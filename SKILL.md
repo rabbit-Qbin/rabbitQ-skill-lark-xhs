@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持连续分页、封面开关、主题组合、引用/卡片/序列、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.7.15
+version: 0.7.16
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -148,7 +148,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 
 ### 状态与输出
 
-- localStorage 自动保存当前文章草稿，并使用源文件指纹避免旧草稿覆盖新源文件。
+- localStorage 自动保存当前文章草稿；草稿键和源文件指纹包含 Skill 版本，重新生成或升级后不会被旧草稿覆盖。
 - “保存编辑 HTML”把当前状态嵌入新 HTML，重新打开仍保持编辑结果。
 - “一键复原”确认后清除当前文章草稿并恢复初始内容、图片、主题和布局。
 - PNG ZIP 导出必须与预览一致，每页尺寸相同，默认 1080 × 1440。

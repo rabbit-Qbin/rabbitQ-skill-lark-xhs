@@ -19,6 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
+const VERSION = "0.7.16";
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -874,7 +875,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.15",
+      version: VERSION,
       title,
       subtitle,
       width,
@@ -4422,7 +4423,8 @@ function studioHtmlV2(payload, libs) {
     }
     let restoringState = false;
     function draftStorageKey() {
-      return 'rabbitQ-lark-xhs-draft:' + config.title + ':' + config.width + 'x' + config.height;
+      return 'rabbitQ-lark-xhs-draft:' + config.title + ':' + config.width + 'x' + config.height + ':' +
+        (config.sourceFingerprint || config.version || 'default');
     }
     function serializeStudioState() {
       return {
@@ -4841,7 +4843,7 @@ function main() {
     const bodyPadTop = Math.round(BODY_PAD_TOP * scaleY);
     const bodyPadBottom = Math.round(BODY_PAD_BOTTOM * scaleY);
     const stat = fs.statSync(resolved.markdownFile);
-    const sourceFingerprint = `${stat.mtimeMs}:${stat.size}`;
+    const sourceFingerprint = `${stat.mtimeMs}:${stat.size}:${VERSION}`;
     const payload = {
       title: extracted.title || title,
       subtitle,
@@ -4873,7 +4875,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.15",
+      version: VERSION,
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,

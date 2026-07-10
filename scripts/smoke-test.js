@@ -67,6 +67,13 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await page.goto(`file://${htmlPath}`);
     await page.waitForTimeout(500);
+    const draftIdentity = await page.evaluate(() => ({
+      key: draftStorageKey(),
+      fingerprint: config.sourceFingerprint,
+      version: config.version,
+    }));
+    assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
+    assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
 
     async function collectFlowOrder() {
       const count = await page.locator("#pageTabs button").count();

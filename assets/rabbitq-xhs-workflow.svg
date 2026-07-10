@@ -7,7 +7,7 @@
   <text x="82" y="112" fill="#171c1a" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans CJK SC',sans-serif" font-size="42" font-weight="800">飞书 Markdown → 小红书 3:4 图文 Studio</text>
   <text x="84" y="154" fill="#526057" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans CJK SC',sans-serif" font-size="22">本地解析、连续分页、自由编辑、批量导出</text>
   <rect x="1328" y="82" width="170" height="44" rx="8" fill="#171c1a"/>
-  <text x="1413" y="111" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="18" font-weight="700">rabbitQ v0.7.15</text>
+  <text x="1413" y="111" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="18" font-weight="700">rabbitQ v0.7.16</text>
 
   <g transform="translate(82 218)">
     <rect width="310" height="410" rx="8" fill="#ffffff" stroke="#cfdacf" stroke-width="2"/>
