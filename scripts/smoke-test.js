@@ -100,6 +100,7 @@ async function main() {
     const pageCount = await page.locator("#pageTabs button").count();
     const content = { quotes: [], callouts: [], labels: [], lists: [] };
     let calloutPageIndex = -1;
+    let multiCalloutPageIndex = -1;
     for (let index = 0; index < pageCount; index += 1) {
       await page.locator("#pageTabs button").nth(index).click();
       await page.waitForTimeout(80);
@@ -110,6 +111,7 @@ async function main() {
         lists: Array.from(document.querySelectorAll("#stageScale .xhs-reason-text")).map((node) => node.textContent.trim()),
       }));
       if (calloutPageIndex < 0 && pageContent.callouts.length) calloutPageIndex = index;
+      if (multiCalloutPageIndex < 0 && pageContent.callouts.length >= 2) multiCalloutPageIndex = index;
       content.quotes.push(...pageContent.quotes);
       content.callouts.push(...pageContent.callouts);
       content.labels.push(...pageContent.labels);
@@ -123,6 +125,21 @@ async function main() {
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
+    assert.ok(multiCalloutPageIndex >= 0);
+    await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
+    const styleTestCallouts = page.locator("#stageScale .xhs-callout");
+    const styleTestCalloutCount = await styleTestCallouts.count();
+    assert.ok(styleTestCalloutCount >= 2);
+    await styleTestCallouts.nth(0).click();
+    await page.click('[data-card-style="frame"]');
+    assert.strictEqual(await styleTestCallouts.nth(0).evaluate((node) => node.classList.contains("xhs-card-frame")), true);
+    assert.strictEqual(await styleTestCallouts.nth(1).evaluate((node) => node.classList.contains("xhs-card-frame")), false);
+    await page.locator("#pageTabs button").nth(0).click();
+    await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
+    const restoredStyleCallouts = page.locator("#stageScale .xhs-callout");
+    assert.strictEqual(await restoredStyleCallouts.nth(0).evaluate((node) => node.classList.contains("xhs-card-frame")), true);
+    assert.strictEqual(await restoredStyleCallouts.nth(1).evaluate((node) => node.classList.contains("xhs-card-frame")), false);
+
     assert.ok(calloutPageIndex >= 0);
     await page.locator("#pageTabs button").nth(calloutPageIndex).click();
     const calloutCountBeforeToggle = await page.locator("#stageScale .xhs-callout").count();
@@ -130,6 +147,34 @@ async function main() {
     await page.click("#keypointBtn");
     const calloutCountAfterToggle = await page.locator("#stageScale .xhs-callout").count();
     assert.strictEqual(calloutCountAfterToggle, calloutCountBeforeToggle - 1);
+
+    const restoredParagraph = page.locator("#stageScale .xhs-p").filter({ hasText: "这是明确的卡片" });
+    assert.strictEqual(await restoredParagraph.count(), 1);
+    await restoredParagraph.evaluate((node) => {
+      const editable = node.closest('[contenteditable="true"]');
+      editable?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    const caretText = "连续输入".repeat(180) + "光标终点";
+    await page.evaluate((text) => document.execCommand("insertText", false, text), caretText);
+    await page.waitForTimeout(1200);
+    const caretState = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const node = selection?.anchorNode;
+      const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      const block = element?.closest?.('.xhs-p, .xhs-rich, .xhs-callout-body');
+      return {
+        blockText: block?.textContent || '',
+        markerCount: document.querySelectorAll('[data-xhs-caret-marker]').length,
+      };
+    });
+    assert.ok(caretState.blockText.includes("光标终点"), `caret moved away from typed text: ${JSON.stringify(caretState)}`);
+    assert.strictEqual(caretState.markerCount, 0);
     const anchorHeights = await page.locator("#stageScale .xhs-caret-anchor").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
     assert.ok(anchorHeights.every((height) => height <= 1.1));
 

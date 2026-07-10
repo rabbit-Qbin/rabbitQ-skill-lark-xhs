@@ -680,6 +680,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-body-frame > div { min-height: 1.8em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
     .xhs-p { margin: 0 0 0.88em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
+    .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
     .xhs-caret-anchor:hover { opacity: 1; }
     .xhs-caret-anchor::before { content: ''; position: absolute; left: 10%; right: 10%; top: -8px; height: 16px; border-top: 1.5px dashed var(--xhs-accent, #5fa66a); opacity: 0.55; pointer-events: auto; }
@@ -873,7 +874,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.10",
+      version: "0.7.11",
       title,
       subtitle,
       width,
@@ -926,6 +927,7 @@ function studioHtmlV2(payload, libs) {
     let imageReflowTimer = null;
     let splitFlowCounter = 0;
     let imageIdCounter = 0;
+    let caretMarkerCounter = 0;
     const boundFrames = new WeakSet();
     const imageResizeObserver = window.ResizeObserver ? new ResizeObserver((entries) => {
       entries.forEach((entry) => {
@@ -1039,23 +1041,22 @@ function studioHtmlV2(payload, libs) {
     }
     function syncPaperPatternUi() {
       paperPatternButtons.forEach((button) => button.classList.toggle('active', button.dataset.paperPattern === currentPaperPattern));
-      cardStyleButtons.forEach((button) => button.classList.toggle('active', button.dataset.cardStyle === currentCardStyle));
+      syncCardStyleUi();
+    }
+    function syncCardStyleUi() {
+      const selectedCard = selectedFlowBlock?.classList?.contains('xhs-callout') ? selectedFlowBlock : null;
+      const style = selectedCard
+        ? (selectedCard.classList.contains('xhs-card-frame') ? 'frame' : 'bar')
+        : currentCardStyle;
+      cardStyleButtons.forEach((button) => button.classList.toggle('active', button.dataset.cardStyle === style));
     }
     function applyCardStyle(key, shouldSave = true) {
       currentCardStyle = key === 'frame' ? 'frame' : 'bar';
-      stageScale.querySelectorAll('.xhs-callout').forEach((node) => {
-        node.classList.toggle('xhs-card-frame', currentCardStyle === 'frame');
-      });
-      pages.forEach((page) => {
-        if (page.type !== 'body' || !page.html) return;
-        const holder = document.createElement('div');
-        holder.innerHTML = page.html;
-        holder.querySelectorAll('.xhs-callout').forEach((node) => {
-          node.classList.toggle('xhs-card-frame', currentCardStyle === 'frame');
-        });
-        page.html = holder.innerHTML;
-      });
-      syncPaperPatternUi();
+      const selectedCard = selectedFlowBlock?.classList?.contains('xhs-callout') && stageScale.contains(selectedFlowBlock)
+        ? selectedFlowBlock
+        : null;
+      if (selectedCard) selectedCard.classList.toggle('xhs-card-frame', currentCardStyle === 'frame');
+      syncCardStyleUi();
       if (shouldSave) saveCurrentPage();
     }
     function applyPaperPattern(key, shouldSave = true) {
@@ -2506,9 +2507,6 @@ function studioHtmlV2(payload, libs) {
       balanceCoverTitle();
       normalizeHeadings(stageScale);
       ensureEditorCaretAnchors(stageScale);
-      stageScale.querySelectorAll('.xhs-callout').forEach((node) => {
-        node.classList.toggle('xhs-card-frame', currentCardStyle === 'frame');
-      });
       stageScale.querySelectorAll('.selectable-image').forEach(bindSelectableFrame);
       const bodyFrame = stageScale.querySelector('.xhs-body-card .xhs-body-frame');
       const coverTailFrame = stageScale.querySelector('.xhs-cover-tail-frame');
@@ -2621,6 +2619,7 @@ function studioHtmlV2(payload, libs) {
       removeAutoLineBreaks(clone);
       stripCaretAnchors(clone);
       clone.querySelectorAll('.selected-image-frame').forEach((node) => node.classList.remove('selected-image-frame'));
+      clone.querySelectorAll('.selected-flow-block').forEach((node) => node.classList.remove('selected-flow-block'));
       clone.querySelectorAll('.resizing-image-frame').forEach((node) => node.classList.remove('resizing-image-frame'));
       clone.querySelectorAll('.xhs-resize-handle').forEach((node) => node.remove());
       if (page.type === 'cover') {
@@ -2650,6 +2649,62 @@ function studioHtmlV2(payload, libs) {
         saveCurrentPage();
         if (force || frame.scrollHeight > frame.clientHeight + 8) reflow();
       }, 520);
+    }
+    function insertReflowCaretMarker() {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return '';
+      const range = selection.getRangeAt(0);
+      const node = range.startContainer;
+      const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      const frame = element?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      if (!frame || !stageScale.contains(frame)) return '';
+      const id = 'caret-' + (++caretMarkerCounter);
+      const marker = document.createElement('span');
+      marker.className = 'xhs-caret-marker';
+      marker.dataset.xhsCaretMarker = id;
+      marker.textContent = String.fromCharCode(8288);
+      range.insertNode(marker);
+      range.setStartAfter(marker);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return id;
+    }
+    function pageIndexForCaretMarker(id) {
+      if (!id) return -1;
+      const token = 'data-xhs-caret-marker="' + id + '"';
+      return pages.findIndex((page) => String(page.html || '').includes(token) || String(page.tailHtml || '').includes(token));
+    }
+    function restoreReflowCaretMarker(id) {
+      if (!id) return false;
+      const marker = stageScale.querySelector('[data-xhs-caret-marker="' + id + '"]');
+      if (!marker) return false;
+      const parent = marker.parentNode;
+      const next = marker.nextSibling;
+      const previous = marker.previousSibling;
+      const editable = marker.closest('[contenteditable="true"]');
+      marker.remove();
+      editable?.focus?.({ preventScroll: true });
+      const selection = window.getSelection();
+      if (!selection || !parent) return false;
+      const range = document.createRange();
+      if (next?.isConnected && next.nodeType === Node.TEXT_NODE) {
+        range.setStart(next, 0);
+      } else if (next?.isConnected) {
+        range.setStartBefore(next);
+      } else if (previous?.isConnected && previous.nodeType === Node.TEXT_NODE) {
+        range.setStart(previous, (previous.textContent || '').length);
+      } else if (previous?.isConnected) {
+        range.setStartAfter(previous);
+      } else {
+        range.selectNodeContents(parent);
+        range.collapse(false);
+      }
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      saveCurrentPage();
+      return true;
     }
     function setCaretInside(node) {
       const selection = window.getSelection();
@@ -3161,6 +3216,7 @@ function studioHtmlV2(payload, libs) {
       if (coverTools) coverTools.hidden = !isCover;
       if (coverThemeTools) coverThemeTools.hidden = !isCover || !coverImageEnabled;
       if (cardStyleTools) cardStyleTools.hidden = !(selectedFlowBlock?.classList?.contains('xhs-callout'));
+      syncCardStyleUi();
       if (coverImageOnBtn && coverImageOffBtn) {
         coverImageOnBtn.classList.toggle('active', coverImageEnabled);
         coverImageOffBtn.classList.toggle('active', !coverImageEnabled);
@@ -4550,6 +4606,7 @@ function studioHtmlV2(payload, libs) {
       }
     }
     function reflow(preferredImageId = '') {
+      const caretMarkerId = insertReflowCaretMarker();
       const rememberedImageId = preferredImageId || (selectedFrame?.classList.contains('cover-image-frame') ? '' : ensureImageId(frameBlock()));
       saveCurrentPage();
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
@@ -4579,10 +4636,14 @@ function studioHtmlV2(payload, libs) {
         cover.tailHtml = '';
         pages = [cover].concat(paginateBlocks(flowBlocks));
       }
+      const caretPageIndex = pageIndexForCaretMarker(caretMarkerId);
       const nextIndex = pageIndexForImageId(rememberedImageId);
-      pageIndex = nextIndex >= 0 ? nextIndex : Math.min(pageIndex, Math.max(0, pages.length - 1));
+      pageIndex = caretPageIndex >= 0
+        ? caretPageIndex
+        : (nextIndex >= 0 ? nextIndex : Math.min(pageIndex, Math.max(0, pages.length - 1)));
       selectedFrame = null;
       renderAll();
+      restoreReflowCaretMarker(caretMarkerId);
       const rememberedBlock = findImageBlockById(stageScale, rememberedImageId);
       const frame = rememberedBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);
@@ -4726,7 +4787,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.10",
+      version: "0.7.11",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,
