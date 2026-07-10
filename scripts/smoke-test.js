@@ -131,10 +131,12 @@ async function main() {
     assert.ok(headingPageIndex >= 0);
     await page.locator("#pageTabs button").nth(headingPageIndex).click();
     await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
-      const blank = document.createElement("p");
-      blank.className = "xhs-p xhs-block xhs-manual-blank";
-      blank.innerHTML = "<br>";
-      heading.before(blank);
+      for (let index = 0; index < 3; index += 1) {
+        const blank = document.createElement("p");
+        blank.className = "xhs-p xhs-block xhs-manual-blank";
+        blank.innerHTML = "<br>";
+        heading.before(blank);
+      }
       const title = heading.querySelector(".xhs-heading-title");
       const editable = heading.closest('[contenteditable="true"]');
       editable?.focus();
@@ -153,6 +155,30 @@ async function main() {
     }));
     assert.strictEqual(leadingBlankState.hasManualBlankBefore, false);
     assert.ok(leadingBlankState.title.includes("结构识别"));
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      const blank = document.createElement("p");
+      blank.className = "xhs-p xhs-block xhs-manual-blank";
+      blank.innerHTML = "<br>";
+      heading.before(blank);
+      const title = heading.querySelector(".xhs-heading-title");
+      const frame = heading.closest('[contenteditable="true"]');
+      frame?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      frame.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "deleteContentBackward",
+      }));
+    });
+    await page.waitForTimeout(800);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => (
+      heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
+    )), false);
 
     assert.ok(multiCalloutPageIndex >= 0);
     await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();

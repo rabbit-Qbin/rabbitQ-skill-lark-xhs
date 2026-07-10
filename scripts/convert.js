@@ -874,7 +874,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.14",
+      version: "0.7.15",
       title,
       subtitle,
       width,
@@ -2812,34 +2812,53 @@ function studioHtmlV2(payload, libs) {
       while (previous?.classList?.contains('xhs-caret-anchor')) previous = previous.previousElementSibling;
       return previous?.classList?.contains('xhs-manual-blank') ? previous : null;
     }
+    function leadingManualBlankContext(frame) {
+      const blanks = [];
+      let firstContent = null;
+      for (const child of Array.from(frame?.children || [])) {
+        if (child.classList?.contains('xhs-caret-anchor')) continue;
+        if (child.classList?.contains('xhs-manual-blank')) {
+          blanks.push(child);
+          continue;
+        }
+        firstContent = child;
+        break;
+      }
+      return { blanks, firstContent };
+    }
     function nearestCaretTarget(block) {
       return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-reason-text') || block;
     }
     function handleManualBlankDelete(event) {
-      if (event.key !== 'Backspace' && event.key !== 'Delete') return false;
+      const key = event.key || (event.inputType === 'deleteContentForward' ? 'Delete' :
+        (event.inputType === 'deleteContentBackward' ? 'Backspace' : ''));
+      if (key !== 'Backspace' && key !== 'Delete') return false;
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
       const range = selection.getRangeAt(0);
       const frame = event.currentTarget;
       const block = directFlowChild(frame, range.startContainer);
       if (!block) return false;
+      const leading = leadingManualBlankContext(frame);
       if (block.classList.contains('xhs-manual-blank')) {
         event.preventDefault();
-        const target = block.nextElementSibling || block.previousElementSibling;
-        block.remove();
+        const isLeadingBlank = leading.blanks.includes(block);
+        const target = isLeadingBlank ? leading.firstContent : (block.nextElementSibling || block.previousElementSibling);
+        (isLeadingBlank ? leading.blanks : [block]).forEach((blank) => blank.remove());
         ensureEditorCaretAnchors(stageScale);
         if (target?.isConnected) setCaretInside(nearestCaretTarget(target));
         saveCurrentPage();
         scheduleOverflowReflow(false);
         return true;
       }
-      if (event.key !== 'Backspace') return false;
+      if (key !== 'Backspace') return false;
       const field = caretFieldForBlock(block, range.startContainer);
       if (!isCaretAtFieldStart(range, field)) return false;
-      const blank = previousManualBlank(block);
-      if (!blank) return false;
+      const leadingBlanks = leading.firstContent === block ? leading.blanks : [];
+      const blanks = leadingBlanks.length ? leadingBlanks : [previousManualBlank(block)].filter(Boolean);
+      if (!blanks.length) return false;
       event.preventDefault();
-      blank.remove();
+      blanks.forEach((blank) => blank.remove());
       ensureEditorCaretAnchors(stageScale);
       setCaretInside(field);
       saveCurrentPage();
@@ -2938,6 +2957,9 @@ function studioHtmlV2(payload, libs) {
       stageScale.querySelectorAll('[contenteditable="true"]').forEach((editable) => {
         if (editable.classList.contains('xhs-body-frame')) {
           editable.addEventListener('keydown', handleManualBlankDelete);
+          editable.addEventListener('beforeinput', (event) => {
+            if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) handleManualBlankDelete(event);
+          });
           editable.addEventListener('keydown', handleHeadingEnter);
           editable.addEventListener('paste', (event) => handleImagePaste(event, editable));
         }
@@ -4851,7 +4873,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.14",
+      version: "0.7.15",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,
