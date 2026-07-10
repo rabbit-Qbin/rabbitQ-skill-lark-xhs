@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持连续分页、封面开关、主题组合、引用/卡片/序列、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.7.7
+version: 0.7.8
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -119,6 +119,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 ### 封面
 
 - 默认上半页封面图、下半页标题和副标题。
+- 图纸纹理覆盖封面标题区；关闭封面图后，封面标题区与下半页正文保持同一图纸观感。
 - 标题按最多三行自动缩放。
 - 副标题按中文字符权重最多 48 字、最多两行。
 - 可关闭封面图；关闭后隐藏封面占位色设置。

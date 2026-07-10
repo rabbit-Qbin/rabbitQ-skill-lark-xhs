@@ -661,7 +661,7 @@ function studioHtmlV2(payload, libs) {
     .cover-image-frame { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--xhs-cover-bg); cursor: grab; touch-action: none; }
     .cover-image-frame img, .xhs-image-frame img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: 50% 50%; transform: translate(0px, 0px) scale(1); transform-origin: center center; user-select: none; -webkit-user-drag: none; }
     .cover-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--xhs-cover-placeholder); font-size: 34px; font-weight: 850; border: 3px dashed var(--xhs-cover-border); }
-    .cover-text { position: absolute; left: 0; top: ${coverSplitY}px; width: 100%; height: ${height - coverSplitY}px; padding: ${coverPadTop}px ${coverPadX}px ${coverPadBottom}px; background: var(--xhs-card-bg); display: flex; flex-direction: column; gap: ${coverGap}px; box-sizing: border-box; }
+    .cover-text { position: absolute; left: 0; top: ${coverSplitY}px; width: 100%; height: ${height - coverSplitY}px; padding: ${coverPadTop}px ${coverPadX}px ${coverPadBottom}px; background-color: var(--xhs-card-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); display: flex; flex-direction: column; gap: ${coverGap}px; box-sizing: border-box; }
     .cover-title { flex: 0 1 auto; min-height: 0; width: 100%; color: #111; font-family: var(--xhs-font); font-size: var(--cover-title-size); line-height: 1.1; font-weight: 900; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; outline: none; }
     .cover-title *, .cover-title strong, .cover-title b, .cover-title .xhs-cover-bold { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: inherit !important; }
     .cover-title strong, .cover-title b, .cover-title .xhs-cover-bold { font-weight: 900 !important; }
@@ -873,7 +873,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.7",
+      version: "0.7.8",
       title,
       subtitle,
       width,
@@ -4694,7 +4694,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.7",
+      version: "0.7.8",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,

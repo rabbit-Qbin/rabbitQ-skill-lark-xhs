@@ -151,6 +151,18 @@ async function main() {
       `two-line subtitle marker is not centered: ${JSON.stringify(twoLineGeometry)}`,
     );
 
+    await page.click('[data-paper-pattern="grid"]');
+    const coverPattern = await page.evaluate(() => {
+      const card = document.querySelector('#stageScale .xhs-cover-card');
+      const coverText = card?.querySelector('.cover-text');
+      return {
+        card: card ? getComputedStyle(card).backgroundImage : 'none',
+        coverText: coverText ? getComputedStyle(coverText).backgroundImage : 'none',
+      };
+    });
+    assert.notStrictEqual(coverPattern.card, 'none');
+    assert.strictEqual(coverPattern.coverText, coverPattern.card);
+
     await page.locator(".cover-title").fill("已修改标题");
     await page.click('[data-bg-theme="blue"]');
     await page.locator("#bodyFontRange").evaluate((node) => {
@@ -162,6 +174,7 @@ async function main() {
     await page.waitForTimeout(500);
     assert.strictEqual((await page.locator(".cover-title").innerText()).trim(), "回归测试");
     assert.strictEqual(await page.locator('[data-bg-theme="paper"]').evaluate((node) => node.classList.contains("active")), true);
+    assert.strictEqual(await page.locator('[data-paper-pattern="none"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#coverImageOnBtn").evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#bodyFontRange").inputValue(), "36");
   } finally {
