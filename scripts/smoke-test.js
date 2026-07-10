@@ -108,6 +108,7 @@ async function main() {
 
     assert.ok(content.quotes.some((text) => text.includes("仍然应该是引用")));
     assert.ok(content.callouts.some((text) => text.includes("这是明确的卡片")));
+    assert.ok(!content.callouts.some((text) => /^\s*(?:金句|注意|结论|划重点)\s*[：:]/.test(text)));
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));

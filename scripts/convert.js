@@ -873,7 +873,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.8",
+      version: "0.7.9",
       title,
       subtitle,
       width,
@@ -1275,6 +1275,35 @@ function studioHtmlV2(payload, libs) {
       targets.forEach(wrapTextTargetLines);
       return root;
     }
+    function stripCalloutBodyLabelPrefix(root) {
+      if (!root) return false;
+      const text = String(root.textContent || '');
+      const match = text.match(/^\\s*(?:高亮|划重点|卡片|注意|结论|金句|关键判断|关键提醒|重点)(?:\\s*[:：]\\s*|\\s*[—–-]\\s*|\\s+)/);
+      if (!match) return false;
+      let remaining = match[0].length;
+      const textNodes = [];
+      const collect = (node) => {
+        Array.from(node.childNodes || []).forEach((child) => {
+          if (child.nodeType === Node.TEXT_NODE) textNodes.push(child);
+          else collect(child);
+        });
+      };
+      collect(root);
+      for (const node of textNodes) {
+        if (remaining <= 0) break;
+        const value = node.nodeValue || '';
+        const cut = Math.min(remaining, value.length);
+        node.nodeValue = value.slice(cut);
+        remaining -= cut;
+      }
+      root.querySelectorAll('strong, b, em, i, span').forEach((node) => {
+        if (!cleanText(node.textContent)) node.remove();
+      });
+      return true;
+    }
+    function normalizeCalloutBodyLabels(root = stageScale) {
+      root?.querySelectorAll?.('.xhs-callout-body').forEach((body) => stripCalloutBodyLabelPrefix(body));
+    }
     function cleanCalloutBodyHtml(html) {
       const holder = document.createElement('div');
       holder.innerHTML = normalizeInlineHtml(html);
@@ -1287,6 +1316,7 @@ function studioHtmlV2(payload, libs) {
         const style = node.getAttribute('style') || '';
         if (/box-shadow|background|border-bottom|color\\s*:/i.test(style)) node.removeAttribute('style');
       });
+      stripCalloutBodyLabelPrefix(holder);
       return holder.innerHTML;
     }
     function makeElement(tag, className, html) {
@@ -2468,6 +2498,7 @@ function studioHtmlV2(payload, libs) {
       stageScale.innerHTML = cardHtml(pages[pageIndex]);
       removeAutoLineBreaks(stageScale);
       normalizeUnderlineDecorations(stageScale);
+      normalizeCalloutBodyLabels(stageScale);
       const coverCard = stageScale.querySelector('.xhs-cover-card');
       if (coverCard) coverCard.classList.toggle('no-cover-image', !coverImageEnabled);
       sanitizeCoverTitleNode(stageScale.querySelector('.cover-title'));
@@ -4410,6 +4441,7 @@ function studioHtmlV2(payload, libs) {
       if (!card) return currentThemeSnapshot();
       const theme = currentThemeSnapshot();
       normalizeUnderlineDecorations(card);
+      normalizeCalloutBodyLabels(card);
       Object.entries({
         '--xhs-card-bg': theme.cardBg,
         '--xhs-cover-bg': theme.coverBg,
@@ -4694,7 +4726,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.8",
+      version: "0.7.9",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,
