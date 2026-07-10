@@ -115,6 +115,42 @@ async function main() {
     assert.ok(anchorHeights.every((height) => height <= 1.1));
 
     await page.locator("#pageTabs button").first().click();
+    const coverSubtitle = page.locator(".cover-subtitle");
+    await coverSubtitle.fill("");
+    await coverSubtitle.click();
+    await coverSubtitle.type("一行副标题");
+    assert.strictEqual((await coverSubtitle.innerText()).trim(), "一行副标题");
+    const oneLineGeometry = await coverSubtitle.evaluate((node) => {
+      const marker = getComputedStyle(node, "::before");
+      return {
+        display: getComputedStyle(node).display,
+        height: node.offsetHeight,
+        markerTop: parseFloat(marker.top),
+        markerTransform: marker.transform,
+      };
+    });
+    assert.strictEqual(oneLineGeometry.display, "block");
+    assert.ok(
+      Math.abs(oneLineGeometry.markerTop - oneLineGeometry.height / 2) <= 1,
+      `one-line subtitle marker is not centered: ${JSON.stringify(oneLineGeometry)}`,
+    );
+    assert.notStrictEqual(oneLineGeometry.markerTransform, "none");
+
+    await coverSubtitle.fill("这是第一行需要继续填写的副标题，这是第二行仍然可以正常编辑的内容");
+    assert.ok((await coverSubtitle.innerText()).includes("第二行"));
+    const twoLineGeometry = await coverSubtitle.evaluate((node) => {
+      const marker = getComputedStyle(node, "::before");
+      return {
+        height: node.offsetHeight,
+        markerTop: parseFloat(marker.top),
+      };
+    });
+    assert.ok(twoLineGeometry.height > oneLineGeometry.height);
+    assert.ok(
+      Math.abs(twoLineGeometry.markerTop - twoLineGeometry.height / 2) <= 1,
+      `two-line subtitle marker is not centered: ${JSON.stringify(twoLineGeometry)}`,
+    );
+
     await page.locator(".cover-title").fill("已修改标题");
     await page.click('[data-bg-theme="blue"]');
     await page.locator("#bodyFontRange").evaluate((node) => {

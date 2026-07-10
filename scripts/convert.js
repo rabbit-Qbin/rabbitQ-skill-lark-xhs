@@ -668,11 +668,11 @@ function studioHtmlV2(payload, libs) {
     .cover-title-bar { flex: 0 0 auto; width: ${Math.round(width * 0.12)}px; height: ${Math.max(5, Math.round(width * 0.005))}px; background: var(--xhs-accent); border-radius: 999px; margin: ${Math.round(height * 0.006)}px 0 ${Math.round(height * 0.014)}px; }
     .xhs-cover-card.no-cover-image .cover-media { display: none; }
     .xhs-cover-card.no-cover-image .cover-text { top: 0; height: ${coverSplitY}px; padding-bottom: ${coverNoImagePadBottom}px; z-index: 2; justify-content: flex-start; }
-    .cover-subtitle { flex: 0 0 auto; display: flex; align-items: center; position: relative; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: 0; color: #111; font-family: "XHSCoverLatin", var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
+    .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: "XHSCoverLatin", var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
     .cover-subtitle * { font-size: inherit !important; line-height: inherit !important; letter-spacing: inherit; }
     .cover-subtitle strong, .cover-subtitle b, .cover-subtitle .xhs-cover-bold { font-weight: 900 !important; }
-    .cover-subtitle::before { content: ""; flex: 0 0 ${Math.max(5, Math.round(width * 0.006))}px; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; margin-right: ${Math.round(width * 0.022)}px; background: var(--xhs-accent-strong); border-radius: 999px; align-self: center; }
-    .cover-subtitle:empty::after { content: attr(data-placeholder); color: #8f948d; letter-spacing: 0; }
+    .cover-subtitle::before { content: ""; position: absolute; left: 0; top: 50%; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; transform: translateY(-50%); background: var(--xhs-accent-strong); border-radius: 999px; pointer-events: none; }
+    .cover-subtitle:empty::after { content: attr(data-placeholder); color: #8f948d; letter-spacing: 0; pointer-events: none; }
     .xhs-body-frame { position: absolute; left: var(--body-pad-x); top: var(--body-pad-top); width: var(--body-content-width); height: var(--body-content-height); overflow: hidden; outline: none; background: transparent; font-family: var(--xhs-font); -webkit-font-smoothing: antialiased; }
     .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${coverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - coverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
@@ -873,7 +873,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.6",
+      version: "0.7.7",
       title,
       subtitle,
       width,
@@ -2909,8 +2909,10 @@ function studioHtmlV2(payload, libs) {
     }
     function lockCoverSubtitleBox(subtitle, size) {
       const lineHeight = Math.ceil(size * 1.62);
-      subtitle.style.display = 'flex';
-      subtitle.style.alignItems = 'center';
+      subtitle.style.display = 'block';
+      subtitle.style.removeProperty('align-items');
+      subtitle.style.position = 'relative';
+      subtitle.style.boxSizing = 'border-box';
       subtitle.style.width = '100%';
       subtitle.style.maxWidth = 'none';
       subtitle.style.whiteSpace = 'normal';
@@ -4692,7 +4694,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.6",
+      version: "0.7.7",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,
