@@ -101,6 +101,7 @@ async function main() {
     const content = { quotes: [], callouts: [], labels: [], lists: [] };
     let calloutPageIndex = -1;
     let multiCalloutPageIndex = -1;
+    let headingPageIndex = -1;
     for (let index = 0; index < pageCount; index += 1) {
       await page.locator("#pageTabs button").nth(index).click();
       await page.waitForTimeout(80);
@@ -108,10 +109,12 @@ async function main() {
         quotes: Array.from(document.querySelectorAll("#stageScale .xhs-quote")).map((node) => node.textContent.trim()),
         callouts: Array.from(document.querySelectorAll("#stageScale .xhs-callout-body")).map((node) => node.textContent.trim()),
         labels: Array.from(document.querySelectorAll("#stageScale .xhs-callout-label")).map((node) => node.textContent.trim()),
+        headingCount: document.querySelectorAll("#stageScale .xhs-heading").length,
         lists: Array.from(document.querySelectorAll("#stageScale .xhs-reason-text")).map((node) => node.textContent.trim()),
       }));
       if (calloutPageIndex < 0 && pageContent.callouts.length) calloutPageIndex = index;
       if (multiCalloutPageIndex < 0 && pageContent.callouts.length >= 2) multiCalloutPageIndex = index;
+      if (headingPageIndex < 0 && pageContent.headingCount) headingPageIndex = index;
       content.quotes.push(...pageContent.quotes);
       content.callouts.push(...pageContent.callouts);
       content.labels.push(...pageContent.labels);
@@ -125,6 +128,32 @@ async function main() {
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
+    assert.ok(headingPageIndex >= 0);
+    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      const blank = document.createElement("p");
+      blank.className = "xhs-p xhs-block xhs-manual-blank";
+      blank.innerHTML = "<br>";
+      heading.before(blank);
+      const title = heading.querySelector(".xhs-heading-title");
+      const editable = heading.closest('[contenteditable="true"]');
+      editable?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(800);
+    const leadingBlankState = await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => ({
+      hasManualBlankBefore: heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false,
+      title: heading.querySelector(".xhs-heading-title")?.textContent.trim() || "",
+    }));
+    assert.strictEqual(leadingBlankState.hasManualBlankBefore, false);
+    assert.ok(leadingBlankState.title.includes("结构识别"));
+
     assert.ok(multiCalloutPageIndex >= 0);
     await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
     const styleTestCallouts = page.locator("#stageScale .xhs-callout");
