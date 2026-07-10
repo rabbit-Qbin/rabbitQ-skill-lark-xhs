@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">rabbitQ 飞书 Markdown 转小红书图文工作流</title>
+  <desc id="desc">从飞书导出 Markdown 和图片附件，经过结构解析与连续分页，在本地 Studio 编辑，最后保存 HTML 或导出 3 比 4 PNG。</desc>
+  <rect width="1600" height="900" fill="#f3f6f1"/>
+  <rect x="52" y="48" width="1496" height="804" rx="8" fill="#fffdf8" stroke="#dce5da" stroke-width="2"/>
+
+  <text x="82" y="112" fill="#171c1a" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans CJK SC',sans-serif" font-size="42" font-weight="800">飞书 Markdown → 小红书 3:4 图文 Studio</text>
+  <text x="84" y="154" fill="#526057" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans CJK SC',sans-serif" font-size="22">本地解析、连续分页、自由编辑、批量导出</text>
+  <rect x="1328" y="82" width="170" height="44" rx="8" fill="#171c1a"/>
+  <text x="1413" y="111" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="18" font-weight="700">rabbitQ v0.7.6</text>
+
+  <g transform="translate(82 218)">
+    <rect width="310" height="410" rx="8" fill="#ffffff" stroke="#cfdacf" stroke-width="2"/>
+    <circle cx="46" cy="48" r="24" fill="#5fa66a"/>
+    <text x="46" y="56" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="22" font-weight="800">1</text>
+    <rect x="88" y="27" width="54" height="66" rx="4" fill="#f4faf3" stroke="#5fa66a" stroke-width="3"/>
+    <path d="M101 46h28M101 59h28M101 72h19" stroke="#5fa66a" stroke-width="3" stroke-linecap="round"/>
+    <rect x="151" y="49" width="68" height="52" rx="4" fill="#eef4fd" stroke="#4d7fd2" stroke-width="3"/>
+    <path d="M160 88l17-17 12 12 10-9 11 14" fill="none" stroke="#4d7fd2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="28" y="145" fill="#171c1a" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="28" font-weight="800">飞书导出</text>
+    <text x="28" y="184" fill="#526057" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">Markdown + 全部图片附件</text>
+    <rect x="28" y="220" width="254" height="1" fill="#e1e8df"/>
+    <text x="28" y="260" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">• 单个 .md 文件</text>
+    <text x="28" y="298" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">• Markdown + 附件目录</text>
+    <text x="28" y="336" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">• 完整飞书 ZIP 包</text>
+    <text x="28" y="380" fill="#8a5b1f" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="17">视频跳过并提示</text>
+  </g>
+
+  <path d="M405 423h46" stroke="#5fa66a" stroke-width="5" stroke-linecap="round"/>
+  <path d="M442 411l14 12-14 12" fill="none" stroke="#5fa66a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g transform="translate(466 218)">
+    <rect width="310" height="410" rx="8" fill="#ffffff" stroke="#cfdacf" stroke-width="2"/>
+    <circle cx="46" cy="48" r="24" fill="#4d7fd2"/>
+    <text x="46" y="56" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="22" font-weight="800">2</text>
+    <circle cx="126" cy="45" r="9" fill="#5fa66a"/>
+    <circle cx="174" cy="45" r="9" fill="#4d7fd2"/>
+    <circle cx="150" cy="91" r="9" fill="#e6b657"/>
+    <path d="M133 51l12 29M167 51l-12 29" stroke="#8aa39a" stroke-width="3"/>
+    <text x="28" y="145" fill="#171c1a" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="28" font-weight="800">独立解析</text>
+    <text x="28" y="184" fill="#526057" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">结构优先，不靠关键词乱猜</text>
+    <rect x="28" y="220" width="254" height="1" fill="#e1e8df"/>
+    <text x="28" y="260" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">标题 · 正文 · 加粗</text>
+    <text x="28" y="298" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">引用 · 卡片 · 序列</text>
+    <text x="28" y="336" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">图片 · 竖图自动并排</text>
+    <text x="28" y="380" fill="#2e5fb2" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="17">连续内容流智能分页</text>
+  </g>
+
+  <path d="M789 423h46" stroke="#4d7fd2" stroke-width="5" stroke-linecap="round"/>
+  <path d="M826 411l14 12-14 12" fill="none" stroke="#4d7fd2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g transform="translate(850 218)">
+    <rect width="310" height="410" rx="8" fill="#ffffff" stroke="#cfdacf" stroke-width="2"/>
+    <circle cx="46" cy="48" r="24" fill="#d99542"/>
+    <text x="46" y="56" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="22" font-weight="800">3</text>
+    <rect x="92" y="26" width="145" height="82" rx="5" fill="#fffaf0" stroke="#d99542" stroke-width="3"/>
+    <rect x="104" y="38" width="121" height="13" rx="3" fill="#e9c993"/>
+    <rect x="104" y="62" width="78" height="8" rx="3" fill="#5fa66a"/>
+    <rect x="104" y="79" width="108" height="8" rx="3" fill="#b9c7bd"/>
+    <text x="28" y="145" fill="#171c1a" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="28" font-weight="800">本地 Studio</text>
+    <text x="28" y="184" fill="#526057" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">浏览器直接打开，无需服务器</text>
+    <rect x="28" y="220" width="254" height="1" fill="#e1e8df"/>
+    <text x="28" y="260" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">封面 · 字体 · 主题</text>
+    <text x="28" y="298" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">图片裁剪 · 缩放 · 并排</text>
+    <text x="28" y="336" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">草稿保存 · 一键复原</text>
+    <text x="28" y="380" fill="#a75f12" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="17">所有内容仍可继续编辑</text>
+  </g>
+
+  <path d="M1173 423h46" stroke="#d99542" stroke-width="5" stroke-linecap="round"/>
+  <path d="M1210 411l14 12-14 12" fill="none" stroke="#d99542" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g transform="translate(1234 218)">
+    <rect width="284" height="410" rx="8" fill="#ffffff" stroke="#cfdacf" stroke-width="2"/>
+    <circle cx="46" cy="48" r="24" fill="#171c1a"/>
+    <text x="46" y="56" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="22" font-weight="800">4</text>
+    <rect x="95" y="26" width="64" height="84" rx="4" fill="#f4faf3" stroke="#5fa66a" stroke-width="3"/>
+    <rect x="169" y="38" width="64" height="84" rx="4" fill="#eef4fd" stroke="#4d7fd2" stroke-width="3"/>
+    <path d="M127 47v40M115 75l12 12 12-12" fill="none" stroke="#5fa66a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="28" y="145" fill="#171c1a" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="28" font-weight="800">保存与导出</text>
+    <text x="28" y="184" fill="#526057" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">保留编辑结果或直接发图</text>
+    <rect x="28" y="220" width="228" height="1" fill="#e1e8df"/>
+    <text x="28" y="260" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">保存编辑 HTML</text>
+    <text x="28" y="298" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">PNG ZIP 批量导出</text>
+    <text x="28" y="336" fill="#27322c" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19">1080 × 1440 标准 3:4</text>
+    <text x="28" y="380" fill="#2f7d3b" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="17">预览与导出保持一致</text>
+  </g>
+
+  <rect x="82" y="690" width="1436" height="116" rx="8" fill="#171c1a"/>
+  <text x="112" y="728" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="18" font-weight="700">核心保证</text>
+  <g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-size="19" fill="#eef5ef">
+    <circle cx="132" cy="766" r="6" fill="#5fa66a"/><text x="150" y="773">本地优先，素材不上传</text>
+    <circle cx="480" cy="766" r="6" fill="#4d7fd2"/><text x="498" y="773">块级分页，不截断图片</text>
+    <circle cx="842" cy="766" r="6" fill="#e6b657"/><text x="860" y="773">预览与 PNG 同步验证</text>
+    <circle cx="1212" cy="766" r="6" fill="#d7789b"/><text x="1230" y="773">编辑后仍可保存复用</text>
+  </g>
+</svg>

@@ -1,78 +1,90 @@
-# Xiaohongshu Layout Spec
+# Xiaohongshu Studio Layout Spec
+
+这份规范描述当前 `xhs-studio.html` 的真实布局和分页约束。它不使用独立 JSON 画布模型。
 
 ## Canvas
 
-Default canvas:
+- 默认尺寸：`1080 × 1440`
+- 固定比例：`3:4`
+- 默认左右边距：`90px`
+- 默认上边距：`91px`
+- 默认下边距：`89px`
+- 默认正文字号：`36px`
+- 默认封面分割线：画布高度的 `50%`
 
-- `width`: 1080
-- `height`: 1440
-- `ratio`: 3:4
+可使用其他接近 3:4 的尺寸，例如：
 
-Supported alternatives:
+- `900 × 1200`
+- `1242 × 1656`
+- `1242 × 1660`
 
-- `900x1200`
-- `1080x1440`
-- `1242x1656`
-- `1242x1660`
+同一篇笔记的每页必须使用相同尺寸。
 
-Use one size for every page in the same note.
+## Content Flow
 
-## Element Types
+页面不是相互独立的文本框。所有正文块先组成连续流，再按浏览器真实高度分页。
 
-### text
+### 可拆分
 
-```json
-{
-  "type": "text",
-  "text": "标题",
-  "x": 72,
-  "y": 220,
-  "w": 920,
-  "h": 240,
-  "fontSize": 72,
-  "lineHeight": 1.1,
-  "weight": 900,
-  "align": "left",
-  "color": "#171717"
-}
-```
+- 普通正文段落
+- 富文本正文
+- 超长卡片正文（保留首段角标，后续页不重复角标）
 
-### image
+### 默认保持完整
 
-```json
-{
-  "type": "image",
-  "src": "data:image/png;base64,...",
-  "x": 72,
-  "y": 600,
-  "w": 936,
-  "h": 520,
-  "fit": "cover",
-  "radius": 36
-}
-```
+- 编号子标题
+- 引用块
+- 普通卡片
+- 有序 / 无序序列
+- 单图和图片组
 
-### rect
+如果单个图片块高于整页，编辑器可自动缩小未被用户手动设置高度的图片框。
 
-```json
-{
-  "type": "rect",
-  "x": 48,
-  "y": 48,
-  "w": 984,
-  "h": 1344,
-  "bg": "#ffffff",
-  "radius": 56
-}
-```
+## Cover
 
-## Editor Controls
+### 显示图片
 
-`xhs-editor.html` edits the same JSON model. It intentionally keeps all layout values in pixels so adjustments are predictable before PNG export.
+- `0–50%`：封面图片。
+- `50–100%`：主标题、副标题和装饰线。
 
-Recommended adjustments:
+### 关闭图片
 
-- move cramped text with `y`
-- make a long line fit with `fontSize` or manual line breaks
-- tune paragraph density with `lineHeight`
-- keep key text inside the safe area: left/right 72 px, top 80 px, bottom 96 px
+- `0–50%`：主标题和副标题。
+- `50–100%`：连续正文流的开头。
+
+封面正文尾区必须保持源顺序。第一个放不下的块出现后，不允许跳过它去放后面的短块。
+
+## Text
+
+- 字体使用宋体族：`Songti SC`、`STSong`、`Noto Serif CJK SC`、`Source Han Serif SC`。
+- 正文默认纯黑、加粗基线，行内样式继承正文字号和行距。
+- 正文使用两端对齐，末行左对齐。
+- 子标题编号与标题是同一结构块，分页时一起移动。
+- 封面主标题最多三行，按可用区域自动减小字号。
+- 封面副标题最多两行，并按中英文权重限制长度。
+
+## Images
+
+- 图片块默认与正文内容宽度一致并居中。
+- 图片框为直角，白色底。
+- `contain` 用于完整显示，`cover` 用于裁剪填满。
+- 图片内容通过 `object-position` 和 transform 保存裁剪中心与缩放。
+- 图片框宽高与图片内容缩放是两个独立参数。
+- 相邻竖图最多自动组成三图组；用户手动拆分后不应再次强制合并。
+
+## Editor Caret
+
+图片、卡片、引用、列表和子标题前后需要可插入文字的光标锚点。锚点必须：
+
+- 在视觉上仅悬停时提示。
+- 不占分页高度。
+- 点击后可直接输入。
+- 保存和导出时从 DOM 副本中移除。
+
+## Export
+
+- 导出使用页面 DOM 的独立副本，不直接截图带选中框的编辑画布。
+- 导出前去除阴影、选中框、缩放控制点和光标锚点。
+- 主题 CSS 变量、图片裁剪参数和行内样式必须复制到导出副本。
+- 下划线在导出前需要稳定化，避免被 `html2canvas` 渲染成整块背景或单独细线。
+- 默认导出 `1080 × 1440` PNG，文件按页码排序。
