@@ -1,0 +1,19 @@
+{
+  "name": "rabbitQ-skill-lark-xhs",
+  "version": "0.7.6",
+  "private": true,
+  "description": "小兔Q彬 · 飞书 Markdown + 附件转可编辑小红书 3:4 图文 Studio",
+  "type": "commonjs",
+  "scripts": {
+    "convert": "node scripts/convert.js",
+    "test": "node scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "html2canvas": "^1.4.1",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.61.1"
+  }
+}
