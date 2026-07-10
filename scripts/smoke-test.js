@@ -187,6 +187,52 @@ async function main() {
       heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
     )), false);
 
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      const blank = document.createElement("p");
+      blank.className = "xhs-p xhs-block xhs-manual-blank";
+      blank.innerHTML = "<br>";
+      heading.before(blank);
+      const frame = heading.closest('[contenteditable="true"]');
+      frame?.focus();
+      const headingOffset = Array.prototype.indexOf.call(frame.childNodes, heading);
+      const range = document.createRange();
+      range.setStart(frame, headingOffset);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(800);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => (
+      heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
+    )), false);
+
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      const blank = document.createElement("p");
+      blank.className = "xhs-p xhs-block xhs-manual-blank";
+      blank.innerHTML = "<br>";
+      heading.before(blank);
+      const frame = heading.closest('[contenteditable="true"]');
+      frame?.focus();
+      const headingOffset = Array.prototype.indexOf.call(frame.childNodes, heading);
+      const range = document.createRange();
+      range.setStart(frame, headingOffset);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      frame.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "deleteContentBackward",
+      }));
+    });
+    await page.waitForTimeout(800);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => (
+      heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
+    )), false);
+
     assert.ok(multiCalloutPageIndex >= 0);
     await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
     const styleTestCallouts = page.locator("#stageScale .xhs-callout");

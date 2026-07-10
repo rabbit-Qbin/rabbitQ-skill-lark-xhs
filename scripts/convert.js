@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.7.16";
+const VERSION = "0.7.17";
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -2784,8 +2784,13 @@ function studioHtmlV2(payload, libs) {
       const beforeText = headingTextBeforeRange(heading, range);
       return insertBlankParagraphNearHeading(heading, !beforeText);
     }
-    function directFlowChild(frame, node) {
+    function directFlowChild(frame, node, offset = 0) {
       let element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      if (node === frame) {
+        const boundaryNode = frame.childNodes[Math.max(0, Math.min(offset, frame.childNodes.length - 1))] ||
+          frame.childNodes[Math.max(0, offset - 1)];
+        element = boundaryNode?.nodeType === Node.ELEMENT_NODE ? boundaryNode : boundaryNode?.parentElement;
+      }
       while (element && element.parentElement !== frame) element = element.parentElement;
       return element?.parentElement === frame ? element : null;
     }
@@ -2807,6 +2812,13 @@ function studioHtmlV2(payload, libs) {
       } finally {
         probe.detach?.();
       }
+    }
+    function isCaretAtFlowBlockStart(range, block) {
+      if (!range?.collapsed || !block) return false;
+      if (range.startContainer === block) return range.startOffset === 0;
+      const parent = block.parentNode;
+      if (range.startContainer !== parent) return false;
+      return Array.prototype.indexOf.call(parent.childNodes, block) === range.startOffset;
     }
     function previousManualBlank(block) {
       let previous = block?.previousElementSibling;
@@ -2838,7 +2850,7 @@ function studioHtmlV2(payload, libs) {
       if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
       const range = selection.getRangeAt(0);
       const frame = event.currentTarget;
-      const block = directFlowChild(frame, range.startContainer);
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
       if (!block) return false;
       const leading = leadingManualBlankContext(frame);
       if (block.classList.contains('xhs-manual-blank')) {
@@ -2854,14 +2866,18 @@ function studioHtmlV2(payload, libs) {
       }
       if (key !== 'Backspace') return false;
       const field = caretFieldForBlock(block, range.startContainer);
-      if (!isCaretAtFieldStart(range, field)) return false;
+      const atBlockStart = isCaretAtFlowBlockStart(range, block);
+      if (!atBlockStart && !isCaretAtFieldStart(range, field)) return false;
       const leadingBlanks = leading.firstContent === block ? leading.blanks : [];
       const blanks = leadingBlanks.length ? leadingBlanks : [previousManualBlank(block)].filter(Boolean);
       if (!blanks.length) return false;
       event.preventDefault();
       blanks.forEach((blank) => blank.remove());
       ensureEditorCaretAnchors(stageScale);
-      setCaretInside(field);
+      const caretTarget = atBlockStart && block.classList.contains('xhs-heading')
+        ? (block.querySelector('.xhs-heading-number') || field)
+        : field;
+      setCaretInside(caretTarget);
       saveCurrentPage();
       scheduleOverflowReflow(false);
       return true;
