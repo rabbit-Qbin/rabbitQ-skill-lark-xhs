@@ -874,7 +874,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.11",
+      version: "0.7.12",
       title,
       subtitle,
       width,
@@ -3576,9 +3576,9 @@ function studioHtmlV2(payload, libs) {
       const accent = ACCENT_THEMES[currentAccentTheme] || ACCENT_THEMES.green;
       const root = document.documentElement.style;
       if (currentCoverTheme === 'accent') {
-        root.setProperty('--xhs-cover-bg', accent.accent);
-        root.setProperty('--xhs-cover-border', accent.strong);
-        root.setProperty('--xhs-cover-placeholder', 'rgba(255,255,255,.88)');
+        root.setProperty('--xhs-cover-bg', accent.underline);
+        root.setProperty('--xhs-cover-border', accent.accent);
+        root.setProperty('--xhs-cover-placeholder', accent.strong);
       } else if (currentCoverTheme === 'dark') {
         root.setProperty('--xhs-cover-bg', '#171c1a');
         root.setProperty('--xhs-cover-border', 'rgba(255,255,255,.28)');
@@ -4787,7 +4787,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.11",
+      version: "0.7.12",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,

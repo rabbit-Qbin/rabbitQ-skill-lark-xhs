@@ -227,6 +227,22 @@ async function main() {
     assert.notStrictEqual(coverPattern.card, 'none');
     assert.strictEqual(coverPattern.coverText, coverPattern.card);
 
+    await page.click('[data-cover-theme="accent"]');
+    const lightAccentCover = await page.evaluate(() => {
+      const styles = getComputedStyle(document.documentElement);
+      return {
+        coverBg: styles.getPropertyValue('--xhs-cover-bg').trim(),
+        coverBorder: styles.getPropertyValue('--xhs-cover-border').trim(),
+        coverPlaceholder: styles.getPropertyValue('--xhs-cover-placeholder').trim(),
+        accent: styles.getPropertyValue('--xhs-accent').trim(),
+        accentStrong: styles.getPropertyValue('--xhs-accent-strong').trim(),
+        underline: styles.getPropertyValue('--xhs-underline').trim(),
+      };
+    });
+    assert.strictEqual(lightAccentCover.coverBg, lightAccentCover.underline);
+    assert.strictEqual(lightAccentCover.coverBorder, lightAccentCover.accent);
+    assert.strictEqual(lightAccentCover.coverPlaceholder, lightAccentCover.accentStrong);
+
     await page.locator(".cover-title").fill("已修改标题");
     await page.click('[data-bg-theme="blue"]');
     await page.locator("#bodyFontRange").evaluate((node) => {
