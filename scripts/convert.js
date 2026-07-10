@@ -657,8 +657,8 @@ function studioHtmlV2(payload, libs) {
     .stage-wrap { width: min(70vw, 620px); aspect-ratio: ${width} / ${height}; position: relative; margin: 0 auto 24px; }
     .stage-scale { position: absolute; left: 0; top: 0; transform-origin: top left; width: ${width}px; height: ${height}px; }
     .xhs-card { position: relative; width: ${width}px; height: ${height}px; overflow: hidden; background-color: var(--xhs-card-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); color: #111; letter-spacing: 0; box-shadow: 0 26px 90px rgba(20, 24, 30, .18); }
-    .cover-media { position: absolute; left: 0; top: 0; width: 100%; height: ${coverSplitY}px; background: var(--xhs-cover-bg); }
-    .cover-image-frame { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--xhs-cover-bg); cursor: grab; touch-action: none; }
+    .cover-media { position: absolute; left: 0; top: 0; width: 100%; height: ${coverSplitY}px; background-color: var(--xhs-cover-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); }
+    .cover-image-frame { position: relative; width: 100%; height: 100%; overflow: hidden; background-color: var(--xhs-cover-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); cursor: grab; touch-action: none; }
     .cover-image-frame img, .xhs-image-frame img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: 50% 50%; transform: translate(0px, 0px) scale(1); transform-origin: center center; user-select: none; -webkit-user-drag: none; }
     .cover-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--xhs-cover-placeholder); font-size: 34px; font-weight: 850; border: 3px dashed var(--xhs-cover-border); }
     .cover-text { position: absolute; left: 0; top: ${coverSplitY}px; width: 100%; height: ${height - coverSplitY}px; padding: ${coverPadTop}px ${coverPadX}px ${coverPadBottom}px; background-color: var(--xhs-card-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); display: flex; flex-direction: column; gap: ${coverGap}px; box-sizing: border-box; }
@@ -874,7 +874,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.12",
+      version: "0.7.13",
       title,
       subtitle,
       width,
@@ -4787,7 +4787,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.12",
+      version: "0.7.13",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,

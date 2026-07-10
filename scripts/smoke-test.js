@@ -219,13 +219,19 @@ async function main() {
     const coverPattern = await page.evaluate(() => {
       const card = document.querySelector('#stageScale .xhs-cover-card');
       const coverText = card?.querySelector('.cover-text');
+      const coverMedia = card?.querySelector('.cover-media');
+      const coverFrame = card?.querySelector('.cover-image-frame');
       return {
         card: card ? getComputedStyle(card).backgroundImage : 'none',
         coverText: coverText ? getComputedStyle(coverText).backgroundImage : 'none',
+        coverMedia: coverMedia ? getComputedStyle(coverMedia).backgroundImage : 'none',
+        coverFrame: coverFrame ? getComputedStyle(coverFrame).backgroundImage : 'none',
       };
     });
     assert.notStrictEqual(coverPattern.card, 'none');
     assert.strictEqual(coverPattern.coverText, coverPattern.card);
+    assert.strictEqual(coverPattern.coverMedia, coverPattern.card);
+    assert.strictEqual(coverPattern.coverFrame, coverPattern.card);
 
     await page.click('[data-cover-theme="accent"]');
     const lightAccentCover = await page.evaluate(() => {
