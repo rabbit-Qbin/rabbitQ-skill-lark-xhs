@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.7.17";
+const VERSION = "0.7.18";
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -690,6 +690,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn:hover { opacity: 1; transform: translateX(-50%) scale(1.12); }
     .xhs-block-halo-btn.halo-before { top: -11px; }
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
+    .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
     .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
     .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: flex; column-gap: 0; align-items: center; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
@@ -2867,15 +2868,20 @@ function studioHtmlV2(payload, libs) {
       if (key !== 'Backspace') return false;
       const field = caretFieldForBlock(block, range.startContainer);
       const atBlockStart = isCaretAtFlowBlockStart(range, block);
-      if (!atBlockStart && !isCaretAtFieldStart(range, field)) return false;
+      const headingNumber = block.classList.contains('xhs-heading')
+        ? block.querySelector('.xhs-heading-number')
+        : null;
+      const caretInsideHeadingNumber = Boolean(headingNumber &&
+        (range.startContainer === headingNumber || headingNumber.contains(range.startContainer)));
+      if (!atBlockStart && !caretInsideHeadingNumber && !isCaretAtFieldStart(range, field)) return false;
       const leadingBlanks = leading.firstContent === block ? leading.blanks : [];
       const blanks = leadingBlanks.length ? leadingBlanks : [previousManualBlank(block)].filter(Boolean);
       if (!blanks.length) return false;
       event.preventDefault();
       blanks.forEach((blank) => blank.remove());
       ensureEditorCaretAnchors(stageScale);
-      const caretTarget = atBlockStart && block.classList.contains('xhs-heading')
-        ? (block.querySelector('.xhs-heading-number') || field)
+      const caretTarget = (atBlockStart || caretInsideHeadingNumber) && headingNumber
+        ? headingNumber
         : field;
       setCaretInside(caretTarget);
       saveCurrentPage();
@@ -2883,26 +2889,51 @@ function studioHtmlV2(payload, libs) {
       return true;
     }
     function bindBlockHalo() {
-      let halo = document.getElementById('blockHalo');
-      if (!halo) {
-        halo = document.createElement('div');
-        halo.id = 'blockHalo';
-        halo.className = 'xhs-block-halo';
-        halo.style.display = 'none';
-        stageWrap.appendChild(halo);
-      }
+      document.getElementById('blockHalo')?.remove();
+      const halo = document.createElement('div');
+      halo.id = 'blockHalo';
+      halo.className = 'xhs-block-halo';
+      halo.style.display = 'none';
+      stageWrap.appendChild(halo);
       const btnBefore = document.createElement('button');
-      btnBefore.className = 'xhs-block-halo-btn halo-before';
+      btnBefore.className = 'xhs-block-halo-btn halo-before halo-add';
       btnBefore.title = '在上方插入空行';
       btnBefore.textContent = '+';
+      const btnBeforeRemove = document.createElement('button');
+      btnBeforeRemove.className = 'xhs-block-halo-btn halo-before halo-remove';
+      btnBeforeRemove.title = '减少上方空行';
+      btnBeforeRemove.textContent = '−';
       const btnAfter = document.createElement('button');
-      btnAfter.className = 'xhs-block-halo-btn halo-after';
+      btnAfter.className = 'xhs-block-halo-btn halo-after halo-add';
       btnAfter.title = '在下方插入空行';
       btnAfter.textContent = '+';
+      const btnAfterRemove = document.createElement('button');
+      btnAfterRemove.className = 'xhs-block-halo-btn halo-after halo-remove';
+      btnAfterRemove.title = '减少下方空行';
+      btnAfterRemove.textContent = '−';
       halo.appendChild(btnBefore);
+      halo.appendChild(btnBeforeRemove);
       halo.appendChild(btnAfter);
+      halo.appendChild(btnAfterRemove);
       let targetBlock = null;
       let haloHideTimer = null;
+      function adjacentManualBlank(block, direction) {
+        let sibling = direction === 'before' ? block?.previousElementSibling : block?.nextElementSibling;
+        while (sibling?.classList?.contains('xhs-caret-anchor')) {
+          sibling = direction === 'before' ? sibling.previousElementSibling : sibling.nextElementSibling;
+        }
+        return sibling?.classList?.contains('xhs-manual-blank') ? sibling : null;
+      }
+      function syncBlankControls(block) {
+        const hasBefore = Boolean(adjacentManualBlank(block, 'before'));
+        const hasAfter = Boolean(adjacentManualBlank(block, 'after'));
+        btnBefore.style.left = hasBefore ? 'calc(50% - 13px)' : '50%';
+        btnBeforeRemove.style.left = 'calc(50% + 13px)';
+        btnBeforeRemove.style.display = hasBefore ? 'block' : 'none';
+        btnAfter.style.left = hasAfter ? 'calc(50% - 13px)' : '50%';
+        btnAfterRemove.style.left = 'calc(50% + 13px)';
+        btnAfterRemove.style.display = hasAfter ? 'block' : 'none';
+      }
       function showHalo(block) {
         if (!block || !stageScale.contains(block)) return;
         targetBlock = block;
@@ -2918,6 +2949,7 @@ function studioHtmlV2(payload, libs) {
         halo.style.top = top + 'px';
         halo.style.width = w + 'px';
         halo.style.height = h + 'px';
+        syncBlankControls(block);
         halo.style.display = 'block';
       }
       function hideHalo() {
@@ -2950,6 +2982,8 @@ function studioHtmlV2(payload, libs) {
         targetBlock.before(blank);
         ensureEditorCaretAnchors(stageScale);
         insertAndFocusBlank(blank);
+        saveCurrentPage();
+        showHalo(targetBlock);
         scheduleOverflowReflow(false);
       });
       btnAfter.addEventListener('mousedown', (e) => {
@@ -2959,8 +2993,23 @@ function studioHtmlV2(payload, libs) {
         targetBlock.after(blank);
         ensureEditorCaretAnchors(stageScale);
         insertAndFocusBlank(blank);
+        saveCurrentPage();
+        showHalo(targetBlock);
         scheduleOverflowReflow(false);
       });
+      function removeAdjacentBlank(e, direction) {
+        e.preventDefault();
+        if (!targetBlock) return;
+        const blank = adjacentManualBlank(targetBlock, direction);
+        if (!blank) return;
+        blank.remove();
+        ensureEditorCaretAnchors(stageScale);
+        saveCurrentPage();
+        showHalo(targetBlock);
+        scheduleOverflowReflow(false);
+      }
+      btnBeforeRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'before'));
+      btnAfterRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'after'));
       const frame = stageScale.querySelector('.xhs-cover-tail-frame') ||
         stageScale.querySelector('.xhs-body-card .xhs-body-frame');
       if (!frame) return;

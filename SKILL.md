@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持连续分页、封面开关、主题组合、引用/卡片/序列、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.7.17
+version: 0.7.18
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -137,6 +137,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 - 卡片正文不重复显示角标文字；例如左上角已显示“金句”时，黑色正文会移除开头的“金句：”。
 - 光标位于已有卡片内时，再点一次“卡片”会取消卡片并恢复普通正文，不弹重复嵌套提示。
 - 引用只转换选中内容，不把整段误变成引用。
+- 悬浮在子标题、卡片、引用、序列或图片块上时，边界 `+` 每次增加一行空白；存在相邻空行时同时显示 `−`，每次减少一行，不要求用户精确放置文字光标。
 
 ### 图片
 

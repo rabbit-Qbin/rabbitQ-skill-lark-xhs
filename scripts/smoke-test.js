@@ -233,6 +233,60 @@ async function main() {
       heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
     )), false);
 
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      heading.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      const addBefore = document.querySelector("#blockHalo .halo-before.halo-add");
+      addBefore.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => (
+      heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
+    )), true);
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      const number = heading.querySelector(".xhs-heading-number");
+      number.focus();
+      const range = document.createRange();
+      range.selectNodeContents(number);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(800);
+    const haloBlankUndoState = await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => ({
+      hasManualBlankBefore: heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false,
+      number: heading.querySelector(".xhs-heading-number")?.textContent.trim() || "",
+    }));
+    assert.strictEqual(haloBlankUndoState.hasManualBlankBefore, false);
+    assert.strictEqual(haloBlankUndoState.number, "01");
+
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      heading.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      const addBefore = document.querySelector("#blockHalo .halo-before.halo-add");
+      addBefore.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    await page.waitForTimeout(100);
+    const blankControlState = await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => ({
+      hasManualBlankBefore: heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false,
+      addButtonCount: document.querySelectorAll("#blockHalo .halo-before.halo-add").length,
+      removeButtonCount: document.querySelectorAll("#blockHalo .halo-before.halo-remove").length,
+      removeVisible: document.querySelector("#blockHalo .halo-before.halo-remove")?.style.display !== "none",
+    }));
+    assert.strictEqual(blankControlState.hasManualBlankBefore, true);
+    assert.strictEqual(blankControlState.addButtonCount, 1);
+    assert.strictEqual(blankControlState.removeButtonCount, 1);
+    assert.strictEqual(blankControlState.removeVisible, true);
+    await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
+      heading.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      const removeBefore = document.querySelector("#blockHalo .halo-before.halo-remove");
+      removeBefore.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    await page.waitForTimeout(800);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => (
+      heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false
+    )), false);
+
     assert.ok(multiCalloutPageIndex >= 0);
     await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
     const styleTestCallouts = page.locator("#stageScale .xhs-callout");
