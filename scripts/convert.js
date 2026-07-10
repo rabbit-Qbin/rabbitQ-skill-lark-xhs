@@ -873,7 +873,7 @@ function studioHtmlV2(payload, libs) {
   <script>${libs.jszip}</script>
   <script>
     const config = ${escapeJsonForScript({
-      version: "0.7.9",
+      version: "0.7.10",
       title,
       subtitle,
       width,
@@ -3879,6 +3879,21 @@ function studioHtmlV2(payload, libs) {
       scheduleOverflowReflow(true);
     }
     function makeKeypointBlock() {
+      const activeSelection = window.getSelection();
+      const activeNode = activeSelection?.anchorNode;
+      const activeElement = activeNode?.nodeType === Node.ELEMENT_NODE ? activeNode : activeNode?.parentElement;
+      const activeCallout = activeElement?.closest?.('.xhs-callout');
+      if (activeCallout && stageScale.contains(activeCallout)) {
+        const p = document.createElement('p');
+        p.className = 'xhs-p xhs-block';
+        p.innerHTML = activeCallout.querySelector('.xhs-callout-body')?.innerHTML || activeCallout.textContent;
+        activeCallout.replaceWith(p);
+        activeSelection?.removeAllRanges();
+        setCaretInside(p);
+        saveCurrentPage();
+        scheduleOverflowReflow(true);
+        return;
+      }
       const item = getStageSelection();
       if (!item) {
         alert('请先选中要放进卡片的文字。');
@@ -3887,21 +3902,6 @@ function studioHtmlV2(payload, libs) {
       const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? item.range.commonAncestorContainer
         : item.range.commonAncestorContainer.parentElement;
-      const existing = parent?.closest?.('.xhs-callout');
-      if (existing && stageScale.contains(existing)) {
-        if (rangeCoversEntireBlock(item.range, existing)) {
-          const p = document.createElement('p');
-          p.className = 'xhs-p xhs-block';
-          p.innerHTML = existing.querySelector('.xhs-callout-body')?.innerHTML || existing.textContent;
-          existing.replaceWith(p);
-          item.selection.removeAllRanges();
-          saveCurrentPage();
-          scheduleOverflowReflow(true);
-          return;
-        }
-        alert('卡片内请用加粗、有色字或下划线强调，不要再套卡片。');
-        return;
-      }
       if (blockNestHost(parent)) {
         alert('这里已经是卡片/引用/序列内容，请用加粗、有色字或下划线强调，不要再套卡片。');
         return;
@@ -4726,7 +4726,7 @@ function main() {
     fs.writeFileSync(studioPath, studioHtmlV2(payload, libs));
     writeJson(manifestPath, {
       generator: "rabbitQ-skill-lark-xhs",
-      version: "0.7.9",
+      version: "0.7.10",
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
       width: opts.width,

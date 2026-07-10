@@ -38,6 +38,12 @@ async function main() {
     "",
     "**金句：这是明确的卡片。**",
     "",
+    "**注意：这是注意卡片需要保留的正文，开头标签不应该重复显示。**",
+    "",
+    "**结论：这是结论卡片需要保留的正文，开头标签不应该重复显示。**",
+    "",
+    "**划重点：这是重点卡片需要保留的正文，开头标签不应该重复显示。**",
+    "",
     "**项目**：rabbitQ-skill-lark-xhs（GitHub）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
@@ -92,26 +98,38 @@ async function main() {
     assert.deepStrictEqual(flowOrderAfterCoverToggle, flowOrderBeforeCoverToggle);
 
     const pageCount = await page.locator("#pageTabs button").count();
-    const content = { quotes: [], callouts: [], lists: [] };
+    const content = { quotes: [], callouts: [], labels: [], lists: [] };
+    let calloutPageIndex = -1;
     for (let index = 0; index < pageCount; index += 1) {
       await page.locator("#pageTabs button").nth(index).click();
       await page.waitForTimeout(80);
       const pageContent = await page.evaluate(() => ({
         quotes: Array.from(document.querySelectorAll("#stageScale .xhs-quote")).map((node) => node.textContent.trim()),
         callouts: Array.from(document.querySelectorAll("#stageScale .xhs-callout-body")).map((node) => node.textContent.trim()),
+        labels: Array.from(document.querySelectorAll("#stageScale .xhs-callout-label")).map((node) => node.textContent.trim()),
         lists: Array.from(document.querySelectorAll("#stageScale .xhs-reason-text")).map((node) => node.textContent.trim()),
       }));
+      if (calloutPageIndex < 0 && pageContent.callouts.length) calloutPageIndex = index;
       content.quotes.push(...pageContent.quotes);
       content.callouts.push(...pageContent.callouts);
+      content.labels.push(...pageContent.labels);
       content.lists.push(...pageContent.lists);
     }
 
     assert.ok(content.quotes.some((text) => text.includes("仍然应该是引用")));
     assert.ok(content.callouts.some((text) => text.includes("这是明确的卡片")));
     assert.ok(!content.callouts.some((text) => /^\s*(?:金句|注意|结论|划重点)\s*[：:]/.test(text)));
+    assert.ok(["金句", "注意", "结论", "划重点"].every((label) => content.labels.includes(label)));
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
+    assert.ok(calloutPageIndex >= 0);
+    await page.locator("#pageTabs button").nth(calloutPageIndex).click();
+    const calloutCountBeforeToggle = await page.locator("#stageScale .xhs-callout").count();
+    await page.locator("#stageScale .xhs-callout-body").first().click();
+    await page.click("#keypointBtn");
+    const calloutCountAfterToggle = await page.locator("#stageScale .xhs-callout").count();
+    assert.strictEqual(calloutCountAfterToggle, calloutCountBeforeToggle - 1);
     const anchorHeights = await page.locator("#stageScale .xhs-caret-anchor").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
     assert.ok(anchorHeights.every((height) => height <= 1.1));
 
