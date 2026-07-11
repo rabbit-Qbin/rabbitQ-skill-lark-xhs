@@ -1,6 +1,6 @@
 # Markdown Patterns for rabbitQ-skill-lark-xhs
 
-这份约定用于准备飞书导出的 Markdown。转换器会独立解析 Markdown，不需要先经过公众号 HTML。
+这份约定用于准备飞书导出的 Markdown。转换器直接解析 Markdown 与附件，无需其他中间格式。
 
 ## 封面标题与副标题
 
