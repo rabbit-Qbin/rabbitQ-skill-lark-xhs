@@ -61,6 +61,8 @@ async function main() {
     "",
     "![回归测试图片](fixture.png)",
     "",
+    "---",
+    "",
     "### 二级小标题回归",
     "",
     "**项目**：rabbitQ-skill-lark-xhs（GitHub）",
@@ -90,6 +92,7 @@ async function main() {
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
   assert.match(html, /data-xhs-heading-level="2"/);
+  assert.match(html, /data-xhs-page-break="1"/);
   assert.match(html, /<button id="headingBtn1">一级标题<\/button>/);
   assert.match(html, /<button id="headingBtn2">二级标题<\/button>/);
   assert.doesNotMatch(html, /id="headingBtn"/);
@@ -193,6 +196,38 @@ async function main() {
     )), 0);
     await page.click("#coverImageOnBtn");
     await page.waitForTimeout(500);
+
+    // Regression: deleting a leading manual-blank on body page 2 must not leave a phantom blank below.
+    if (await page.locator("#pageTabs button").count() > 2) {
+      await page.locator("#pageTabs button").nth(2).click();
+      await page.waitForTimeout(100);
+      const bodyPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
+      await bodyPageFrame.evaluate((frame) => {
+        const blank = document.createElement("p");
+        blank.className = "xhs-p xhs-block xhs-manual-blank";
+        blank.innerHTML = "<br>";
+        const first = frame.firstElementChild;
+        if (first) first.before(blank);
+        else frame.appendChild(blank);
+        frame.focus();
+        const range = document.createRange();
+        range.selectNodeContents(blank);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      });
+      await page.keyboard.press("Backspace");
+      await page.waitForTimeout(800);
+      const bodyPageBlankState = await bodyPageFrame.evaluate((frame) => ({
+        manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
+        caretAnchorCount: frame.querySelectorAll(".xhs-caret-anchor").length,
+        firstText: frame.firstElementChild?.textContent?.replace(/\s+/g, " ").trim() || "",
+      }));
+      assert.strictEqual(bodyPageBlankState.manualBlankCount, 0);
+      assert.strictEqual(bodyPageBlankState.caretAnchorCount, 0);
+      assert.ok(bodyPageBlankState.firstText.length > 0);
+    }
 
     const pageCount = await page.locator("#pageTabs button").count();
     const content = { quotes: [], callouts: [], labels: [], lists: [], tables: [] };
@@ -478,6 +513,17 @@ async function main() {
     await page.waitForTimeout(200);
     const level2Count = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).count();
     assert.strictEqual(level2Count, 1, "二级标题 button should create a level-2 heading");
+    const level2Style = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
+      const title = heading.querySelector(".xhs-heading-title");
+      const styles = getComputedStyle(title);
+      return {
+        color: styles.color,
+        borderBottomWidth: styles.borderBottomWidth,
+        borderBottomColor: styles.borderBottomColor,
+      };
+    });
+    assert.strictEqual(level2Style.borderBottomWidth, "2px");
+    assert.notStrictEqual(level2Style.color, "rgb(17, 17, 17)");
     await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
       const title = heading.querySelector(".xhs-heading-title") || heading;
       title.focus?.();

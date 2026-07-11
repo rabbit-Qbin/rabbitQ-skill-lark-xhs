@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.5";
+const VERSION = "0.8.7";
 const DEFAULT_BG_THEME = "white";
 const DEFAULT_ACCENT_THEME = "blue";
 const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点";
@@ -541,6 +541,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
       blocks.push(renderMarkdownTable(tableHeader, rows, markdownFile));
       continue;
     }
+    if (/^(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      flushAll();
+      blocks.push(`<section data-xhs-page-break="1" aria-hidden="true"></section>`);
+      continue;
+    }
     if (!line) {
       let hasUpcomingList = false;
       for (let j = lineIndex + 1; j < lines.length; j += 1) {
@@ -774,6 +779,8 @@ function studioHtmlV2(payload, libs) {
     .cover-subtitle strong, .cover-subtitle b, .cover-subtitle .xhs-cover-bold { font-weight: 900 !important; }
     .cover-subtitle::before { content: ""; position: absolute; left: 0; top: 50%; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; transform: translateY(-50%); background: var(--xhs-accent); border-radius: 999px; pointer-events: none; }
     .cover-subtitle:empty::after { content: attr(data-placeholder); color: #8f948d; letter-spacing: 0; pointer-events: none; }
+    .xhs-page-break { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; visibility: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-body-frame > .xhs-page-break + .xhs-page-break { display: none; }
     .xhs-body-frame { position: absolute; left: var(--body-pad-x); top: var(--body-pad-top); width: var(--body-content-width); height: var(--body-content-height); overflow: hidden; outline: none; background: transparent; font-family: var(--xhs-font); -webkit-font-smoothing: antialiased; }
     .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${coverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - coverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
@@ -798,7 +805,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading-space { display: none; }
     .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 0.5em; padding: 0; border-bottom: 0; }
-    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: #111; font-size: ${Math.round(headingTitleSize * 0.8)}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 1.5px solid #c8d6c6; border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${Math.round(headingTitleSize * 0.8)}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
     .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
@@ -1477,6 +1484,7 @@ function studioHtmlV2(payload, libs) {
         else merged.appendChild(node);
         node.remove();
       });
+      if (!hasEditableContent(merged)) return;
       heading.after(merged);
     }
     function detectHeadingLevel(heading) {
@@ -2018,6 +2026,7 @@ function studioHtmlV2(payload, libs) {
         node.classList.contains('xhs-table-block') ||
         node.classList.contains('xhs-image-block') ||
         node.classList.contains('xhs-image-grid') ||
+        node.classList.contains('xhs-page-break') ||
         node.classList.contains('xhs-caret-anchor')
       );
     }
@@ -2181,6 +2190,12 @@ function studioHtmlV2(payload, libs) {
       return cleanText(rich.textContent) || rich.querySelector('img') ? rich : null;
     }
     function convertSourceElement(el, index) {
+      if (el.getAttribute?.('data-xhs-page-break') === '1' || el.dataset?.xhsPageBreak === '1') {
+        const marker = makeElement('section', 'xhs-page-break xhs-block');
+        marker.dataset.xhsPageBreak = '1';
+        marker.setAttribute('aria-hidden', 'true');
+        return [marker];
+      }
       if (isHeroBlock(el, index)) return [];
       const text = cleanText(el.textContent);
       const imgs = Array.from(el.querySelectorAll('img')).filter((img) => img.getAttribute('src'));
@@ -2412,6 +2427,10 @@ function studioHtmlV2(payload, libs) {
         used = 0;
       }
       for (const sourceBlock of blocks) {
+        if (sourceBlock.dataset?.xhsPageBreak === '1') {
+          pushPage();
+          continue;
+        }
         let pending = sourceBlock.cloneNode(true);
         while (pending) {
           let block = pending;
@@ -2465,6 +2484,11 @@ function studioHtmlV2(payload, libs) {
       let tailClosed = false;
       const rest = [];
       for (const sourceBlock of blocks) {
+        if (sourceBlock.dataset?.xhsPageBreak === '1') {
+          if (!tailClosed) tailClosed = true;
+          else rest.push(sourceBlock);
+          continue;
+        }
         if (tailClosed) {
           rest.push(sourceBlock);
           continue;
@@ -2679,28 +2703,19 @@ function studioHtmlV2(payload, libs) {
       return p;
     }
     function ensureEditorCaretAnchors(root = stageScale) {
-      const frame = root.querySelector('.xhs-body-frame');
-      if (!frame) return;
-      frame.querySelectorAll('.xhs-caret-anchor').forEach((node) => {
-        if (isEmptyCaretAnchor(node)) node.remove();
-      });
-      // Insert before the very first child if it's a hard block or heading
-      const firstChild = frame.firstElementChild;
-      if (firstChild && (isEditorHardBlock(firstChild) || firstChild.classList?.contains('xhs-heading'))) {
-        if (!firstChild.previousElementSibling?.classList?.contains('xhs-caret-anchor')) {
-          frame.prepend(makeCaretAnchor());
-        }
-      }
-      Array.from(frame.children).forEach((node) => {
-        if (!isEditorHardBlock(node) && !node.classList?.contains('xhs-heading')) return;
-        const next = node.nextElementSibling;
-        if (next?.classList?.contains('xhs-caret-anchor')) return;
-        // No next sibling, or the next sibling is itself a non-editable block
-        // (another callout/image/quote/heading). In both cases there is no place
-        // to put the caret after this block, so insert an editable anchor.
-        if (!next || isEditorHardBlock(next) || next.classList?.contains('xhs-heading')) {
-          node.after(makeCaretAnchor());
-        }
+      const frames = Array.from(root.querySelectorAll('.xhs-body-frame, .xhs-cover-tail-frame'));
+      frames.forEach((frame) => {
+        frame.querySelectorAll('.xhs-caret-anchor').forEach((node) => {
+          if (isEmptyCaretAnchor(node)) node.remove();
+        });
+        Array.from(frame.children).forEach((node) => {
+          if (!isEditorHardBlock(node) && !node.classList?.contains('xhs-heading')) return;
+          const next = node.nextElementSibling;
+          if (next?.classList?.contains('xhs-caret-anchor')) return;
+          if (!next || isEditorHardBlock(next) || next.classList?.contains('xhs-heading')) {
+            node.after(makeCaretAnchor());
+          }
+        });
       });
     }
     function stripCaretAnchors(root) {
@@ -3075,7 +3090,6 @@ function studioHtmlV2(payload, libs) {
         const isLeadingBlank = leading.blanks.includes(block);
         const target = isLeadingBlank ? leading.firstContent : (block.nextElementSibling || block.previousElementSibling);
         (isLeadingBlank ? leading.blanks : [block]).forEach((blank) => blank.remove());
-        ensureEditorCaretAnchors(stageScale);
         if (target?.isConnected) setCaretInside(nearestCaretTarget(target));
         saveCurrentPage();
         scheduleOverflowReflow(false);
@@ -3095,7 +3109,6 @@ function studioHtmlV2(payload, libs) {
       if (!blanks.length) return false;
       event.preventDefault();
       blanks.forEach((blank) => blank.remove());
-      ensureEditorCaretAnchors(stageScale);
       const caretTarget = (atBlockStart || caretInsideHeadingNumber) && headingNumber
         ? headingNumber
         : field;
