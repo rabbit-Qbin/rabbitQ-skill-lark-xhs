@@ -19,8 +19,9 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.8";
+const VERSION = "0.8.9";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
+const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
 function headingLevel2FontSize(headingTitleSize) {
   return Math.round(Number(headingTitleSize || 48) * 0.8) + HEADING_LEVEL2_SIZE_BONUS_PX;
@@ -810,7 +811,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading-number { flex: 0 0 ${Math.round(headingNumberSize * 1.16)}px; width: ${Math.round(headingNumberSize * 1.16)}px; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
     .xhs-heading-space { display: none; }
     .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
-    .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 0.5em; padding: 0; border-bottom: 0; }
+    .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 ${HEADING_LEVEL2_MARGIN_BOTTOM_PX}px; padding: 0; border-bottom: 0; }
     .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${headingLevel2Size}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
