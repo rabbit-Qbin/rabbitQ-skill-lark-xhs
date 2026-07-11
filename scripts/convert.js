@@ -19,7 +19,12 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.7";
+const VERSION = "0.8.8";
+const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
+
+function headingLevel2FontSize(headingTitleSize) {
+  return Math.round(Number(headingTitleSize || 48) * 0.8) + HEADING_LEVEL2_SIZE_BONUS_PX;
+}
 const DEFAULT_BG_THEME = "white";
 const DEFAULT_ACCENT_THEME = "blue";
 const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点";
@@ -711,6 +716,7 @@ function studioHtmlV2(payload, libs) {
   const calloutBorder = Math.max(5, Math.round(width * 0.006));
   const calloutBodySize = Math.max(28, Math.round(bodyFontSize - 3));
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
+  const headingLevel2Size = headingLevel2FontSize(headingTitleSize);
   const imageGridGap = Math.round(width * 0.018);
   const songtiFont = `"Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif`;
   const wechatFont = songtiFont;
@@ -805,7 +811,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading-space { display: none; }
     .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 0.5em; padding: 0; border-bottom: 0; }
-    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${Math.round(headingTitleSize * 0.8)}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${headingLevel2Size}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
     .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
@@ -3493,7 +3499,7 @@ function studioHtmlV2(payload, libs) {
     }
     function fitHeadingTitles(root = stageScale) {
       const base = Number(config.headingTitleSize || 48);
-      const lv2Size = Math.round(base * 0.8);
+      const lv2Size = Math.round(base * 0.8) + ${HEADING_LEVEL2_SIZE_BONUS_PX};
       root.querySelectorAll('.xhs-heading-title').forEach((title) => {
         const heading = title.closest('.xhs-heading');
         const isLv2 = detectHeadingLevel(heading) === '2';

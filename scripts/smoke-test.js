@@ -518,10 +518,12 @@ async function main() {
       const styles = getComputedStyle(title);
       return {
         color: styles.color,
+        fontSize: styles.fontSize,
         borderBottomWidth: styles.borderBottomWidth,
         borderBottomColor: styles.borderBottomColor,
       };
     });
+    assert.strictEqual(level2Style.fontSize, "40px");
     assert.strictEqual(level2Style.borderBottomWidth, "2px");
     assert.notStrictEqual(level2Style.color, "rgb(17, 17, 17)");
     await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
