@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.7.19";
+const VERSION = "0.7.20";
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -349,6 +349,49 @@ function isMarkdownListLine(line) {
   return /^(\d+)[.)、]\s+/.test(line) || /^[-*+•·◦]\s+/.test(line);
 }
 
+function splitMarkdownTableRow(line) {
+  let value = String(line || "").trim();
+  if (!value.includes("|")) return [];
+  if (value.startsWith("|")) value = value.slice(1);
+  if (value.endsWith("|") && !value.endsWith("\\|")) value = value.slice(0, -1);
+  const cells = [];
+  let cell = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "\\" && value[index + 1] === "|") {
+      cell += "|";
+      index += 1;
+      continue;
+    }
+    if (char === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    cell += char;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function isMarkdownTableDelimiter(line, expectedColumns) {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length === expectedColumns &&
+    cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+}
+
+function renderMarkdownTable(header, rows, markdownFile) {
+  const width = header.length;
+  const cellHtml = (tag, value) =>
+    `<${tag}>${inlineMarkdownToHtml(String(value || ""), markdownFile) || "&nbsp;"}</${tag}>`;
+  const head = `<thead><tr>${header.map((cell) => cellHtml("th", cell)).join("")}</tr></thead>`;
+  const body = rows.map((row) => {
+    const normalized = Array.from({ length: width }, (_, index) => row[index] || "");
+    return `<tr>${normalized.map((cell) => cellHtml("td", cell)).join("")}</tr>`;
+  }).join("");
+  return `<section data-xhs-block-type="table"><table>${head}<tbody>${body}</tbody></table></section>`;
+}
+
 function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
   const { body } = parseFrontmatter(markdown);
   const lines = body.replace(/\r\n/g, "\n").split("\n");
@@ -435,6 +478,36 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
     }
     if (inCode) {
       code.push(rawLine);
+      continue;
+    }
+    if (/^<table(?:\s|>)/i.test(line)) {
+      flushAll();
+      const tableLines = [rawLine];
+      while (!/<\/table>\s*$/i.test(tableLines[tableLines.length - 1]) && lineIndex + 1 < lines.length) {
+        tableLines.push(lines[++lineIndex]);
+      }
+      blocks.push(`<section data-xhs-block-type="table">${tableLines.join("\n")}</section>`);
+      continue;
+    }
+    const tableHeader = splitMarkdownTableRow(line);
+    const nextLine = String(lines[lineIndex + 1] || "").trim();
+    if (tableHeader.length >= 2 && isMarkdownTableDelimiter(nextLine, tableHeader.length)) {
+      flushAll();
+      const rows = [];
+      lineIndex += 2;
+      while (lineIndex < lines.length) {
+        const rowLine = String(lines[lineIndex] || "").trim();
+        if (!rowLine) break;
+        const row = splitMarkdownTableRow(rowLine);
+        if (row.length < 2) {
+          lineIndex -= 1;
+          break;
+        }
+        rows.push(row);
+        lineIndex += 1;
+      }
+      if (lineIndex >= lines.length || !String(lines[lineIndex] || "").trim()) lineIndex -= 1;
+      blocks.push(renderMarkdownTable(tableHeader, rows, markdownFile));
       continue;
     }
     if (!line) {
@@ -717,7 +790,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
     .selectable-image.dragging { cursor: grabbing; }
-    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-reason-stack.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
+    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-reason-stack.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
     .xhs-reason-stack { margin: 0 0 1.1em; padding: 0.46em; background: var(--xhs-accent-pale); border: 1px solid var(--xhs-underline); border-radius: 10px; display: grid; gap: 0.34em; font-size: var(--body-font); line-height: var(--body-line); }
@@ -726,6 +799,14 @@ function studioHtmlV2(payload, libs) {
     .xhs-reason-number { display: inline-grid; place-items: center; color: var(--xhs-accent-strong); font-size: .76em; line-height: 1.28; font-weight: 950; margin-top: .22em; }
     .xhs-reason-text { min-width: 0; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
     .xhs-reason-text span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-table-block { margin: 0 0 1.02em; width: 100%; max-width: var(--body-text-width); overflow: hidden; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
+    .xhs-table { width: 100%; border-collapse: collapse; table-layout: fixed; background: #fff; color: #111; font-size: ${Math.max(24, Math.round(bodyFontSize * 0.75))}px; line-height: 1.48; }
+    .xhs-table th, .xhs-table td { padding: 0.58em 0.62em; text-align: left; vertical-align: top; word-break: normal; overflow-wrap: anywhere; letter-spacing: 0; }
+    .xhs-table thead th { background: var(--xhs-accent-pale); color: var(--xhs-accent-strong); font-weight: 900; border-top: 1.5px solid var(--xhs-accent); border-bottom: 1.5px solid var(--xhs-accent); }
+    .xhs-table tbody td { background: #fff; border-bottom: 1px dashed #d5ded3; font-weight: 700; }
+    .xhs-table tbody tr:last-child td { border-bottom: 2px solid var(--xhs-underline); }
+    .xhs-table strong, .xhs-table b { font-weight: 900; }
+    .xhs-table em { font-style: italic; }
     .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
@@ -1596,6 +1677,42 @@ function studioHtmlV2(payload, libs) {
       else block.dataset.listType = 'unordered';
       return block;
     }
+    function tableFromElement(el) {
+      const source = el.tagName?.toLowerCase() === 'table' ? el : el.querySelector('table');
+      if (!source) return null;
+      const block = document.createElement('section');
+      block.className = 'xhs-table-block xhs-block';
+      const table = document.createElement('table');
+      table.className = 'xhs-table';
+      const sourceRows = Array.from(source.querySelectorAll('tr'));
+      if (!sourceRows.length) return null;
+      const explicitHeadRows = Array.from(source.querySelectorAll('thead tr'));
+      const headRows = explicitHeadRows.length ? explicitHeadRows : [sourceRows[0]];
+      const headSet = new Set(headRows);
+      const thead = document.createElement('thead');
+      headRows.forEach((row) => {
+        const nextRow = document.createElement('tr');
+        Array.from(row.children).forEach((cell) => {
+          const th = document.createElement('th');
+          th.innerHTML = normalizeInlineHtml(cell.innerHTML || cell.textContent || '');
+          nextRow.appendChild(th);
+        });
+        thead.appendChild(nextRow);
+      });
+      const tbody = document.createElement('tbody');
+      sourceRows.filter((row) => !headSet.has(row)).forEach((row) => {
+        const nextRow = document.createElement('tr');
+        Array.from(row.children).forEach((cell) => {
+          const td = document.createElement('td');
+          td.innerHTML = normalizeInlineHtml(cell.innerHTML || cell.textContent || '');
+          nextRow.appendChild(td);
+        });
+        tbody.appendChild(nextRow);
+      });
+      table.append(thead, tbody);
+      block.appendChild(table);
+      return block;
+    }
     function isQuoteBlock(el) {
       if (el.querySelector('img')) return false;
       const explicitType = el.dataset?.xhsBlockType || '';
@@ -1799,6 +1916,14 @@ function studioHtmlV2(payload, libs) {
       return node;
     }
     function appendSplitContent(target, source) {
+      if (target.classList.contains('xhs-table-block')) {
+        const targetBody = target.querySelector('tbody');
+        const sourceBody = source.querySelector('tbody');
+        if (targetBody && sourceBody) {
+          Array.from(sourceBody.rows).forEach((row) => targetBody.appendChild(row.cloneNode(true)));
+        }
+        return;
+      }
       if (target.classList.contains('xhs-callout')) {
         const targetBody = target.querySelector('.xhs-callout-body');
         const sourceBody = source.querySelector('.xhs-callout-body');
@@ -1814,7 +1939,7 @@ function studioHtmlV2(payload, libs) {
         next?.dataset?.flowId &&
         base.dataset.flowId === next.dataset.flowId &&
         base.tagName === next.tagName &&
-        (isPlainSplittable(base) || base.classList.contains('xhs-callout'));
+        (isPlainSplittable(base) || base.classList.contains('xhs-callout') || base.classList.contains('xhs-table-block'));
     }
     function mergeSplitBlocks(blocks) {
       const merged = [];
@@ -1840,6 +1965,7 @@ function studioHtmlV2(payload, libs) {
         node.classList.contains('xhs-callout') ||
         node.classList.contains('xhs-quote') ||
         node.classList.contains('xhs-reason-stack') ||
+        node.classList.contains('xhs-table-block') ||
         node.classList.contains('xhs-image-block') ||
         node.classList.contains('xhs-image-grid') ||
         node.classList.contains('xhs-caret-anchor')
@@ -2010,6 +2136,10 @@ function studioHtmlV2(payload, libs) {
       const imgs = Array.from(el.querySelectorAll('img')).filter((img) => img.getAttribute('src'));
       if (!text && !imgs.length) return [];
       if (imgs.length) return imageGroupFromImgs(imgs);
+      if (el.dataset?.xhsBlockType === 'table' || el.tagName?.toLowerCase() === 'table' || el.querySelector('table')) {
+        const table = tableFromElement(el);
+        return table ? [table] : [];
+      }
       if (isHeadingBlock(el)) return [headingFromElement(el)];
       if (isReasonListBlock(el)) return [reasonListFromElement(el)];
       if (isQuoteBlock(el)) return [makeElement('section', 'xhs-quote xhs-block', normalizeInlineHtml(el.innerHTML || el.textContent))];
@@ -2093,7 +2223,7 @@ function studioHtmlV2(payload, libs) {
       return block.classList.contains('xhs-p') || block.classList.contains('xhs-rich');
     }
     function isSplittableTextBlock(block) {
-      return isPlainSplittable(block);
+      return isPlainSplittable(block) || block.classList.contains('xhs-table-block');
     }
     function preferredTextSplitIndex(text, best, total) {
       if (!text || best <= 2 || best >= total - 1) return best;
@@ -2186,9 +2316,40 @@ function studioHtmlV2(payload, libs) {
       markSplitPart(tail, id, 'tail');
       return cleanText(head.textContent) && cleanText(tail.textContent) ? { head, tail } : null;
     }
+    function splitTableBlock(block, available) {
+      const rows = Array.from(block.querySelectorAll('tbody > tr'));
+      if (rows.length < 2 || available < 120) return null;
+      const id = flowIdFor(block);
+      function makePart(from, to, kind) {
+        const part = block.cloneNode(true);
+        const body = part.querySelector('tbody');
+        body.innerHTML = '';
+        rows.slice(from, to).forEach((row) => body.appendChild(row.cloneNode(true)));
+        return markSplitPart(part, id, kind);
+      }
+      let best = 0;
+      let lo = 1;
+      let hi = rows.length - 1;
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const candidate = makePart(0, mid, 'head');
+        if (measureBlock(candidate) <= available) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (best < 1 || best >= rows.length) return null;
+      return {
+        head: makePart(0, best, 'head'),
+        tail: makePart(best, rows.length, 'tail'),
+      };
+    }
     function splitTextBlockToFit(block, available) {
       if (isPlainSplittable(block)) return splitPlainTextBlock(block, available);
       if (block.classList.contains('xhs-callout')) return splitCalloutBlock(block, available);
+      if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
       return null;
     }
     function paginateBlocks(blocks) {
@@ -2452,7 +2613,8 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-image-grid') ||
         node?.classList?.contains('xhs-callout') ||
         node?.classList?.contains('xhs-quote') ||
-        node?.classList?.contains('xhs-reason-stack');
+        node?.classList?.contains('xhs-reason-stack') ||
+        node?.classList?.contains('xhs-table-block');
     }
     function makeCaretAnchor() {
       const p = document.createElement('p');
@@ -3014,7 +3176,7 @@ function studioHtmlV2(payload, libs) {
         stageScale.querySelector('.xhs-body-card .xhs-body-frame');
       if (!frame) return;
       frame.addEventListener('mouseover', (e) => {
-        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-reason-stack, .xhs-heading');
+        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-reason-stack, .xhs-table-block, .xhs-heading');
         if (hard && frame.contains(hard)) showHalo(hard);
       });
       frame.addEventListener('mouseleave', hideHalo);
@@ -3395,7 +3557,7 @@ function studioHtmlV2(payload, libs) {
       if (shouldSave) saveCurrentPage();
     }
     function reorderableFlowNode(target) {
-      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-reason-stack, .xhs-image-grid, .xhs-image-block');
+      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-reason-stack, .xhs-table-block, .xhs-image-grid, .xhs-image-block');
     }
     function flowBlocksInBody(bodyFrame) {
       return Array.from(bodyFrame.children).filter((node) => {
@@ -3407,6 +3569,7 @@ function studioHtmlV2(payload, libs) {
           node.classList?.contains('xhs-callout') ||
           node.classList?.contains('xhs-quote') ||
           node.classList?.contains('xhs-reason-stack') ||
+          node.classList?.contains('xhs-table-block') ||
           node.classList?.contains('xhs-rich');
       });
     }

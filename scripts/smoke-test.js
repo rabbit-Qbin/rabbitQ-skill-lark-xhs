@@ -17,6 +17,10 @@ function findBrowser() {
     "/usr/bin/google-chrome",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Microsoft", "Edge", "Application", "msedge.exe"),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+    process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Microsoft", "Edge", "Application", "msedge.exe"),
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
@@ -44,6 +48,13 @@ async function main() {
     "",
     "**划重点：这是重点卡片需要保留的正文，开头标签不应该重复显示。**",
     "",
+    "| 模式 | 适合 | 页数 |",
+    "| --- | --- | ---: |",
+    "| 有封面图 | 视觉强、产品感 | 6 |",
+    "| 无封面图 | 干货长文、教程 | 8 |",
+    "| 半页封面 | 标题 + 首段同页 | 5 |",
+    ...Array.from({ length: 18 }, (_, index) => `| 长表第 ${index + 1} 行 | 跨页时保持完整数据行 | ${index + 9} |`),
+    "",
     "**项目**：rabbitQ-skill-lark-xhs（GitHub）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
@@ -58,6 +69,11 @@ async function main() {
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
   assert.match(html, /data-xhs-block-type="quote"/);
+  assert.match(html, /data-xhs-block-type="table"/);
+  assert.match(html, /<th>模式<\/th>/);
+  assert.match(html, /border-top: 1\.5px solid var\(--xhs-accent\)/);
+  assert.match(html, /border-bottom: 1\.5px solid var\(--xhs-accent\)/);
+  assert.match(html, /tbody tr:last-child td \{ border-bottom: 2px solid var\(--xhs-underline\)/);
   assert.doesNotMatch(html, /&lt;br&gt;/);
 
   const executablePath = findBrowser();
@@ -81,11 +97,20 @@ async function main() {
       for (let index = 1; index < count; index += 1) {
         await page.locator("#pageTabs button").nth(index).click();
         await page.waitForTimeout(50);
-        const blocks = await page.locator("#stageScale .xhs-body-frame > :not(.xhs-caret-anchor)").evaluateAll((nodes) => nodes.map((node) => ({
-          className: node.className,
-          text: node.textContent.replace(/\s+/g, " ").trim(),
-          imageCount: node.querySelectorAll("img").length,
-        })));
+        const blocks = await page.locator("#stageScale .xhs-body-frame > :not(.xhs-caret-anchor)").evaluateAll((nodes) => nodes.flatMap((node) => {
+          if (node.classList.contains("xhs-table-block")) {
+            return Array.from(node.querySelectorAll("tbody tr")).map((row) => ({
+              className: "xhs-table-row",
+              text: row.textContent.replace(/\s+/g, " ").trim(),
+              imageCount: row.querySelectorAll("img").length,
+            }));
+          }
+          return [{
+            className: node.className,
+            text: node.textContent.replace(/\s+/g, " ").trim(),
+            imageCount: node.querySelectorAll("img").length,
+          }];
+        }));
         order.push(...blocks);
       }
       return order;
@@ -105,7 +130,7 @@ async function main() {
     assert.deepStrictEqual(flowOrderAfterCoverToggle, flowOrderBeforeCoverToggle);
 
     const pageCount = await page.locator("#pageTabs button").count();
-    const content = { quotes: [], callouts: [], labels: [], lists: [] };
+    const content = { quotes: [], callouts: [], labels: [], lists: [], tables: [] };
     let calloutPageIndex = -1;
     let multiCalloutPageIndex = -1;
     let headingPageIndex = -1;
@@ -118,6 +143,11 @@ async function main() {
         labels: Array.from(document.querySelectorAll("#stageScale .xhs-callout-label")).map((node) => node.textContent.trim()),
         headingCount: document.querySelectorAll("#stageScale .xhs-heading").length,
         lists: Array.from(document.querySelectorAll("#stageScale .xhs-reason-text")).map((node) => node.textContent.trim()),
+        tables: Array.from(document.querySelectorAll("#stageScale .xhs-table")).map((node) => ({
+          text: node.textContent.replace(/\s+/g, " ").trim(),
+          headers: Array.from(node.querySelectorAll("thead th")).map((cell) => cell.textContent.trim()),
+          rows: node.querySelectorAll("tbody tr").length,
+        })),
       }));
       if (calloutPageIndex < 0 && pageContent.callouts.length) calloutPageIndex = index;
       if (multiCalloutPageIndex < 0 && pageContent.callouts.length >= 2) multiCalloutPageIndex = index;
@@ -126,6 +156,7 @@ async function main() {
       content.callouts.push(...pageContent.callouts);
       content.labels.push(...pageContent.labels);
       content.lists.push(...pageContent.lists);
+      content.tables.push(...pageContent.tables);
     }
 
     assert.ok(content.quotes.some((text) => text.includes("仍然应该是引用")));
@@ -135,6 +166,10 @@ async function main() {
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
+    assert.ok(content.tables.length >= 2);
+    assert.ok(content.tables.every((table) => JSON.stringify(table.headers) === JSON.stringify(["模式", "适合", "页数"])));
+    assert.strictEqual(content.tables.reduce((total, table) => total + table.rows, 0), 21);
+    assert.ok(content.tables.some((table) => table.text.includes("无封面图")));
     assert.ok(headingPageIndex >= 0);
     await page.locator("#pageTabs button").nth(headingPageIndex).click();
     await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
