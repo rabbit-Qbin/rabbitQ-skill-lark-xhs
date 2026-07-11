@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.7.18";
+const VERSION = "0.7.19";
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -672,7 +672,7 @@ function studioHtmlV2(payload, libs) {
     .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: "XHSCoverLatin", var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
     .cover-subtitle * { font-size: inherit !important; line-height: inherit !important; letter-spacing: inherit; }
     .cover-subtitle strong, .cover-subtitle b, .cover-subtitle .xhs-cover-bold { font-weight: 900 !important; }
-    .cover-subtitle::before { content: ""; position: absolute; left: 0; top: 50%; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; transform: translateY(-50%); background: var(--xhs-accent-strong); border-radius: 999px; pointer-events: none; }
+    .cover-subtitle::before { content: ""; position: absolute; left: 0; top: 50%; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; transform: translateY(-50%); background: var(--xhs-accent); border-radius: 999px; pointer-events: none; }
     .cover-subtitle:empty::after { content: attr(data-placeholder); color: #8f948d; letter-spacing: 0; pointer-events: none; }
     .xhs-body-frame { position: absolute; left: var(--body-pad-x); top: var(--body-pad-top); width: var(--body-content-width); height: var(--body-content-height); overflow: hidden; outline: none; background: transparent; font-family: var(--xhs-font); -webkit-font-smoothing: antialiased; }
     .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${coverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - coverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
