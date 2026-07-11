@@ -48,6 +48,10 @@ async function main() {
     "",
     "**划重点：这是重点卡片需要保留的正文，开头标签不应该重复显示。**",
     "",
+    "**时间价值**",
+    "",
+    "这件事花的时间 \\< 你本人核心时间的价值",
+    "",
     "| 模式 | 适合 | 页数 |",
     "| --- | --- | ---: |",
     "| 有封面图 | 视觉强、产品感 | 6 |",
@@ -55,9 +59,18 @@ async function main() {
     "| 半页封面 | 标题 + 首段同页 | 5 |",
     ...Array.from({ length: 18 }, (_, index) => `| 长表第 ${index + 1} 行 | 跨页时保持完整数据行 | ${index + 9} |`),
     "",
+    "![回归测试图片](fixture.png)",
+    "",
+    "### 二级小标题回归",
+    "",
     "**项目**：rabbitQ-skill-lark-xhs（GitHub）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
+  const fixturePng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  fs.writeFileSync(path.join(sourceDir, "fixture.png"), fixturePng);
 
   const convert = childProcess.spawnSync(
     process.execPath,
@@ -75,6 +88,15 @@ async function main() {
   assert.match(html, /border-bottom: 1\.5px solid var\(--xhs-accent\)/);
   assert.match(html, /tbody tr:last-child td \{ border-bottom: 2px solid var\(--xhs-underline\)/);
   assert.doesNotMatch(html, /&lt;br&gt;/);
+  assert.match(html, /data-xhs-heading-level="1"/);
+  assert.match(html, /data-xhs-heading-level="2"/);
+  assert.match(html, /<button id="headingBtn1">一级标题<\/button>/);
+  assert.match(html, /<button id="headingBtn2">二级标题<\/button>/);
+  assert.doesNotMatch(html, /id="headingBtn"/);
+  assert.doesNotMatch(html, /id="replaceImageBtn"/);
+  assert.doesNotMatch(html, /id="deleteImageBtn"/);
+  assert.match(html, /这件事花的时间 &lt; 你本人核心时间的价值/);
+  assert.doesNotMatch(html, /这件事花的时间 \\&lt;/);
 
   const executablePath = findBrowser();
   assert.ok(executablePath, "No Chromium browser found; set PLAYWRIGHT_CHROMIUM_EXECUTABLE");
@@ -418,6 +440,138 @@ async function main() {
     const anchorHeights = await page.locator("#stageScale .xhs-caret-anchor").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
     assert.ok(anchorHeights.every((height) => height <= 1.1));
 
+    // Regression: 一级标题 button toggles a numbered heading back to a paragraph.
+    // Image double-click / Backspace deletion also live here, after page-index
+    // dependent assertions, because these mutations can reflow content.
+    assert.ok(headingPageIndex >= 0);
+    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    const level1Heading = page.locator('#stageScale .xhs-heading').filter({ hasText: "结构识别" }).first();
+    await level1Heading.evaluate((heading) => {
+      const title = heading.querySelector(".xhs-heading-title") || heading;
+      title.focus?.();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("headingBtn1").click();
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").filter({ hasText: "结构识别" }).count(), 0, "clicking 一级标题 again should convert the heading back to a paragraph");
+    assert.strictEqual(await page.locator("#stageScale .xhs-p").filter({ hasText: "结构识别" }).count(), 1);
+
+    // Regression: 二级标题 button creates a thin-underline heading and toggles off.
+    const bodyFrame = page.locator("#stageScale .xhs-body-frame, #stageScale .xhs-cover-tail-frame").first();
+    await bodyFrame.evaluate((frame) => {
+      const p = document.createElement("p");
+      p.className = "xhs-p xhs-block";
+      p.textContent = "临时二级标题";
+      frame.appendChild(p);
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("headingBtn2").click();
+    });
+    await page.waitForTimeout(200);
+    const level2Count = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).count();
+    assert.strictEqual(level2Count, 1, "二级标题 button should create a level-2 heading");
+    await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
+      const title = heading.querySelector(".xhs-heading-title") || heading;
+      title.focus?.();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("headingBtn2").click();
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").filter({ hasText: "临时二级标题" }).count(), 0);
+
+    // Regression: block styles can cross-switch (二级 → 卡片 → 引用) and cancel.
+    await bodyFrame.evaluate((frame) => {
+      const p = document.createElement("p");
+      p.className = "xhs-p xhs-block";
+      p.textContent = "互切样式测试";
+      frame.appendChild(p);
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("headingBtn2").click();
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "互切样式测试" }).count(), 1);
+    await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "互切样式测试" }).first().evaluate((heading) => {
+      const title = heading.querySelector(".xhs-heading-title") || heading;
+      title.focus?.();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").filter({ hasText: "互切样式测试" }).count(), 0);
+    assert.strictEqual(await page.locator("#stageScale .xhs-callout").filter({ hasText: "互切样式测试" }).count(), 1, "二级标题 should cross-switch into a card");
+    await page.locator("#stageScale .xhs-callout").filter({ hasText: "互切样式测试" }).first().evaluate((callout) => {
+      const body = callout.querySelector(".xhs-callout-body") || callout;
+      body.focus?.();
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("italicBtn").click();
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator("#stageScale .xhs-callout").filter({ hasText: "互切样式测试" }).count(), 0);
+    assert.strictEqual(await page.locator("#stageScale .xhs-quote").filter({ hasText: "互切样式测试" }).count(), 1, "card should cross-switch into a quote");
+    await page.locator("#stageScale .xhs-quote").filter({ hasText: "互切样式测试" }).first().evaluate((quote) => {
+      quote.focus?.();
+      const range = document.createRange();
+      range.selectNodeContents(quote);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("italicBtn").click();
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator("#stageScale .xhs-quote").filter({ hasText: "互切样式测试" }).count(), 0);
+    assert.strictEqual(await page.locator("#stageScale .xhs-p").filter({ hasText: "互切样式测试" }).count(), 1, "clicking the same style again should cancel back to paragraph");
+
+    // Regression: images no longer have dedicated replace/delete buttons.
+    // Double-click must open the native file chooser to replace locally,
+    // and Backspace/Delete must remove the selected image block.
+    const pageTabCount = await page.locator("#pageTabs button").count();
+    let imagePageIndex = -1;
+    for (let index = 0; index < pageTabCount; index += 1) {
+      await page.locator("#pageTabs button").nth(index).click();
+      if (await page.locator("#stageScale .xhs-image-frame").count()) {
+        imagePageIndex = index;
+        break;
+      }
+    }
+    assert.ok(imagePageIndex >= 0, "expected to find a page containing the fixture image");
+    const imageFrame = page.locator("#stageScale .xhs-image-frame").first();
+    assert.strictEqual(await imageFrame.count(), 1, "expected the fixture image to render as an image block");
+    const filechooserPromise = page.waitForEvent("filechooser", { timeout: 3000 }).then(() => true).catch(() => false);
+    await imageFrame.dblclick();
+    assert.strictEqual(await filechooserPromise, true, "double-clicking an image should open the local file chooser to replace it");
+    await imageFrame.click();
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(300);
+    assert.strictEqual(await page.locator("#stageScale .xhs-image-frame").count(), 0, "Backspace should delete the selected image block");
+
     await page.locator("#pageTabs button").first().click();
     const coverSubtitle = page.locator(".cover-subtitle");
     await coverSubtitle.fill("");
@@ -499,7 +653,7 @@ async function main() {
     await page.click("#resetBtn");
     await page.waitForTimeout(500);
     assert.strictEqual((await page.locator(".cover-title").innerText()).trim(), "回归测试");
-    assert.strictEqual(await page.locator('[data-bg-theme="paper"]').evaluate((node) => node.classList.contains("active")), true);
+    assert.strictEqual(await page.locator('[data-bg-theme="white"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator('[data-paper-pattern="none"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#coverImageOnBtn").evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#bodyFontRange").inputValue(), "36");

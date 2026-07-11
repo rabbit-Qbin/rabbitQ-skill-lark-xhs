@@ -19,7 +19,13 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.7.21";
+const VERSION = "0.8.5";
+const DEFAULT_BG_THEME = "white";
+const DEFAULT_ACCENT_THEME = "blue";
+const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点";
+// Trailing !/！ (0-2) is part of the recognized token, e.g. "注意！！" / "提醒!!".
+const CARD_LABEL_TOKEN = `(?:${CARD_LABEL_WORDS})[!！]{0,2}`;
+const CARD_LABEL_EXACT = new RegExp(`^${CARD_LABEL_TOKEN}$`);
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -142,10 +148,13 @@ function extractTitle(markdown) {
   return "";
 }
 
+function unescapeMarkdownEscapes(value) {
+  return String(value || "").replace(/\\([\\`*_[\]{}()#+\-.!<>])/g, "$1");
+}
+
 function plainMarkdownText(value) {
   let text = String(value || "").trim();
-  text = text
-    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, "$1")
+  text = unescapeMarkdownEscapes(text)
     .replace(/`([^`]+)`/g, "$1");
   let changed = true;
   while (changed) {
@@ -165,13 +174,34 @@ function plainMarkdownText(value) {
 function inferCardLabel(text) {
   const plain = plainMarkdownText(text).replace(/\s+/g, "");
   if (!plain) return "卡片";
-  if (/注意|小心|切记|务必|千万|别忘|警告|风险|老外也不是傻子/.test(plain)) return "注意";
+  if (/注意|小心|切记|务必|千万|别忘|警告|风险|提醒/.test(plain)) return "注意";
   if (/结论|总之|归根|一句话|所以|这就是/.test(plain)) return "结论";
-  if (/金句|名言|记住|必杀|真诚才是/.test(plain)) return "金句";
-  if (/重点|关键|核心|真相|本质|问题不在于|真正有效/.test(plain)) return "划重点";
+  if (/金句|名言|记住|必杀/.test(plain)) return "金句";
+  if (/判断/.test(plain)) return "判断";
+  if (/关键/.test(plain)) return "关键";
+  if (/重点|划重点|高亮|核心|真相|本质/.test(plain)) return "划重点";
   if (plain.length <= 24 && /[。！？!?]$/.test(plain)) return "金句";
   if (plain.length <= 18) return "金句";
   return "划重点";
+}
+
+/** Rank heading depths used in the article (excluding cover title). Least # → L1, second least → L2. */
+function resolveHeadingRanks(body, title) {
+  const levels = new Set();
+  let skippedTitle = false;
+  for (const rawLine of String(body || "").replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.trim();
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (!heading) continue;
+    const text = plainMarkdownText(heading[2]);
+    if (!skippedTitle && title && text === title) {
+      skippedTitle = true;
+      continue;
+    }
+    levels.add(heading[1].length);
+  }
+  const ranks = [...levels].sort((a, b) => a - b);
+  return { level1: ranks[0] || null, level2: ranks[1] || null };
 }
 
 function slugify(value) {
@@ -310,8 +340,8 @@ function boldMarkdownHtml(content) {
 }
 
 function inlineMarkdownToHtml(text, markdownFile) {
-  let html = escapeHtml(text)
-    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, "$1")
+  const unescaped = unescapeMarkdownEscapes(text);
+  let html = escapeHtml(unescaped)
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, (_, content) => boldMarkdownHtml(content))
     .replace(/__([^_]+)__/g, (_, content) => boldMarkdownHtml(content))
@@ -402,7 +432,8 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
   let code = [];
   let inCode = false;
   let headingIndex = 0;
-  let inXhsGallery = false;
+  let skippedCoverTitle = false;
+  const headingRanks = resolveHeadingRanks(body, title);
 
   function pushParagraph() {
     if (!paragraph.length) return;
@@ -412,7 +443,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
     const strongStart = text.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)([\s\S]*)$/);
     const strongOnly = text.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)$/);
     const strongLabel = plainMarkdownText(strongStart?.[1] || "").replace(/[:：\s]+$/g, "");
-    const explicitCardStart = /^(?:高亮|划重点|卡片|注意|结论|金句|关键判断|关键提醒|重点)$/.test(strongLabel);
+    const explicitCardStart = CARD_LABEL_EXACT.test(strongLabel);
     if ((strongOnly || explicitCardStart) && plainMarkdownText(text).length >= 18) {
       const label = inferCardLabel(text);
       blocks.push(`<section data-xhs-block-type="callout" style="border-left:4px solid #57b560;background:#f4faf3;"><strong>${escapeHtml(label)}</strong><p>${inlineMarkdownToHtml(text, markdownFile)}</p></section>`);
@@ -523,15 +554,6 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
       continue;
     }
     const imgOnly = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
-    if (inXhsGallery) {
-      if (imgOnly) continue;
-      const galleryHeading = line.match(/^(#{1,6})\s+(.+)$/);
-      if (galleryHeading && !/小红书/i.test(plainMarkdownText(galleryHeading[2]))) {
-        inXhsGallery = false;
-      } else {
-        continue;
-      }
-    }
     if (imgOnly) {
       flushAll();
       pushImage(imgOnly[1], imgOnly[2]);
@@ -545,19 +567,24 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
     if (heading) {
       flushAll();
       const level = heading[1].length;
-      const text = plainMarkdownText(heading[2]);
-      if (level === 1 && /小红书/i.test(text)) {
-        inXhsGallery = true;
+      // Support closed ATX headings ("## 标题 ##"): a trailing #-run preceded
+      // by whitespace is decorative and not part of the title text.
+      const text = plainMarkdownText(heading[2].replace(/\s+#+$/, ""));
+      // Cover title already used for the cover page — don't repeat it in the body.
+      if (!skippedCoverTitle && title && text === title) {
+        skippedCoverTitle = true;
         continue;
       }
-      if (level === 1) {
-        blocks.push(`<section><strong>${escapeHtml(text)}</strong></section>`);
-      } else {
+      if (headingRanks.level1 != null && level === headingRanks.level1) {
         const explicit = text.match(/^(\d{1,2})[.、\s]+(.+)$/);
         const number = explicit ? String(Number(explicit[1])).padStart(2, "0") : String(++headingIndex).padStart(2, "0");
         if (explicit) headingIndex = Math.max(headingIndex, Number(explicit[1]));
         const titleText = explicit ? explicit[2].trim() : text;
-        blocks.push(`<section style="border-bottom:1px solid #d9e7d8;"><span>${number}</span><strong>${escapeHtml(titleText)}</strong></section>`);
+        blocks.push(`<section data-xhs-heading-level="1" style="border-bottom:1px solid #d9e7d8;"><span>${number}</span><strong>${escapeHtml(titleText)}</strong></section>`);
+      } else if (headingRanks.level2 != null && level === headingRanks.level2) {
+        blocks.push(`<section data-xhs-heading-level="2"><strong>${escapeHtml(text)}</strong></section>`);
+      } else {
+        blocks.push(`<section><strong>${escapeHtml(text)}</strong></section>`);
       }
       continue;
     }
@@ -704,15 +731,15 @@ function studioHtmlV2(payload, libs) {
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
       --xhs-font: ${songtiFont};
-      --xhs-shell-bg: #f1f4ef;
-      --xhs-card-bg: #fffdf8;
-      --xhs-accent: #5fa66a;
-      --xhs-accent-strong: #2f7d3b;
-      --xhs-accent-soft: rgba(95, 166, 106, .18);
-      --xhs-accent-pale: #f4faf3;
-      --xhs-underline: #b8ddb4;
-      --xhs-cover-bg: #fffdf8;
-      --xhs-cover-border: #b8ddb4;
+      --xhs-shell-bg: #f3f4f2;
+      --xhs-card-bg: #ffffff;
+      --xhs-accent: #4d7fd2;
+      --xhs-accent-strong: #2e5fb2;
+      --xhs-accent-soft: rgba(77, 127, 210, .16);
+      --xhs-accent-pale: #f3f7ff;
+      --xhs-underline: #b8cbee;
+      --xhs-cover-bg: #ffffff;
+      --xhs-cover-border: #b8cbee;
       --xhs-cover-placeholder: #8f948d;
     }
     html, body { margin: 0; min-height: 100%; background: var(--xhs-shell-bg); color: #111; }
@@ -752,7 +779,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
     .xhs-block { width: 100%; }
     .xhs-body-frame > div { min-height: 1.8em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
-    .xhs-p { margin: 0 0 0.88em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; }
+    .xhs-p { margin: 0 0 0.88em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
@@ -765,19 +792,21 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
     .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
-    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: flex; column-gap: 0; align-items: center; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
+    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: flex; column-gap: 0; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
     .xhs-heading-number { flex: 0 0 ${Math.round(headingNumberSize * 1.16)}px; width: ${Math.round(headingNumberSize * 1.16)}px; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
     .xhs-heading-space { display: none; }
     .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
-    .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); }
+    .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 0.5em; padding: 0; border-bottom: 0; }
+    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: #111; font-size: ${Math.round(headingTitleSize * 0.8)}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 1.5px solid #c8d6c6; border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
-    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
+    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-callout.xhs-card-frame { border-left: 0; border: 1.5px solid var(--xhs-underline); border-radius: 8px; background: var(--xhs-accent-pale); padding: 0.78em 0.9em; }
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
     .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: 720; }
-    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: var(--body-font); line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
-    .xhs-image-block { margin: 0 auto 1.1em; width: 100%; max-width: 100%; text-align: center; }
+    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: var(--body-font); line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-image-block { margin: 0 auto 1.1em; width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
     .selected-image-frame .xhs-resize-handle { display: block; }
@@ -785,7 +814,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-resize-handle.handle-s { left: 50%; bottom: 4px; width: 58px; height: 14px; transform: translateX(-50%); border-radius: 999px; cursor: ns-resize; }
     .xhs-resize-handle.handle-se { right: 4px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; cursor: nwse-resize; }
     .resizing-image-frame { cursor: nwse-resize; }
-    .xhs-image-grid { display: grid; gap: ${imageGridGap}px; margin: 0 0 1.1em; align-items: start; justify-items: center; text-align: center; }
+    .xhs-image-grid { display: grid; gap: ${imageGridGap}px; margin: 0 0 1.1em; align-items: start; justify-items: center; text-align: center; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
@@ -793,11 +822,11 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-reason-stack.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
-    .xhs-reason-stack { margin: 0 0 1.1em; padding: 0.46em; background: var(--xhs-accent-pale); border: 1px solid var(--xhs-underline); border-radius: 10px; display: grid; gap: 0.34em; font-size: var(--body-font); line-height: var(--body-line); }
-    .xhs-reason-card { display: grid; grid-template-columns: 0.66em 1fr; column-gap: 0.52em; align-items: start; padding: 0.58em 0.62em 0.62em; background: #fff; border: 1px solid var(--xhs-underline); border-radius: 8px; }
+    .xhs-reason-stack { margin: 0 0 1.1em; padding: 0.46em; background: var(--xhs-accent-pale); border: 1px solid var(--xhs-underline); border-radius: 10px; display: grid; gap: 0.34em; font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-reason-card { display: grid; grid-template-columns: 0.66em 1fr; column-gap: 0.52em; align-items: start; padding: 0.58em 0.62em 0.62em; background: #fff; border: 1px solid var(--xhs-underline); border-radius: 8px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-reason-dot { width: 0.46em; height: 0.46em; margin-top: 0.54em; border-radius: 50%; background: var(--xhs-accent); }
     .xhs-reason-number { display: inline-grid; place-items: center; color: var(--xhs-accent-strong); font-size: .76em; line-height: 1.28; font-weight: 950; margin-top: .22em; }
-    .xhs-reason-text { min-width: 0; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
+    .xhs-reason-text { min-width: 0; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-reason-text span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
     .xhs-table-block { margin: 0 0 1.02em; width: 100%; max-width: var(--body-text-width); overflow: hidden; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
     .xhs-table { width: 100%; border-collapse: collapse; table-layout: fixed; background: #fff; color: #111; font-size: ${Math.max(24, Math.round(bodyFontSize * 0.75))}px; line-height: 1.48; }
@@ -807,7 +836,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-table tbody tr:last-child td { border-bottom: 2px solid var(--xhs-underline); }
     .xhs-table strong, .xhs-table b { font-weight: 900; }
     .xhs-table em { font-style: italic; }
-    .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
+    .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout .xhs-green-text { color: #111; font-weight: 900; }
@@ -844,14 +873,13 @@ function studioHtmlV2(payload, libs) {
       ${warnings.length ? `<div class="notice">原稿里有 ${warnings.length} 个视频链接。小红书图文卡片这里只放图片，视频已跳过；需要视频请在小红书发布页单独上传，或先截帧/转图片再放入卡片。</div>` : ""}
       <div class="toolbar">
         <button id="boldBtn" class="dark">B 加粗</button>
-        <button id="headingBtn">子标题</button>
+        <button id="headingBtn1">一级标题</button>
+        <button id="headingBtn2">二级标题</button>
         <button id="italicBtn">引用块</button>
         <button id="greenTextBtn">有色字</button>
         <button id="greenUnderlineBtn">下划线</button>
         <button id="keypointBtn">卡片</button>
         <button id="listBtn">序列</button>
-        <button id="replaceImageBtn">替换选中图片</button>
-        <button id="deleteImageBtn">删除选中图片</button>
         <button id="saveHtmlBtn">保存编辑 HTML</button>
         <button id="exportBtn" class="primary">批量导出 PNG ZIP</button>
         <button id="resetBtn" title="清除当前编辑，恢复生成时的初始内容">一键复原</button>
@@ -889,8 +917,8 @@ function studioHtmlV2(payload, libs) {
         </div>
         <p class="tool-title">背景主题</p>
         <div class="theme-grid">
-          <button data-bg-theme="paper" class="active">米白</button>
-          <button data-bg-theme="white">纯白</button>
+          <button data-bg-theme="white" class="active">纯白</button>
+          <button data-bg-theme="paper">米白</button>
           <button data-bg-theme="mint">薄荷</button>
           <button data-bg-theme="gray">浅灰</button>
           <button data-bg-theme="sand">煎黄</button>
@@ -898,8 +926,8 @@ function studioHtmlV2(payload, libs) {
         </div>
         <p class="tool-title">强调色</p>
         <div class="theme-grid">
-          <button data-accent-theme="green" class="active">翠绿</button>
-          <button data-accent-theme="blue">知蓝</button>
+          <button data-accent-theme="blue" class="active">知蓝</button>
+          <button data-accent-theme="green">翠绿</button>
           <button data-accent-theme="pink">莓粉</button>
           <button data-accent-theme="teal">青缎</button>
           <button data-accent-theme="orange">活力橙</button>
@@ -1039,7 +1067,8 @@ function studioHtmlV2(payload, libs) {
     const fitContainBtn = document.getElementById('fitContainBtn');
     const fitCoverBtn = document.getElementById('fitCoverBtn');
     const italicBtn = document.getElementById('italicBtn');
-    const headingBtn = document.getElementById('headingBtn');
+    const headingBtn1 = document.getElementById('headingBtn1');
+    const headingBtn2 = document.getElementById('headingBtn2');
     const greenTextBtn = document.getElementById('greenTextBtn');
     const greenUnderlineBtn = document.getElementById('greenUnderlineBtn');
     const keypointBtn = document.getElementById('keypointBtn');
@@ -1054,7 +1083,6 @@ function studioHtmlV2(payload, libs) {
     const coverThemeButtons = Array.from(document.querySelectorAll('[data-cover-theme]'));
     const paperPatternButtons = Array.from(document.querySelectorAll('[data-paper-pattern]'));
     const cardStyleButtons = Array.from(document.querySelectorAll('[data-card-style]'));
-    const deleteImageBtn = document.getElementById('deleteImageBtn');
     const fontWechatBtn = document.getElementById('fontWechatBtn');
     const fontSongtiBtn = document.getElementById('fontSongtiBtn');
     const coverTitleRange = document.getElementById('coverTitleRange');
@@ -1090,8 +1118,10 @@ function studioHtmlV2(payload, libs) {
       orange: { accent: '#d99542', strong: '#b66b18', soft: 'rgba(217,149,66,.16)', pale: '#fff8ec', underline: '#edcea3' },
       purple: { accent: '#9676d8', strong: '#6d4ab3', soft: 'rgba(150,118,216,.16)', pale: '#f8f5ff', underline: '#cfbfef' },
     };
-    let currentBgTheme = 'paper';
-    let currentAccentTheme = 'green';
+    const DEFAULT_BG_THEME = '${DEFAULT_BG_THEME}';
+    const DEFAULT_ACCENT_THEME = '${DEFAULT_ACCENT_THEME}';
+    let currentBgTheme = DEFAULT_BG_THEME;
+    let currentAccentTheme = DEFAULT_ACCENT_THEME;
     let currentCoverTheme = 'background';
     let currentPaperPattern = 'none';
     let currentCardStyle = 'bar';
@@ -1163,10 +1193,12 @@ function studioHtmlV2(payload, libs) {
     function inferCardLabel(text) {
       const plain = cleanText(text).replace(/\\s+/g, '');
       if (!plain) return '卡片';
-      if (/注意|小心|切记|务必|千万|别忘|警告|风险/.test(plain)) return '注意';
+      if (/注意|小心|切记|务必|千万|别忘|警告|风险|提醒/.test(plain)) return '注意';
       if (/结论|总之|归根|一句话|所以|这就是/.test(plain)) return '结论';
-      if (/金句|名言|记住|必杀|真诚才是/.test(plain)) return '金句';
-      if (/重点|关键|核心|真相|本质|问题不在于|真正有效/.test(plain)) return '划重点';
+      if (/金句|名言|记住|必杀/.test(plain)) return '金句';
+      if (/判断/.test(plain)) return '判断';
+      if (/关键/.test(plain)) return '关键';
+      if (/重点|划重点|高亮|核心|真相|本质/.test(plain)) return '划重点';
       if (plain.length <= 24 && /[。！？!?]$/.test(plain)) return '金句';
       if (plain.length <= 18) return '金句';
       return '划重点';
@@ -1362,7 +1394,7 @@ function studioHtmlV2(payload, libs) {
     function stripCalloutBodyLabelPrefix(root) {
       if (!root) return false;
       const text = String(root.textContent || '');
-      const match = text.match(/^\\s*(?:高亮|划重点|卡片|注意|结论|金句|关键判断|关键提醒|重点)(?:\\s*[:：]\\s*|\\s*[—–-]\\s*|\\s+)/);
+      const match = text.match(/^\\s*${CARD_LABEL_TOKEN}(?:\\s*[:：]\\s*|\\s*[—–-]\\s*|\\s+)/);
       if (!match) return false;
       let remaining = match[0].length;
       const textNodes = [];
@@ -1447,8 +1479,19 @@ function studioHtmlV2(payload, libs) {
       });
       heading.after(merged);
     }
+    function detectHeadingLevel(heading) {
+      if (heading?.dataset?.level === '2') return '2';
+      if (heading?.dataset?.xhsHeadingLevel === '2') return '2';
+      return '1';
+    }
     function parseHeadingParts(heading) {
       hoistStrayHeadingContent(heading);
+      const level = detectHeadingLevel(heading);
+      if (level === '2') {
+        const titleEl = heading.querySelector('.xhs-heading-title') || heading.querySelector('strong');
+        const titleText = titleEl ? cleanText(textWithBreaksPreservingSpaces(titleEl)) : cleanText(heading.textContent);
+        return { number: '', titleText, level };
+      }
       const numberEl = heading.querySelector('.xhs-heading-number') ||
         Array.from(heading.children).find((child) => /^\\d{2}$/.test(cleanText(child.textContent)));
       const titleEl = heading.querySelector('.xhs-heading-title') || heading.querySelector('strong');
@@ -1465,11 +1508,12 @@ function studioHtmlV2(payload, libs) {
       if (cleanText(titleFromEl)) titleText = stripHeadingNumberPrefix(titleFromEl, number);
       else if (spaced) titleText = spaced[2].trim();
       else titleText = stripHeadingNumberPrefix(raw, number);
-      return { number, titleText };
+      return { number, titleText, level: '1' };
     }
     function isHeadingBlock(el) {
       if (el.querySelector('img')) return false;
       if (el.classList?.contains('xhs-heading')) return true;
+      if (el.dataset?.xhsHeadingLevel === '1' || el.dataset?.xhsHeadingLevel === '2') return true;
       const style = el.getAttribute('style') || '';
       const tag = (el.tagName || '').toLowerCase();
       if (/^h[2-6]$/.test(tag)) return true;
@@ -1481,27 +1525,33 @@ function studioHtmlV2(payload, libs) {
       const titleChild = directChildren.find((child) => child.tagName?.toLowerCase() === 'strong' && cleanText(child.textContent));
       return Boolean(numberChild && titleChild);
     }
-    function headingHtml(number, titleText) {
+    function headingHtml(number, titleText, level) {
+      if (String(level) === '2') {
+        const safeTitle = String(titleText || '').trim();
+        return '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + escWithBreaks(safeTitle) + '</span>';
+      }
       const safeNumber = String(number || '00').match(/^(\\d{2})/)?.[1] || '00';
       const safeTitle = stripHeadingNumberPrefix(titleText, safeNumber);
       return '<span class="xhs-heading-number" contenteditable="true" spellcheck="false">' + esc(safeNumber) + '</span>' +
         '<span class="xhs-heading-space" aria-hidden="true">&nbsp;</span>' +
         '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + escWithBreaks(safeTitle) + '</span>';
     }
-    function makeNewHeadingBlock(number = '00', titleText = '') {
+    function makeNewHeadingBlock(number = '00', titleText = '', level = '1') {
       const block = makeElement('section', 'xhs-heading xhs-block');
       block.setAttribute('contenteditable', 'false');
-      block.innerHTML = headingHtml(number, titleText);
+      block.dataset.level = String(level) === '2' ? '2' : '1';
+      block.innerHTML = headingHtml(number, titleText, block.dataset.level);
       return block;
     }
     function headingFromElement(el) {
-      const { number, titleText } = parseHeadingParts(el);
-      return makeNewHeadingBlock(number, titleText);
+      const { number, titleText, level } = parseHeadingParts(el);
+      return makeNewHeadingBlock(number, titleText, level);
     }
     function normalizeHeadingBlock(heading) {
-      const { number, titleText } = parseHeadingParts(heading);
+      const { number, titleText, level } = parseHeadingParts(heading);
       heading.setAttribute('contenteditable', 'false');
-      heading.innerHTML = headingHtml(number, titleText);
+      heading.dataset.level = level;
+      heading.innerHTML = headingHtml(number, titleText, level);
     }
     function activeHeadingEditField() {
       const sel = window.getSelection();
@@ -1571,12 +1621,12 @@ function studioHtmlV2(payload, libs) {
       const text = cleanText(el.textContent);
       const first = cleanText(el.firstElementChild?.textContent || '');
       const style = el.getAttribute('style') || '';
-      return /高亮|划重点|卡片|注意|结论|金句|关键判断|关键提醒|重点/.test(first || text) || /border-left\\s*:\\s*4px[^;]*#57b560/i.test(style);
+      return /${CARD_LABEL_WORDS}/.test(first || text) || /border-left\\s*:\\s*4px[^;]*#57b560/i.test(style);
     }
     function calloutFromElement(el) {
       const children = Array.from(el.children);
       const firstText = cleanText(children[0]?.textContent || '');
-      const hasExplicitLabel = /^(高亮|划重点|卡片|注意|结论|金句|关键判断|关键提醒|重点)$/.test(firstText);
+      const hasExplicitLabel = /^(${CARD_LABEL_TOKEN})$/.test(firstText);
       const bodyChildren = hasExplicitLabel ? children.slice(1) : children;
       const rawBodyHtml = bodyChildren.length
         ? bodyChildren.map((child) => normalizeInlineHtml(child.innerHTML || child.textContent)).join('')
@@ -2368,7 +2418,7 @@ function studioHtmlV2(payload, libs) {
           wrapBodyTextLines(block);
           let h = measureBlock(block);
           let remaining = config.pageLimit - used;
-          if (current.length && block.classList.contains('xhs-heading') && remaining < 160) {
+          if (current.length && block.classList.contains('xhs-heading') && block.dataset.level !== '2' && remaining < 160) {
             pushPage();
             remaining = config.pageLimit;
           }
@@ -3429,9 +3479,12 @@ function studioHtmlV2(payload, libs) {
       ctx.restore();
     }
     function fitHeadingTitles(root = stageScale) {
+      const base = Number(config.headingTitleSize || 48);
+      const lv2Size = Math.round(base * 0.8);
       root.querySelectorAll('.xhs-heading-title').forEach((title) => {
-        const base = Number(config.headingTitleSize || 48);
-        title.style.fontSize = base + 'px';
+        const heading = title.closest('.xhs-heading');
+        const isLv2 = detectHeadingLevel(heading) === '2';
+        title.style.fontSize = (isLv2 ? lv2Size : base) + 'px';
         title.style.whiteSpace = 'pre-wrap';
       });
     }
@@ -3866,8 +3919,8 @@ function studioHtmlV2(payload, libs) {
       layoutReflowTimer = window.setTimeout(reflow, 280);
     }
     function applyBackgroundTheme(key, shouldSave = true) {
-      const theme = BG_THEMES[key] || BG_THEMES.paper;
-      currentBgTheme = BG_THEMES[key] ? key : 'paper';
+      const theme = BG_THEMES[key] || BG_THEMES[DEFAULT_BG_THEME];
+      currentBgTheme = BG_THEMES[key] ? key : DEFAULT_BG_THEME;
       const root = document.documentElement.style;
       root.setProperty('--xhs-shell-bg', theme.shell);
       root.setProperty('--xhs-card-bg', theme.card);
@@ -3876,8 +3929,8 @@ function studioHtmlV2(payload, libs) {
       if (shouldSave) saveCurrentPage();
     }
     function applyAccentTheme(key, shouldSave = true) {
-      const theme = ACCENT_THEMES[key] || ACCENT_THEMES.green;
-      currentAccentTheme = ACCENT_THEMES[key] ? key : 'green';
+      const theme = ACCENT_THEMES[key] || ACCENT_THEMES[DEFAULT_ACCENT_THEME];
+      currentAccentTheme = ACCENT_THEMES[key] ? key : DEFAULT_ACCENT_THEME;
       const root = document.documentElement.style;
       root.setProperty('--xhs-accent', theme.accent);
       root.setProperty('--xhs-accent-strong', theme.strong);
@@ -3891,8 +3944,8 @@ function studioHtmlV2(payload, libs) {
     }
     function applyCoverTheme(key, shouldSave = true) {
       currentCoverTheme = key || 'background';
-      const bg = BG_THEMES[currentBgTheme] || BG_THEMES.paper;
-      const accent = ACCENT_THEMES[currentAccentTheme] || ACCENT_THEMES.green;
+      const bg = BG_THEMES[currentBgTheme] || BG_THEMES[DEFAULT_BG_THEME];
+      const accent = ACCENT_THEMES[currentAccentTheme] || ACCENT_THEMES[DEFAULT_ACCENT_THEME];
       const root = document.documentElement.style;
       if (currentCoverTheme === 'accent') {
         root.setProperty('--xhs-cover-bg', accent.underline);
@@ -4211,27 +4264,139 @@ function studioHtmlV2(payload, libs) {
     function blockNestHost(node) {
       return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-reason-text');
     }
-    function makeHeadingBlock() {
+    function nextAutoHeadingNumber() {
+      const existingLevel1 = stageScale.querySelectorAll('.xhs-heading[data-level="1"], .xhs-heading:not([data-level])');
+      return String(existingLevel1.length + 1).padStart(2, '0');
+    }
+    // Shared cross-switch model for the four flow-block style buttons
+    // (一级标题 / 二级标题 / 引用块 / 卡片 / 序列): placing the caret inside
+    // any one of them and clicking a different button's style converts the
+    // block in place; clicking the same style again converts it back to
+    // plain paragraph(s).
+    function activeFlowBlockAt(node) {
+      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      if (!el || !stageScale.contains(el)) return null;
+      const heading = el.closest('.xhs-heading');
+      if (heading) return { type: 'heading', level: detectHeadingLevel(heading), el: heading };
+      const quote = el.closest('.xhs-quote');
+      if (quote) return { type: 'quote', el: quote };
+      const callout = el.closest('.xhs-callout');
+      if (callout) return { type: 'card', el: callout };
+      const list = el.closest('.xhs-reason-stack');
+      if (list) return { type: 'list', el: list };
+      return null;
+    }
+    function flowBlockContentHtml(info) {
+      if (!info) return '';
+      if (info.type === 'heading') {
+        const title = info.el.querySelector('.xhs-heading-title');
+        return title ? title.innerHTML : info.el.innerHTML;
+      }
+      if (info.type === 'card') {
+        const body = info.el.querySelector('.xhs-callout-body');
+        return body ? body.innerHTML : info.el.innerHTML;
+      }
+      if (info.type === 'list') {
+        return Array.from(info.el.querySelectorAll('.xhs-reason-text')).map((node) => node.innerHTML).join('<br>');
+      }
+      return info.el.innerHTML;
+    }
+    function flowBlockPlainText(info) {
+      if (!info) return '';
+      if (info.type === 'heading') {
+        const title = info.el.querySelector('.xhs-heading-title');
+        return textWithBreaks(title || info.el);
+      }
+      if (info.type === 'card') {
+        const body = info.el.querySelector('.xhs-callout-body');
+        return textWithBreaks(body || info.el);
+      }
+      if (info.type === 'list') {
+        return Array.from(info.el.querySelectorAll('.xhs-reason-text')).map((node) => textWithBreaks(node)).join('\\n');
+      }
+      return textWithBreaks(info.el);
+    }
+    function buildFlowBlockFromContent(targetType, targetLevel, info) {
+      if (targetType === 'heading') {
+        const plain = stripHeadingNumberPrefix(flowBlockPlainText(info), '00');
+        const number = targetLevel === '1' ? nextAutoHeadingNumber() : '';
+        return makeNewHeadingBlock(number, plain, targetLevel);
+      }
+      if (targetType === 'quote') {
+        const block = document.createElement('section');
+        block.className = 'xhs-quote xhs-block';
+        block.innerHTML = normalizeInlineHtml(flowBlockContentHtml(info));
+        return block;
+      }
+      if (targetType === 'card') {
+        const label = inferCardLabel(cleanText(flowBlockPlainText(info)));
+        const block = document.createElement('section');
+        block.className = 'xhs-callout xhs-block' + (currentCardStyle === 'frame' ? ' xhs-card-frame' : '');
+        block.innerHTML = '<div class="xhs-callout-label">' + esc(label) + '</div><div class="xhs-callout-body">' +
+          cleanCalloutBodyHtml(flowBlockContentHtml(info)) + '</div>';
+        return block;
+      }
+      if (targetType === 'list') {
+        const html = stripListMarkerFromHtml(normalizeInlineHtml(flowBlockContentHtml(info)));
+        const plain = stripLeadingListMarkerText(cleanText(flowBlockPlainText(info)));
+        return buildReasonStack([{ html, plain }], 'unordered');
+      }
+      return null;
+    }
+    function focusFlowBlock(block) {
+      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-reason-text') || block;
+      if (target) setCaretInside(target);
+    }
+    function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
+      const selection = window.getSelection();
+      const info = activeFlowBlockAt(selection?.anchorNode);
+      if (!info) return false;
+      const sameType = info.type === targetType && (targetType !== 'heading' || info.level === targetLevel);
+      if (sameType) {
+        if (info.type === 'list') {
+          const frag = document.createDocumentFragment();
+          info.el.querySelectorAll('.xhs-reason-text').forEach((node) => {
+            const p = document.createElement('p');
+            p.className = 'xhs-p xhs-block';
+            p.innerHTML = node.innerHTML;
+            frag.appendChild(p);
+          });
+          const firstP = frag.firstElementChild;
+          info.el.replaceWith(frag);
+          selection?.removeAllRanges();
+          if (firstP) setCaretInside(firstP);
+        } else {
+          const p = document.createElement('p');
+          p.className = 'xhs-p xhs-block';
+          p.innerHTML = flowBlockContentHtml(info);
+          info.el.replaceWith(p);
+          selection?.removeAllRanges();
+          setCaretInside(p);
+        }
+      } else {
+        const replacement = buildFlowBlockFromContent(targetType, targetLevel, info);
+        if (!replacement) return false;
+        info.el.replaceWith(replacement);
+        selection?.removeAllRanges();
+        focusFlowBlock(replacement);
+      }
+      normalizeNestedFlowBlocks(stageScale);
+      saveCurrentPage();
+      scheduleOverflowReflow(true);
+      return true;
+    }
+    function makeHeadingBlock(level = '1') {
+      const targetLevel = String(level) === '2' ? '2' : '1';
       const editable = stageScale.querySelector('.xhs-body-card .xhs-body-frame') ||
         stageScale.querySelector('.xhs-cover-tail-frame');
       if (!editable) return;
+      if (tryToggleOrSwitchFlowBlock('heading', targetLevel)) return;
       const item = getStageSelection();
-      const heading = makeNewHeadingBlock('00', '');
+      const heading = makeNewHeadingBlock(targetLevel === '1' ? nextAutoHeadingNumber() : '', '', targetLevel);
       if (item && !item.range.collapsed) {
         const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
           ? item.range.commonAncestorContainer
           : item.range.commonAncestorContainer.parentElement;
-        const existing = parent?.closest?.('.xhs-heading');
-        if (existing && stageScale.contains(existing) && rangeCoversEntireBlock(item.range, existing)) {
-          const p = document.createElement('p');
-          p.className = 'xhs-p xhs-block';
-          p.innerHTML = existing.querySelector('.xhs-heading-title')?.innerHTML || existing.textContent;
-          existing.replaceWith(p);
-          item.selection.removeAllRanges();
-          saveCurrentPage();
-          scheduleOverflowReflow(true);
-          return;
-        }
         const fragment = item.range.extractContents();
         const holder = document.createElement('div');
         holder.appendChild(fragment);
@@ -4254,21 +4419,7 @@ function studioHtmlV2(payload, libs) {
       scheduleOverflowReflow(true);
     }
     function makeKeypointBlock() {
-      const activeSelection = window.getSelection();
-      const activeNode = activeSelection?.anchorNode;
-      const activeElement = activeNode?.nodeType === Node.ELEMENT_NODE ? activeNode : activeNode?.parentElement;
-      const activeCallout = activeElement?.closest?.('.xhs-callout');
-      if (activeCallout && stageScale.contains(activeCallout)) {
-        const p = document.createElement('p');
-        p.className = 'xhs-p xhs-block';
-        p.innerHTML = activeCallout.querySelector('.xhs-callout-body')?.innerHTML || activeCallout.textContent;
-        activeCallout.replaceWith(p);
-        activeSelection?.removeAllRanges();
-        setCaretInside(p);
-        saveCurrentPage();
-        scheduleOverflowReflow(true);
-        return;
-      }
+      if (tryToggleOrSwitchFlowBlock('card')) return;
       const item = getStageSelection();
       if (!item) {
         alert('请先选中要放进卡片的文字。');
@@ -4322,6 +4473,7 @@ function studioHtmlV2(payload, libs) {
       saveCurrentPage();
     }
     function italicSelection() {
+      if (tryToggleOrSwitchFlowBlock('quote')) return;
       const item = getStageSelection();
       if (!item) {
         alert('请先选中要变成引用块的文字。');
@@ -4330,17 +4482,6 @@ function studioHtmlV2(payload, libs) {
       const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? item.range.commonAncestorContainer
         : item.range.commonAncestorContainer.parentElement;
-      const existing = parent?.closest?.('.xhs-quote');
-      if (existing && stageScale.contains(existing) && rangeCoversEntireBlock(item.range, existing)) {
-        const p = document.createElement('p');
-        p.className = 'xhs-p xhs-block';
-        p.innerHTML = existing.innerHTML || existing.textContent;
-        existing.replaceWith(p);
-        item.selection.removeAllRanges();
-        saveCurrentPage();
-        scheduleOverflowReflow(true);
-        return;
-      }
       if (blockNestHost(parent)) {
         alert('卡片/序列内不能再套引用块，请用加粗、有色字或下划线强调。');
         return;
@@ -4432,6 +4573,7 @@ function studioHtmlV2(payload, libs) {
       return stack;
     }
     function makeListBlock() {
+      if (tryToggleOrSwitchFlowBlock('list')) return;
       const item = getStageSelection();
       if (!item) {
         alert('请先选中要变成序列的文字。');
@@ -4440,21 +4582,6 @@ function studioHtmlV2(payload, libs) {
       const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? item.range.commonAncestorContainer
         : item.range.commonAncestorContainer.parentElement;
-      const existing = parent?.closest?.('.xhs-reason-stack');
-      if (existing && stageScale.contains(existing) && rangeCoversEntireBlock(item.range, existing)) {
-        const frag = document.createDocumentFragment();
-        existing.querySelectorAll('.xhs-reason-text').forEach((node) => {
-          const p = document.createElement('p');
-          p.className = 'xhs-p xhs-block';
-          p.innerHTML = node.innerHTML || node.textContent;
-          frag.appendChild(p);
-        });
-        existing.replaceWith(frag);
-        item.selection.removeAllRanges();
-        saveCurrentPage();
-        scheduleOverflowReflow(true);
-        return;
-      }
       const collected = collectListItemsFromSelection(item);
       if (!collected.items.length) {
         alert('请先选中至少一行文字。多段/多行会拆成多条序列。');
@@ -4701,8 +4828,8 @@ function studioHtmlV2(payload, libs) {
         bodyLineRange.value = String(Math.round(initialLayout.bodyLineHeight * 100));
         bodyPadXRange.value = String(initialLayout.bodyPadX);
         bodyPadYRange.value = String(initialLayout.bodyPadTop);
-        applyBackgroundTheme('paper', false);
-        applyAccentTheme('green', false);
+        applyBackgroundTheme(DEFAULT_BG_THEME, false);
+        applyAccentTheme(DEFAULT_ACCENT_THEME, false);
         applyCoverTheme('background', false);
         applyPaperPattern('none', false);
         applyCardStyle('bar', false);
@@ -4738,8 +4865,8 @@ function studioHtmlV2(payload, libs) {
           if (state.controls.bodyPadX) bodyPadXRange.value = state.controls.bodyPadX;
           if (state.controls.bodyPadY) bodyPadYRange.value = state.controls.bodyPadY;
         }
-        applyBackgroundTheme(state.currentBgTheme || 'paper', false);
-        applyAccentTheme(state.currentAccentTheme || 'green', false);
+        applyBackgroundTheme(state.currentBgTheme || DEFAULT_BG_THEME, false);
+        applyAccentTheme(state.currentAccentTheme || DEFAULT_ACCENT_THEME, false);
         applyCoverTheme(state.currentCoverTheme || 'background', false);
         applyPaperPattern(state.currentPaperPattern || 'none', false);
         applyCardStyle(state.currentCardStyle || 'bar', false);
@@ -4802,15 +4929,15 @@ function studioHtmlV2(payload, libs) {
     function currentThemeSnapshot() {
       const styles = getComputedStyle(document.documentElement);
       return {
-        cardBg: styles.getPropertyValue('--xhs-card-bg').trim() || '#fffdf8',
-        coverBg: styles.getPropertyValue('--xhs-cover-bg').trim() || styles.getPropertyValue('--xhs-card-bg').trim() || '#fffdf8',
-        coverBorder: styles.getPropertyValue('--xhs-cover-border').trim() || styles.getPropertyValue('--xhs-underline').trim() || '#b8ddb4',
+        cardBg: styles.getPropertyValue('--xhs-card-bg').trim() || '#ffffff',
+        coverBg: styles.getPropertyValue('--xhs-cover-bg').trim() || styles.getPropertyValue('--xhs-card-bg').trim() || '#ffffff',
+        coverBorder: styles.getPropertyValue('--xhs-cover-border').trim() || styles.getPropertyValue('--xhs-underline').trim() || '#b8cbee',
         coverPlaceholder: styles.getPropertyValue('--xhs-cover-placeholder').trim() || '#8f948d',
-        accent: styles.getPropertyValue('--xhs-accent').trim() || '#5fa66a',
-        accentStrong: styles.getPropertyValue('--xhs-accent-strong').trim() || '#2f7d3b',
-        accentSoft: styles.getPropertyValue('--xhs-accent-soft').trim() || 'rgba(95,166,106,.18)',
-        accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f4faf3',
-        underline: styles.getPropertyValue('--xhs-underline').trim() || '#b8ddb4',
+        accent: styles.getPropertyValue('--xhs-accent').trim() || '#4d7fd2',
+        accentStrong: styles.getPropertyValue('--xhs-accent-strong').trim() || '#2e5fb2',
+        accentSoft: styles.getPropertyValue('--xhs-accent-soft').trim() || 'rgba(77,127,210,.16)',
+        accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f3f7ff',
+        underline: styles.getPropertyValue('--xhs-underline').trim() || '#b8cbee',
       };
     }
     function prepareCardForExport(card) {
@@ -4968,11 +5095,12 @@ function studioHtmlV2(payload, libs) {
       const frame = rememberedBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);
     }
-    [document.getElementById('boldBtn'), italicBtn, headingBtn, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
+    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
       button.addEventListener('mousedown', (event) => event.preventDefault());
     });
     document.getElementById('boldBtn').addEventListener('click', boldSelection);
-    headingBtn.addEventListener('click', makeHeadingBlock);
+    headingBtn1.addEventListener('click', () => makeHeadingBlock('1'));
+    headingBtn2.addEventListener('click', () => makeHeadingBlock('2'));
     italicBtn.addEventListener('click', italicSelection);
     greenTextBtn.addEventListener('click', applyGreenText);
     greenUnderlineBtn.addEventListener('click', applyGreenUnderline);
@@ -4995,8 +5123,6 @@ function studioHtmlV2(payload, libs) {
     [bodyFontRange, bodyLineRange, bodyPadXRange, bodyPadYRange].forEach((input) => {
       input.addEventListener('input', () => applyLayout(true));
     });
-    document.getElementById('replaceImageBtn').addEventListener('click', replaceImage);
-    deleteImageBtn.addEventListener('click', deleteImage);
     document.getElementById('saveHtmlBtn').addEventListener('click', saveEditedHtml);
     document.getElementById('exportBtn').addEventListener('click', exportZip);
     document.getElementById('resetBtn').addEventListener('click', resetStudioToInitial);
@@ -5013,8 +5139,11 @@ function studioHtmlV2(payload, libs) {
     document.addEventListener('keydown', (event) => {
       if (!selectedFrame) return;
       const target = event.target;
-      if (target?.closest?.('input, textarea, select')) return;
-      if (target?.isContentEditable || target?.closest?.('[contenteditable="true"]')) return;
+      const withinSelectedFrame = target === selectedFrame || selectedFrame.contains(target);
+      if (!withinSelectedFrame) {
+        if (target?.closest?.('input, textarea, select')) return;
+        if (target?.isContentEditable || target?.closest?.('[contenteditable="true"]')) return;
+      }
       if (event.key === 'Backspace' || event.key === 'Delete') {
         event.preventDefault();
         deleteImage();
@@ -5030,8 +5159,8 @@ function studioHtmlV2(payload, libs) {
     });
     window.addEventListener('resize', fitStage);
     if (!restoreSavedStudioState()) {
-      applyBackgroundTheme('paper', false);
-      applyAccentTheme('green', false);
+      applyBackgroundTheme(DEFAULT_BG_THEME, false);
+      applyAccentTheme(DEFAULT_ACCENT_THEME, false);
       applyPaperPattern('none', false);
       applyCardStyle('bar', false);
       applyLayout(false);
