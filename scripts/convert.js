@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.7.20";
+const VERSION = "0.7.21";
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 90;
@@ -2773,7 +2773,11 @@ function studioHtmlV2(payload, libs) {
       const page = pages[pageIndex];
       const card = stageScale.querySelector('.xhs-card');
       if (!page || !card) return;
-      if (page.type !== 'cover') {
+      // Non-cover pages are entirely body content. Cover pages only need this
+      // when they carry a body-like tail frame (cover image off, overflow
+      // content flows into the cover tail frame) — otherwise these calls are
+      // harmless no-ops since there is no body frame or heading to find.
+      if (page.type !== 'cover' || card.querySelector('.xhs-cover-tail-frame')) {
         normalizeLooseImages(card);
         normalizeHeadings(card);
         normalizeEditableBodyBlocks(card);

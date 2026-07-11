@@ -129,6 +129,49 @@ async function main() {
     const flowOrderAfterCoverToggle = await collectFlowOrder();
     assert.deepStrictEqual(flowOrderAfterCoverToggle, flowOrderBeforeCoverToggle);
 
+    // Regression: deleting a leading manual-blank line inside the cover's
+    // tail frame (shown when the cover image is off) must actually remove
+    // it instead of leaving behind a phantom empty caret-anchor paragraph.
+    await page.locator("#pageTabs button").first().click();
+    await page.click("#coverImageOffBtn");
+    await page.waitForTimeout(500);
+    const tailFrameHeadingCount = await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").count();
+    assert.ok(tailFrameHeadingCount > 0, "expected a heading to flow into the cover tail frame");
+    await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").first().evaluate((heading) => {
+      const blank = document.createElement("p");
+      blank.className = "xhs-p xhs-block xhs-manual-blank";
+      blank.innerHTML = "<br>";
+      heading.before(blank);
+      const frame = heading.closest('[contenteditable="true"]');
+      frame?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(blank);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(800);
+    const tailFrameBlankState = await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => ({
+      manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
+      caretAnchorCount: frame.querySelectorAll(".xhs-caret-anchor").length,
+      firstChildIsHeading: frame.firstElementChild?.classList.contains("xhs-heading") || false,
+    }));
+    assert.strictEqual(tailFrameBlankState.manualBlankCount, 0);
+    assert.strictEqual(tailFrameBlankState.caretAnchorCount, 0);
+    assert.strictEqual(tailFrameBlankState.firstChildIsHeading, true);
+    // Persisted state (survives switching pages away and back) must stay clean too.
+    await page.locator("#pageTabs button").nth(1).click();
+    await page.waitForTimeout(100);
+    await page.locator("#pageTabs button").first().click();
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => (
+      frame.querySelectorAll(".xhs-caret-anchor, .xhs-manual-blank").length
+    )), 0);
+    await page.click("#coverImageOnBtn");
+    await page.waitForTimeout(500);
+
     const pageCount = await page.locator("#pageTabs button").count();
     const content = { quotes: [], callouts: [], labels: [], lists: [], tables: [] };
     let calloutPageIndex = -1;
