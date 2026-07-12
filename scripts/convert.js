@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.28";
+const VERSION = "0.8.29";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -988,6 +988,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-callout .xhs-green-text { color: #111; font-weight: 900; }
     .xhs-callout .xhs-green-underline { background: none; border-bottom: 0; padding: 0; font-weight: 900; }
     .xhs-split-head { margin-bottom: 0 !important; }
+    .xhs-p.xhs-split-tail, .xhs-rich.xhs-split-tail { margin-top: 0 !important; }
     .xhs-callout.xhs-split-tail { padding-top: 0.72em; }
     .xhs-rich img { max-width: 100%; height: auto; }
     .selected-image-frame { outline: 5px solid rgba(37, 99, 235, .92); outline-offset: 5px; }
@@ -2525,7 +2526,8 @@ function studioHtmlV2(payload, libs) {
     }
     function splitPlainTextBlock(block, available) {
       const total = textLengthDeep(block);
-      if (total < 8 || available < Math.max(32, config.bodyFontSize * config.bodyLineHeight * 0.6)) return null;
+      const oneLine = config.bodyFontSize * config.bodyLineHeight;
+      if (total < 4 || available < Math.max(24, oneLine * 0.45)) return null;
       const id = flowIdFor(block);
       let lo = 1;
       let hi = total - 1;
@@ -2545,13 +2547,12 @@ function studioHtmlV2(payload, libs) {
           hi = mid - 1;
         }
       }
-      if (best < 2 || best >= total - 1) return null;
+      if (best < 1 || best >= total - 1) return null;
       const rawBest = best;
       const preferred = preferredTextSplitIndex(block.textContent || '', rawBest, total);
       if (preferred !== rawBest) {
         const preferredHead = markSplitPart(cloneTextRangeElement(block, 0, preferred), id, 'head');
         const preferredHeight = measureBlock(preferredHead);
-        const oneLine = config.bodyFontSize * config.bodyLineHeight;
         const leavesTinyGap = available - preferredHeight <= oneLine * 0.25;
         best = leavesTinyGap ? preferred : rawBest;
       }
