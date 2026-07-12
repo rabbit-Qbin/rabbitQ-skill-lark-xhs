@@ -81,6 +81,64 @@ async function main() {
   );
   assert.strictEqual(convert.status, 0, convert.stderr || convert.stdout);
 
+  const explicitSourceDir = path.join(root, "explicit-cover-source");
+  const explicitOutputDir = path.join(root, "explicit-cover-output");
+  fs.mkdirSync(explicitSourceDir, { recursive: true });
+  const explicitMarkdown = [
+    "---",
+    "title: 封面大标题（frontmatter）",
+    "subtitle: 封面副标题",
+    "---",
+    "",
+    "# 正文里的一级标题",
+    "",
+    "## 01 章节",
+    "",
+    "段落正文。",
+  ].join("\n");
+  fs.writeFileSync(path.join(explicitSourceDir, "article.md"), explicitMarkdown, "utf8");
+  const explicitConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), explicitSourceDir, "-o", explicitOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(explicitConvert.status, 0, explicitConvert.stderr || explicitConvert.stdout);
+  const explicitHtml = fs.readFileSync(path.join(explicitOutputDir, "xhs-studio.html"), "utf8");
+  assert.match(explicitHtml, /封面大标题（frontmatter）/);
+  assert.match(explicitHtml, /<section data-xhs-heading-level="1"[\s\S]*?<strong>章节<\/strong>/);
+  assert.doesNotMatch(explicitHtml, /<section data-xhs-heading-level="1"[\s\S]*?正文里的一级标题/);
+  assert.match(explicitHtml, /<section><strong>正文里的一级标题<\/strong><\/section>/);
+  const explicitLevel1Blocks = [...explicitHtml.matchAll(/<section data-xhs-heading-level="1"[\s\S]*?<\/section>/g)].map((match) => match[0]);
+  assert.ok(explicitLevel1Blocks.length >= 1);
+  assert.ok(explicitLevel1Blocks.every((block) => !block.includes("封面大标题")));
+
+  const chineseSourceDir = path.join(root, "chinese-cover-source");
+  const chineseOutputDir = path.join(root, "chinese-cover-output");
+  fs.mkdirSync(chineseSourceDir, { recursive: true });
+  const chineseMarkdown = [
+    "标题：中文标签大标题",
+    "副标题：中文标签副标题，写完就能批量出图",
+    "",
+    "# 正文一级章节",
+    "",
+    "## 01 小节",
+    "",
+    "段落正文。",
+  ].join("\n");
+  fs.writeFileSync(path.join(chineseSourceDir, "article.md"), chineseMarkdown, "utf8");
+  const chineseConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), chineseSourceDir, "-o", chineseOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(chineseConvert.status, 0, chineseConvert.stderr || chineseConvert.stdout);
+  const chineseHtml = fs.readFileSync(path.join(chineseOutputDir, "xhs-studio.html"), "utf8");
+  assert.match(chineseHtml, /"title":"中文标签大标题"/);
+  assert.match(chineseHtml, /"subtitle":"中文标签副标题，写完就能批量出图"/);
+  assert.doesNotMatch(chineseHtml, /标题：中文标签大标题/);
+  assert.match(chineseHtml, /<section data-xhs-heading-level="1"[\s\S]*?<strong>小节<\/strong>/);
+  assert.match(chineseHtml, /<section><strong>正文一级章节<\/strong><\/section>/);
+
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
   assert.match(html, /data-xhs-block-type="quote"/);
@@ -92,6 +150,7 @@ async function main() {
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
   assert.match(html, /data-xhs-heading-level="2"/);
+  assert.doesNotMatch(html, /data-xhs-heading-level="1"[^>]*>.*回归测试/);
   assert.match(html, /data-xhs-page-break="1"/);
   assert.match(html, /<button id="headingBtn1">一级标题<\/button>/);
   assert.match(html, /<button id="headingBtn2">二级标题<\/button>/);
@@ -221,11 +280,15 @@ async function main() {
       await page.waitForTimeout(800);
       const bodyPageBlankState = await bodyPageFrame.evaluate((frame) => ({
         manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
-        caretAnchorCount: frame.querySelectorAll(".xhs-caret-anchor").length,
+        leadingIsBlank: Boolean(
+          frame.firstElementChild?.classList.contains("xhs-manual-blank") ||
+          ((frame.firstElementChild?.classList.contains("xhs-p") || frame.firstElementChild?.classList.contains("xhs-rich")) &&
+            !frame.firstElementChild?.textContent?.replace(/\s+/g, "").length),
+        ),
         firstText: frame.firstElementChild?.textContent?.replace(/\s+/g, " ").trim() || "",
       }));
       assert.strictEqual(bodyPageBlankState.manualBlankCount, 0);
-      assert.strictEqual(bodyPageBlankState.caretAnchorCount, 0);
+      assert.strictEqual(bodyPageBlankState.leadingIsBlank, false);
       assert.ok(bodyPageBlankState.firstText.length > 0);
     }
 
@@ -277,7 +340,7 @@ async function main() {
         callouts: Array.from(document.querySelectorAll("#stageScale .xhs-callout-body")).map((node) => node.textContent.trim()),
         labels: Array.from(document.querySelectorAll("#stageScale .xhs-callout-label")).map((node) => node.textContent.trim()),
         headingCount: document.querySelectorAll("#stageScale .xhs-heading").length,
-        lists: Array.from(document.querySelectorAll("#stageScale .xhs-reason-text")).map((node) => node.textContent.trim()),
+        lists: Array.from(document.querySelectorAll("#stageScale .xhs-list-body")).map((node) => node.textContent.trim()),
         tables: Array.from(document.querySelectorAll("#stageScale .xhs-table")).map((node) => ({
           text: node.textContent.replace(/\s+/g, " ").trim(),
           headers: Array.from(node.querySelectorAll("thead th")).map((cell) => cell.textContent.trim()),
@@ -300,8 +363,85 @@ async function main() {
     assert.ok(["金句", "注意", "结论", "划重点"].every((label) => content.labels.includes(label)));
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
+    // Regression: backspace at the start of a list line should unlist it into plain body text.
+    const listPageIndex = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (document.querySelector("#stageScale .xhs-list-line .xhs-list-body")) return index;
+      }
+      return -1;
+    });
+    assert.ok(listPageIndex >= 0, "expected at least one list line in studio output");
+    await page.locator("#pageTabs button").nth(listPageIndex).click();
+    await page.waitForTimeout(100);
+    const unlistState = await page.locator("#stageScale .xhs-list-line .xhs-list-body").first().evaluate((body) => {
+      const line = body.closest(".xhs-list-line");
+      const sample = body.textContent || "";
+      const editable = body.closest('[contenteditable="true"]');
+      editable?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return { sample, lineClass: line?.className || "" };
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(500);
+    const afterUnlist = await page.locator("#stageScale .xhs-body-card .xhs-body-frame").first().evaluate((frame, sample) => ({
+      listLineCount: frame.querySelectorAll(".xhs-list-line").length,
+      plainCount: Array.from(frame.querySelectorAll(".xhs-p")).filter((node) => (
+        !node.classList.contains("xhs-manual-blank") &&
+        !node.classList.contains("xhs-caret-anchor") &&
+        (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
+      )).length,
+    }), unlistState.sample);
+    assert.ok(afterUnlist.plainCount >= 1, "list line should become plain paragraph after backspace at line start");
+
+    await page.locator("#pageTabs button").nth(listPageIndex).click();
+    await page.waitForTimeout(100);
+    const listBodyWithContent = page.locator("#stageScale .xhs-list-line .xhs-list-body").filter({ hasText: "重新分页" });
+    await listBodyWithContent.first().evaluate((body) => {
+      const editable = body.closest('[contenteditable="true"]');
+      editable?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    const listLineCountBeforeEnter = await page.locator("#stageScale .xhs-list-line").count();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(200);
+    const listEnterState = await listBodyWithContent.first().evaluate((body, beforeCount) => {
+      const line = body.closest(".xhs-list-line");
+      return {
+        lineCount: document.querySelectorAll("#stageScale .xhs-list-line").length,
+        currentBody: body.textContent.trim(),
+        previousBody: line?.previousElementSibling?.querySelector?.(".xhs-list-body")?.textContent.trim() || "",
+        beforeCount,
+      };
+    }, listLineCountBeforeEnter);
+    assert.strictEqual(listEnterState.lineCount, listLineCountBeforeEnter + 1);
+    assert.ok(listEnterState.currentBody.includes("重新分页"));
+    assert.strictEqual(listEnterState.previousBody, "");
+
+    const paragraphHaloState = await page.locator("#stageScale .xhs-p").first().evaluate((paragraph) => {
+      paragraph.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      return {
+        haloVisible: document.querySelector("#blockHalo")?.style.display === "block",
+        isParagraph: paragraph.classList.contains("xhs-p"),
+      };
+    });
+    assert.strictEqual(paragraphHaloState.isParagraph, true);
+    assert.strictEqual(paragraphHaloState.haloVisible, false);
+
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
     assert.ok(content.tables.length >= 1);
+    assert.ok(content.tables.length >= 2, "long table should split across pages instead of clipping");
     assert.ok(content.tables.every((table) => JSON.stringify(table.headers) === JSON.stringify(["模式", "适合", "页数"])));
     assert.strictEqual(content.tables.reduce((total, table) => total + table.rows, 0), 21);
     assert.ok(content.tables.some((table) => table.text.includes("无封面图")));
@@ -324,8 +464,11 @@ async function main() {
       selection.removeAllRanges();
       selection.addRange(range);
     });
-    await page.keyboard.press("Backspace");
-    await page.waitForTimeout(1200);
+    for (let i = 0; i < 3; i += 1) {
+      await page.keyboard.press("Backspace");
+      await page.waitForTimeout(120);
+    }
+    await page.waitForTimeout(800);
     await page.locator("#pageTabs button").nth(headingPageIndex).click();
     await page.waitForTimeout(100);
     const leadingBlankState = await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => ({

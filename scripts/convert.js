@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.12";
+const VERSION = "0.8.24";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -146,9 +146,49 @@ function parseFrontmatter(raw) {
   return { frontmatter, body: raw.slice(match[0].length) };
 }
 
+const CHINESE_COVER_LABELS = [
+  { key: "title", pattern: /^(?:\*\*)?(?:大标题|标题|封面标题)(?:\*\*)?\s*[：:]\s*(.+)$/ },
+  { key: "subtitle", pattern: /^(?:\*\*)?(?:副标题|封面副标题)(?:\*\*)?\s*[：:]\s*(.+)$/ },
+];
+
+/** Parse leading Chinese cover labels like `标题：…` / `副标题：…` and strip them from body. */
+function extractChineseCoverMeta(body) {
+  const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  const meta = {};
+  let cut = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) {
+      cut = i + 1;
+      continue;
+    }
+    let matched = false;
+    for (const { key, pattern } of CHINESE_COVER_LABELS) {
+      const hit = line.match(pattern);
+      if (!hit) continue;
+      if (!meta[key]) meta[key] = plainMarkdownText(stripWrappingQuotes(hit[1]));
+      matched = true;
+      cut = i + 1;
+      break;
+    }
+    if (!matched) break;
+  }
+  return {
+    meta,
+    body: lines.slice(cut).join("\n").replace(/^\n+/, ""),
+  };
+}
+
+function prepareMarkdownBody(markdown) {
+  const { frontmatter, body: afterFrontmatter } = parseFrontmatter(markdown);
+  const { meta: chineseMeta, body } = extractChineseCoverMeta(afterFrontmatter);
+  return { frontmatter, chineseMeta, body };
+}
+
 function extractTitle(markdown) {
-  const { frontmatter, body } = parseFrontmatter(markdown);
+  const { frontmatter, chineseMeta, body } = prepareMarkdownBody(markdown);
   if (frontmatter.title) return frontmatter.title;
+  if (chineseMeta.title) return chineseMeta.title;
   const h1 = body.match(/^#\s+(.+)$/m);
   if (h1) return plainMarkdownText(h1[1]);
   return "";
@@ -191,23 +231,51 @@ function inferCardLabel(text) {
   return "划重点";
 }
 
-/** Rank heading depths used in the article (excluding cover title). Least # → L1, second least → L2. */
-function resolveHeadingRanks(body, title) {
+function normalizeCoverHeadingText(value) {
+  return plainMarkdownText(value)
+    .replace(/[·•・]/g, " ")
+    .replace(/[—–-]+/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function isCoverTitleHeading(text, coverTitle) {
+  if (!coverTitle || !text) return false;
+  const left = plainMarkdownText(text);
+  const right = plainMarkdownText(coverTitle);
+  if (left === right) return true;
+  return normalizeCoverHeadingText(left) === normalizeCoverHeadingText(right);
+}
+
+/** Rank heading depths in body. Least # → L1, second least → L2. Skips only cover-title duplicates. */
+function resolveHeadingRanks(body, title, options = {}) {
   const levels = new Set();
-  let skippedTitle = false;
+  let hasDepth1 = false;
   for (const rawLine of String(body || "").replace(/\r\n/g, "\n").split("\n")) {
     const line = rawLine.trim();
     const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (!heading) continue;
     const text = plainMarkdownText(heading[2]);
-    if (!skippedTitle && title && text === title) {
-      skippedTitle = true;
-      continue;
-    }
-    levels.add(heading[1].length);
+    if (isCoverTitleHeading(text, title)) continue;
+    const depth = heading[1].length;
+    if (depth === 1) hasDepth1 = true;
+    levels.add(depth);
   }
-  const ranks = [...levels].sort((a, b) => a - b);
-  return { level1: ranks[0] || null, level2: ranks[1] || null };
+  let ranks = [...levels].sort((a, b) => a - b);
+  let introDepth = null;
+  // Cover already fixed (frontmatter / CLI / 中文标签): a lone `#` echoing the doc name
+  // is intro, while `## 01 …` chapters stay the real level-1 sections.
+  if (options.coverTitleExplicit && hasDepth1 && ranks.includes(2)) {
+    introDepth = 1;
+    ranks = ranks.filter((depth) => depth !== 1);
+  }
+  return { level1: ranks[0] || null, level2: ranks[1] || null, introDepth };
+}
+
+function isCoverTitleExplicit(markdown, cliTitle) {
+  if (cliTitle) return true;
+  const { frontmatter, chineseMeta } = prepareMarkdownBody(markdown);
+  return Boolean(frontmatter.title || chineseMeta.title);
 }
 
 function slugify(value) {
@@ -370,9 +438,12 @@ function isMarkdownVideoLine(line) {
 
 function stripLeadingListMarkerText(text) {
   let value = String(text || "").trim();
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     const next = value
-      .replace(/^(?:[-*+•·◦]|\d+[.)、])\s+/, "")
+      .replace(/^(?:[-*+•·◦]\s*)/, "")
+      .replace(/^(?:\d+[.)、．]\s*)/, "")
+      .replace(/^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|（\d+）|\(\d+\))\s*/, "")
+      .replace(/^[1-9](?=[\u4e00-\u9fff])/, "")
       .replace(/^[·•]\s*/, "")
       .trim();
     if (next === value) break;
@@ -383,6 +454,12 @@ function stripLeadingListMarkerText(text) {
 
 function isMarkdownListLine(line) {
   return /^(\d+)[.)、]\s+/.test(line) || /^[-*+•·◦]\s+/.test(line);
+}
+
+function markdownListType(line) {
+  if (/^(\d+)[.)、]\s+/.test(String(line || ""))) return "ordered";
+  if (/^[-*+•·◦]\s+/.test(String(line || ""))) return "unordered";
+  return "";
 }
 
 function splitMarkdownTableRow(line) {
@@ -428,8 +505,8 @@ function renderMarkdownTable(header, rows, markdownFile) {
   return `<section data-xhs-block-type="table"><table>${head}<tbody>${body}</tbody></table></section>`;
 }
 
-function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
-  const { body } = parseFrontmatter(markdown);
+function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) {
+  const { body } = prepareMarkdownBody(markdown);
   const lines = body.replace(/\r\n/g, "\n").split("\n");
   const blocks = [];
   let paragraph = [];
@@ -438,8 +515,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
   let code = [];
   let inCode = false;
   let headingIndex = 0;
-  let skippedCoverTitle = false;
-  const headingRanks = resolveHeadingRanks(body, title);
+  const headingRanks = resolveHeadingRanks(body, title, options);
 
   function pushParagraph() {
     if (!paragraph.length) return;
@@ -459,15 +535,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
   }
   function pushList() {
     if (!list.length) return;
-    const isOrdered = list.every((item) => item.type === "ordered");
-    const cards = list.map((item, index) => {
-      const marker = item.type === "ordered"
-        ? `<span style="display:inline-block;color:#2f7d3b;font-weight:900;">${escapeHtml(item.marker || String(index + 1))}</span>`
-        : `<span style="border-radius:50%;display:inline-block;width:10px;height:10px;background:#57b560;"></span>`;
+    const cards = list.map((item) => {
+      const marker = '<span style="border-radius:50%;display:inline-block;width:10px;height:10px;background:#57b560;"></span>';
       return `<section>${marker}<span>${inlineMarkdownToHtml(stripLeadingListMarkerText(item.text), markdownFile)}</span></section>`;
     }).join("");
-    // Keep list type in source HTML so Studio can preserve ordered (1/2/3) vs unordered (dot).
-    blocks.push(`<section data-xhs-block-type="list" style="background:#f3f8f1;" data-list-type="${isOrdered ? "ordered" : "unordered"}">${cards}</section>`);
+    blocks.push(`<section data-xhs-block-type="list" style="background:#f3f8f1;" data-list-type="unordered">${cards}</section>`);
     list = [];
   }
   function pushQuote() {
@@ -553,14 +625,14 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
       continue;
     }
     if (!line) {
-      let hasUpcomingList = false;
+      let upcomingListType = "";
       for (let j = lineIndex + 1; j < lines.length; j += 1) {
         const upcoming = lines[j].trim();
         if (!upcoming) continue;
-        hasUpcomingList = isMarkdownListLine(upcoming);
+        upcomingListType = markdownListType(upcoming);
         break;
       }
-      if (list.length && hasUpcomingList) continue;
+      if (list.length && upcomingListType && upcomingListType === list[0].type) continue;
       flushAll();
       continue;
     }
@@ -581,9 +653,10 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
       // Support closed ATX headings ("## 标题 ##"): a trailing #-run preceded
       // by whitespace is decorative and not part of the title text.
       const text = plainMarkdownText(heading[2].replace(/\s+#+$/, ""));
-      // Cover title already used for the cover page — don't repeat it in the body.
-      if (!skippedCoverTitle && title && text === title) {
-        skippedCoverTitle = true;
+      // Only skip a heading that duplicates the resolved cover title — never blanket-skip all `#`.
+      if (isCoverTitleHeading(text, title)) continue;
+      if (headingRanks.introDepth != null && level === headingRanks.introDepth) {
+        blocks.push(`<section><strong>${escapeHtml(text)}</strong></section>`);
         continue;
       }
       if (headingRanks.level1 != null && level === headingRanks.level1) {
@@ -605,10 +678,12 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title) {
     if (bullet) {
       pushParagraph();
       pushQuote();
+      const nextListType = ordered ? "ordered" : "unordered";
+      if (list.length && list[0].type !== nextListType) pushList();
       const rawText = ordered ? ordered[2] : unordered[1];
       list.push(ordered
         ? { type: "ordered", marker: ordered[1], text: stripLeadingListMarkerText(rawText) }
-        : { type: "bullet", marker: "", text: stripLeadingListMarkerText(rawText) });
+        : { type: "unordered", marker: "", text: stripLeadingListMarkerText(rawText) });
       continue;
     }
     if (/^>\s?/.test(line)) {
@@ -793,7 +868,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
     .xhs-block { width: 100%; }
     .xhs-body-frame > div { min-height: 1.8em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
-    .xhs-p { margin: 0 0 0.88em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
+    .xhs-p { margin: 0 0 0.88em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 720; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
@@ -815,11 +890,11 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${headingLevel2Size}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
-    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
+    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-callout.xhs-card-frame { border-left: 0; border: 1.5px solid var(--xhs-underline); border-radius: 8px; background: var(--xhs-accent-pale); padding: 0.78em 0.9em; }
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
     .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: 720; }
-    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: var(--body-font); line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: var(--body-font); line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-block { margin: 0 auto 1.1em; width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
@@ -833,15 +908,15 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
     .selectable-image.dragging { cursor: grabbing; }
-    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-reason-stack.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
+    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
-    .xhs-reason-stack { margin: 0 0 1.1em; padding: 0.46em; background: var(--xhs-accent-pale); border: 1px solid var(--xhs-underline); border-radius: 10px; display: grid; gap: 0.34em; font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
-    .xhs-reason-card { display: grid; grid-template-columns: 0.66em 1fr; column-gap: 0.52em; align-items: start; padding: 0.58em 0.62em 0.62em; background: #fff; border: 1px solid var(--xhs-underline); border-radius: 8px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
-    .xhs-reason-dot { width: 0.46em; height: 0.46em; margin-top: 0.54em; border-radius: 50%; background: var(--xhs-accent); }
-    .xhs-reason-number { display: inline-grid; place-items: center; color: var(--xhs-accent-strong); font-size: .76em; line-height: 1.28; font-weight: 950; margin-top: .22em; }
-    .xhs-reason-text { min-width: 0; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
-    .xhs-reason-text span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.48em; margin: 0 0 0.42em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; overflow: visible; }
+    .xhs-list-marker { flex: 0 0 1.35em; width: 1.35em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: inherit; }
+    .xhs-list-marker-ordered { color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; }
+    .xhs-list-marker-dot::before { content: ''; display: inline-block; width: 0.42em; height: 0.42em; margin-top: 0.58em; border-radius: 50%; background: var(--xhs-accent); }
+    .xhs-list-body { flex: 1 1 auto; min-width: 0; max-width: var(--body-text-width); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
+    .xhs-list-body span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
     .xhs-table-block { margin: 0 0 1.02em; width: 100%; max-width: var(--body-text-width); overflow: hidden; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
     .xhs-table { width: 100%; border-collapse: collapse; table-layout: fixed; background: #fff; color: #111; font-size: ${Math.max(24, Math.round(bodyFontSize * 0.75))}px; line-height: 1.48; }
     .xhs-table th, .xhs-table td { padding: 0.58em 0.62em; text-align: left; vertical-align: top; word-break: normal; overflow-wrap: anywhere; letter-spacing: 0; }
@@ -850,7 +925,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-table tbody tr:last-child td { border-bottom: 2px solid var(--xhs-underline); }
     .xhs-table strong, .xhs-table b { font-weight: 900; }
     .xhs-table em { font-style: italic; }
-    .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: justify; text-align-last: left; text-justify: inter-character; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
+    .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout .xhs-green-text { color: #111; font-weight: 900; }
@@ -1047,14 +1122,16 @@ function studioHtmlV2(payload, libs) {
     let blockReorderDrag = null;
     let blockDropIndicator = null;
     let reflowTimer = null;
+    let reflowForcePending = false;
+    let lightSaveTimer = null;
     let headingNormalizeTimer = null;
     let layoutReflowTimer = null;
     let imageReflowTimer = null;
     let splitFlowCounter = 0;
     let imageIdCounter = 0;
     let caretMarkerCounter = 0;
-    let manualBlankDeleteGuardUntil = 0;
     let manualBlankDeleteKeydownHandled = false;
+    let manualBlankDeleteKeydownTimer = null;
     const boundFrames = new WeakSet();
     const imageResizeObserver = window.ResizeObserver ? new ResizeObserver((entries) => {
       entries.forEach((entry) => {
@@ -1401,7 +1478,7 @@ function studioHtmlV2(payload, libs) {
     function wrapBodyTextLines(root) {
       const targets = [];
       if (root.matches?.('.xhs-p, .xhs-rich, .xhs-quote')) targets.push(root);
-      root.querySelectorAll?.('.xhs-p, .xhs-rich, .xhs-quote, .xhs-callout-body, .xhs-reason-text').forEach((node) => {
+      root.querySelectorAll?.('.xhs-p, .xhs-rich, .xhs-quote, .xhs-callout-body, .xhs-list-body').forEach((node) => {
         if (!targets.includes(node)) targets.push(node);
       });
       targets.forEach(wrapTextTargetLines);
@@ -1461,7 +1538,13 @@ function studioHtmlV2(payload, libs) {
       if (index !== 0 || el.querySelector('img')) return false;
       const compactTitle = cleanText(config.title).replace(/\\s/g, '');
       const compactText = cleanText(el.textContent).replace(/\\s/g, '');
-      return compactTitle && compactText.includes(compactTitle.slice(0, Math.min(12, compactTitle.length)));
+      if (!compactTitle) return false;
+      if (compactText.includes(compactTitle.slice(0, Math.min(12, compactTitle.length)))) return true;
+      if (el.dataset?.xhsHeadingLevel !== '1') return false;
+      const titleEl = el.querySelector('strong, .xhs-heading-title');
+      const headingTitle = cleanText(titleEl?.textContent || '').replace(/\\s/g, '');
+      return headingTitle === compactTitle ||
+        headingTitle.includes(compactTitle.slice(0, Math.min(12, compactTitle.length)));
     }
     function stripHeadingNumberPrefix(titleText, number) {
       let value = String(titleText || '').trim();
@@ -1657,9 +1740,12 @@ function studioHtmlV2(payload, libs) {
     }
     function stripLeadingListMarkerText(text) {
       let value = String(text || '').trim();
-      for (let i = 0; i < 3; i += 1) {
+      for (let i = 0; i < 5; i += 1) {
         const next = value
-          .replace(/^(?:[-*+•·◦]|\\d+[.)、])\\s+/, '')
+          .replace(/^(?:[-*+•·◦]\\s*)/, '')
+          .replace(/^(?:\\d+[.)、．]\\s*)/, '')
+          .replace(/^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|（\\d+）|\\(\\d+\\))\\s*/, '')
+          .replace(/^[1-9](?=[\\u4e00-\\u9fff])/, '')
           .replace(/^[·•]\\s*/, '')
           .trim();
         if (next === value) break;
@@ -1671,6 +1757,30 @@ function studioHtmlV2(payload, libs) {
       if (!html) return '';
       const holder = document.createElement('div');
       holder.innerHTML = html;
+      while (holder.firstChild) {
+        if (holder.firstChild.nodeType === Node.TEXT_NODE) {
+          const stripped = stripLeadingListMarkerText(holder.firstChild.textContent || '');
+          if (stripped !== holder.firstChild.textContent) holder.firstChild.textContent = stripped;
+          if (!cleanText(holder.firstChild.textContent)) {
+            holder.removeChild(holder.firstChild);
+            continue;
+          }
+          break;
+        }
+        if (holder.firstChild.nodeType === Node.ELEMENT_NODE) {
+          const el = holder.firstChild;
+          const markerText = cleanText(el.textContent || '');
+          if (/^\\d+[.)、．]?$/.test(markerText) || /^[-*+•·◦]$/.test(markerText)) {
+            el.remove();
+            continue;
+          }
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          const first = walker.nextNode();
+          if (first) first.textContent = stripLeadingListMarkerText(first.textContent || '');
+          break;
+        }
+        break;
+      }
       const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT);
       const first = walker.nextNode();
       if (first) first.textContent = stripLeadingListMarkerText(first.textContent || '');
@@ -1680,33 +1790,38 @@ function studioHtmlV2(payload, libs) {
       const text = cleanText(node?.textContent || '');
       return /^(?:[-*+•·◦]|\\d+[.)、])\\s/.test(text);
     }
+    function paragraphListType(node) {
+      const text = cleanText(node?.textContent || '');
+      if (/^\\d+[.)、]\\s/.test(text)) return 'ordered';
+      if (/^[-*+•·◦]\\s/.test(text)) return 'unordered';
+      return '';
+    }
     function buildReasonStackFromParagraphs(paragraphs, listType = 'unordered') {
       const items = paragraphs.map((node) => {
         const html = stripListMarkerFromHtml(normalizeInlineHtml(node.innerHTML || node.textContent));
         const plain = stripLeadingListMarkerText(cleanText(node.textContent));
         return plain ? { html, plain } : null;
       }).filter(Boolean);
-      return items.length ? buildReasonStack(items, listType) : null;
+      return items.length ? buildListLines(items) : [];
     }
     function mergeAdjacentListParagraphs(blocks) {
       const merged = [];
       let buffer = [];
+      function flushBuffer() {
+        if (!buffer.length) return;
+        const lines = buildReasonStackFromParagraphs(buffer, 'unordered');
+        lines.forEach((line) => merged.push(line));
+        buffer = [];
+      }
       blocks.forEach((block) => {
         if (block.classList?.contains('xhs-p') && paragraphLooksLikeListItem(block)) {
           buffer.push(block);
           return;
         }
-        if (buffer.length) {
-          const stack = buildReasonStackFromParagraphs(buffer);
-          if (stack) merged.push(stack);
-          buffer = [];
-        }
+        flushBuffer();
         merged.push(block);
       });
-      if (buffer.length) {
-        const stack = buildReasonStackFromParagraphs(buffer);
-        if (stack) merged.push(stack);
-      }
+      flushBuffer();
       return merged;
     }
     function isReasonListBlock(el) {
@@ -1722,27 +1837,64 @@ function studioHtmlV2(payload, libs) {
       }).length;
       return listCards >= 2 || (/background\\s*:\\s*#f3f8f1/i.test(style) && listCards >= 1);
     }
-    function reasonListFromElement(el) {
-      const block = makeElement('section', 'xhs-reason-stack xhs-block');
-      const cards = Array.from(el.children).map((child) => {
+    function reasonListLinesFromElement(el) {
+      const items = Array.from(el.children).map((child) => {
         const spans = Array.from(child.querySelectorAll('span'));
-        const numberSpan = spans.find((span) => /^\\d+$/.test(cleanText(span.textContent)));
         const contentSpan = spans.find((span) => {
           const text = cleanText(span.textContent);
-          return text.length > 8 && !/^\\d+$/.test(text);
+          return text.length > 0 && !/^\\d+[.)、．]?$/.test(text);
         });
         const textHtml = stripListMarkerFromHtml(normalizeInlineHtml(contentSpan ? contentSpan.innerHTML : child.innerHTML));
-        if (!cleanText(textHtml.replace(/<[^>]*>/g, ''))) return '';
-        // Ordered lists keep 1/2/3 markers; unordered lists keep the accent dot.
-        const marker = numberSpan
-          ? '<span class="xhs-reason-number">' + esc(cleanText(numberSpan.textContent)) + '</span>'
-          : '<span class="xhs-reason-dot"></span>';
-        return '<section class="xhs-reason-card">' + marker + '<span class="xhs-reason-text">' + textHtml + '</span></section>';
+        const plain = stripLeadingListMarkerText(cleanText(textHtml.replace(/<[^>]*>/g, '')));
+        return plain ? { html: textHtml, plain } : null;
       }).filter(Boolean);
-      block.innerHTML = cards.join('');
-      if (cards.some((html) => html.includes('xhs-reason-number'))) block.dataset.listType = 'ordered';
-      else block.dataset.listType = 'unordered';
-      return block;
+      return buildListLines(items, 'unordered');
+    }
+    function reasonListLinesFromStack(stack) {
+      const items = Array.from(stack.querySelectorAll('.xhs-reason-card, .xhs-reason-text')).map((node) => {
+        const textEl = node.classList?.contains('xhs-reason-text') ? node : node.querySelector('.xhs-reason-text');
+        const html = textEl ? stripListMarkerFromHtml(normalizeInlineHtml(textEl.innerHTML)) : '';
+        const plain = stripLeadingListMarkerText(cleanText(textEl?.textContent || ''));
+        return plain ? { html, plain } : null;
+      }).filter(Boolean);
+      return buildListLines(items, 'unordered');
+    }
+    function normalizeListLinesInFrame(frame) {
+      if (!frame) return false;
+      let changed = false;
+      Array.from(frame.querySelectorAll('.xhs-list-line')).forEach((line) => {
+        if (line.dataset.listType !== 'unordered') {
+          line.dataset.listType = 'unordered';
+          changed = true;
+        }
+        const body = line.querySelector('.xhs-list-body');
+        if (body) {
+          const stripped = stripListMarkerFromHtml(body.innerHTML);
+          if (stripped !== body.innerHTML) {
+            body.innerHTML = stripped || '<br>';
+            changed = true;
+          }
+        }
+        const marker = line.querySelector('.xhs-list-marker');
+        if (marker && !marker.classList.contains('xhs-list-marker-dot')) {
+          marker.replaceWith(listMarkerElement());
+          changed = true;
+        }
+      });
+      return changed;
+    }
+    function expandReasonStacksInFrame(frame) {
+      if (!frame) return false;
+      let changed = false;
+      Array.from(frame.querySelectorAll('.xhs-reason-stack')).forEach((stack) => {
+        if (!frame.contains(stack)) return;
+        const lines = reasonListLinesFromStack(stack);
+        const frag = document.createDocumentFragment();
+        lines.forEach((line) => frag.appendChild(line));
+        stack.replaceWith(frag);
+        changed = true;
+      });
+      return changed;
     }
     function tableFromElement(el) {
       const source = el.tagName?.toLowerCase() === 'table' ? el : el.querySelector('table');
@@ -2031,7 +2183,7 @@ function studioHtmlV2(payload, libs) {
         node.classList.contains('xhs-heading') ||
         node.classList.contains('xhs-callout') ||
         node.classList.contains('xhs-quote') ||
-        node.classList.contains('xhs-reason-stack') ||
+        node.classList.contains('xhs-list-line') ||
         node.classList.contains('xhs-table-block') ||
         node.classList.contains('xhs-image-block') ||
         node.classList.contains('xhs-image-grid') ||
@@ -2046,8 +2198,12 @@ function studioHtmlV2(payload, libs) {
     function isEmptyGeneratedFlowBlock(node) {
       if (!node?.classList) return false;
       if (node.classList.contains('xhs-caret-anchor')) return isEmptyCaretAnchor(node);
+      if (node.classList.contains('xhs-manual-blank')) return false;
       if (node.classList.contains('xhs-callout')) return !cleanText(node.querySelector('.xhs-callout-body')?.textContent || '');
-      if (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) return !hasEditableContent(node);
+      if (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) {
+        if (node.classList.contains('xhs-manual-blank')) return false;
+        return !cleanText(node.textContent) && !node.querySelector('br');
+      }
       return false;
     }
     function hoistNestedBlockFromWrapper(nested, wrapper, frame) {
@@ -2104,18 +2260,6 @@ function studioHtmlV2(payload, libs) {
       Array.from(frame.children).forEach((node) => {
         if (node.classList?.contains('xhs-manual-blank')) return;
         if (isEmptyGeneratedFlowBlock(node)) {
-          // Empty xhs-p/xhs-rich with a <br> was created by pressing Enter —
-          // promote to manual-blank instead of deleting it. Skip promotion
-          // right after a custom blank delete: browser leftovers must be dropped.
-          if (!node.classList.contains('xhs-caret-anchor') &&
-              (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) &&
-              node.querySelector('br') &&
-              Date.now() >= manualBlankDeleteGuardUntil) {
-            node.classList.add('xhs-manual-blank');
-            node.innerHTML = '<br>';
-            changed = true;
-            return;
-          }
           node.remove();
           changed = true;
         }
@@ -2131,21 +2275,14 @@ function studioHtmlV2(payload, libs) {
         p.innerHTML = normalizeInlineHtml(node.innerHTML || node.textContent || '');
       }
       if (cleanText(p.textContent) || p.querySelector('img')) return p;
-      // Preserve an intentional empty line: the user pressed Enter to create a
-      // blank paragraph/div. Mark it manual-blank so later normalization keeps it
-      // (empty, unmarked paragraphs are otherwise dropped).
-      if (node.nodeType === Node.ELEMENT_NODE &&
-          (p.querySelector('br') || node.tagName === 'DIV' || node.tagName === 'P')) {
-        p.classList.add('xhs-manual-blank');
-        p.innerHTML = '<br>';
-        return p;
-      }
       return null;
     }
     function normalizeEditableBodyBlocks(root) {
       const frame = root?.classList?.contains('xhs-body-frame') ? root : root?.querySelector?.('.xhs-body-frame');
       if (!frame) return false;
-      let changed = normalizeNestedFlowBlocks(frame);
+      let changed = expandReasonStacksInFrame(frame);
+      changed = normalizeListLinesInFrame(frame) || changed;
+      changed = normalizeNestedFlowBlocks(frame) || changed;
       const normalized = [];
       Array.from(frame.childNodes).forEach((node) => {
         if (node.nodeType === Node.TEXT_NODE) {
@@ -2157,22 +2294,13 @@ function studioHtmlV2(payload, libs) {
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return;
         if (node.tagName === 'BR') {
+          const p = makeEmptyParagraph();
+          normalized.push(p);
           changed = true;
           return;
         }
         if (isStructuredFlowBlock(node)) {
           if (isEmptyGeneratedFlowBlock(node)) {
-            // Empty xhs-p/xhs-rich with a <br>: user pressed Enter — keep as blank line.
-            if (!node.classList.contains('xhs-caret-anchor') &&
-                (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) &&
-                node.querySelector('br') &&
-                Date.now() >= manualBlankDeleteGuardUntil) {
-              node.classList.add('xhs-manual-blank');
-              node.innerHTML = '<br>';
-              normalized.push(node);
-              changed = true;
-              return;
-            }
             changed = true;
             return;
           }
@@ -2218,7 +2346,7 @@ function studioHtmlV2(payload, libs) {
         return table ? [table] : [];
       }
       if (isHeadingBlock(el)) return [headingFromElement(el)];
-      if (isReasonListBlock(el)) return [reasonListFromElement(el)];
+      if (isReasonListBlock(el)) return reasonListLinesFromElement(el);
       if (isQuoteBlock(el)) return [makeElement('section', 'xhs-quote xhs-block', normalizeInlineHtml(el.innerHTML || el.textContent))];
       if (isCalloutBlock(el)) return [calloutFromElement(el)];
       if (el.tagName && el.tagName.toLowerCase() === 'p') {
@@ -2297,13 +2425,13 @@ function studioHtmlV2(payload, libs) {
       return node;
     }
     function isPlainSplittable(block) {
-      return block.classList.contains('xhs-p') || block.classList.contains('xhs-rich');
+      return (block.classList.contains('xhs-p') || block.classList.contains('xhs-rich')) &&
+        !block.classList.contains('xhs-list-line');
     }
     function isAtomicFlowBlock(block) {
       return block.classList.contains('xhs-heading') ||
         block.classList.contains('xhs-callout') ||
         block.classList.contains('xhs-quote') ||
-        block.classList.contains('xhs-reason-stack') ||
         block.classList.contains('xhs-image-block') ||
         block.classList.contains('xhs-image-grid') ||
         block.classList.contains('xhs-table-block');
@@ -2444,6 +2572,20 @@ function studioHtmlV2(payload, libs) {
       if (!isSplittableTextBlock(block)) return null;
       return splitPlainTextBlock(block, available);
     }
+    function isSplittableBlock(block) {
+      if (isSplittableTextBlock(block)) return true;
+      if (block.classList.contains('xhs-callout')) return true;
+      if (block.classList.contains('xhs-table-block')) {
+        return block.querySelectorAll('tbody > tr').length >= 2;
+      }
+      return false;
+    }
+    function splitBlockToFit(block, available) {
+      if (isSplittableTextBlock(block)) return splitPlainTextBlock(block, available);
+      if (block.classList.contains('xhs-callout')) return splitCalloutBlock(block, available);
+      if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
+      return null;
+    }
     function paginateBlocks(blocks) {
       const nextPages = [];
       let current = [];
@@ -2469,8 +2611,8 @@ function studioHtmlV2(payload, libs) {
             remaining = config.pageLimit;
           }
           if (current.length && h > remaining) {
-            if (isSplittableTextBlock(block)) {
-              const split = splitTextBlockToFit(block, remaining);
+            if (isSplittableBlock(block)) {
+              const split = splitBlockToFit(block, remaining);
               if (split) {
                 current.push(split.head);
                 pushPage();
@@ -2481,8 +2623,8 @@ function studioHtmlV2(payload, libs) {
             pushPage();
             continue;
           }
-          if (!current.length && h > config.pageLimit && isSplittableTextBlock(block)) {
-            const split = splitTextBlockToFit(block, config.pageLimit);
+          if (!current.length && h > config.pageLimit && isSplittableBlock(block)) {
+            const split = splitBlockToFit(block, config.pageLimit);
             if (split) {
               current.push(split.head);
               pushPage();
@@ -2529,8 +2671,20 @@ function studioHtmlV2(payload, libs) {
           wrapBodyTextLines(block);
           let h = measureBlock(block);
           const remaining = tailLimit - used;
-          if (!tailNodes.length && h > tailLimit && isSplittableTextBlock(block)) {
-            const split = splitTextBlockToFit(block, tailLimit);
+          if (h > remaining && isSplittableBlock(block)) {
+            const split = splitBlockToFit(block, Math.max(remaining, tailLimit));
+            if (split) {
+              tailNodes.push(split.head);
+              rest.push(split.tail);
+              used += measureBlock(split.head);
+              tailClosed = true;
+              pending = null;
+              placed = true;
+              continue;
+            }
+          }
+          if (!tailNodes.length && h > tailLimit && isSplittableBlock(block)) {
+            const split = splitBlockToFit(block, tailLimit);
             if (split) {
               tailNodes.push(split.head);
               rest.push(split.tail);
@@ -2716,7 +2870,6 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-image-grid') ||
         node?.classList?.contains('xhs-callout') ||
         node?.classList?.contains('xhs-quote') ||
-        node?.classList?.contains('xhs-reason-stack') ||
         node?.classList?.contains('xhs-table-block');
     }
     function makeCaretAnchor() {
@@ -2764,6 +2917,10 @@ function studioHtmlV2(payload, libs) {
       balanceCoverSubtitle();
       balanceCoverTitle();
       normalizeHeadings(stageScale);
+      stageScale.querySelectorAll('.xhs-body-frame, .xhs-cover-tail-frame').forEach((frame) => {
+        expandReasonStacksInFrame(frame);
+        normalizeListLinesInFrame(frame);
+      });
       ensureEditorCaretAnchors(stageScale);
       stageScale.querySelectorAll('.selectable-image').forEach(bindSelectableFrame);
       const bodyFrame = stageScale.querySelector('.xhs-body-card .xhs-body-frame');
@@ -2784,7 +2941,7 @@ function studioHtmlV2(payload, libs) {
       });
       looseImages.forEach((img) => {
         const block = imageBlockFromSrc(img.getAttribute('src') || img.src || '', img.getAttribute('alt') || '');
-        const textBlock = img.closest('.xhs-p, .xhs-rich, .xhs-quote, .xhs-callout, .xhs-reason-card');
+        const textBlock = img.closest('.xhs-p, .xhs-rich, .xhs-quote, .xhs-callout, .xhs-list-line');
         if (textBlock && textBlock.parentNode && root.contains(textBlock)) {
           const anchor = insertionAnchors.get(textBlock) || textBlock;
           textBlock.parentNode.insertBefore(block, anchor.nextSibling);
@@ -2820,7 +2977,7 @@ function studioHtmlV2(payload, libs) {
           ? candidate.commonAncestorContainer
           : candidate.commonAncestorContainer.parentElement;
         if (parent && editable.contains(parent)) {
-          const textBlock = parent.closest?.('.xhs-p, .xhs-rich, .xhs-quote, .xhs-callout, .xhs-reason-card');
+          const textBlock = parent.closest?.('.xhs-p, .xhs-rich, .xhs-quote, .xhs-callout, .xhs-list-line');
           if (textBlock && editable.contains(textBlock)) {
             textBlock.after(...nodes);
             selection.removeAllRanges();
@@ -2863,15 +3020,12 @@ function studioHtmlV2(payload, libs) {
         }
       }, 30);
     }
-    function saveCurrentPage() {
+    function saveCurrentPage(options = {}) {
+      const skipNormalize = Boolean(options.skipNormalize);
       const page = pages[pageIndex];
       const card = stageScale.querySelector('.xhs-card');
       if (!page || !card) return;
-      // Non-cover pages are entirely body content. Cover pages only need this
-      // when they carry a body-like tail frame (cover image off, overflow
-      // content flows into the cover tail frame) — otherwise these calls are
-      // harmless no-ops since there is no body frame or heading to find.
-      if (page.type !== 'cover' || card.querySelector('.xhs-cover-tail-frame')) {
+      if (!skipNormalize && (page.type !== 'cover' || card.querySelector('.xhs-cover-tail-frame'))) {
         normalizeLooseImages(card);
         normalizeHeadings(card);
         normalizeEditableBodyBlocks(card);
@@ -2899,21 +3053,26 @@ function studioHtmlV2(payload, libs) {
       }
       persistDraft();
     }
+    function scheduleLightSave() {
+      window.clearTimeout(lightSaveTimer);
+      lightSaveTimer = window.setTimeout(() => saveCurrentPage({ skipNormalize: true }), 180);
+    }
     function scheduleOverflowReflow(force = false) {
       window.clearTimeout(reflowTimer);
-      if (force) manualBlankDeleteGuardUntil = Date.now() + 900;
+      if (force) reflowForcePending = true;
+      const delay = force ? 520 : 1400;
       reflowTimer = window.setTimeout(() => {
         const frame = stageScale.querySelector('.xhs-cover-tail-frame') ||
           stageScale.querySelector('.xhs-body-card .xhs-body-frame');
         if (!frame) {
-          saveCurrentPage();
+          saveCurrentPage({ skipNormalize: true });
+          reflowForcePending = false;
           return;
         }
-        saveCurrentPage();
-        // Continuous-flow rebalance: merge all body pages and re-paginate.
-        // force=true after blank-line edits so freed space pulls content back up.
-        if (force || frame.scrollHeight > frame.clientHeight + 8) reflow();
-      }, 520);
+        saveCurrentPage({ skipNormalize: true });
+        if (force || reflowForcePending || frame.scrollHeight > frame.clientHeight + 8) reflow();
+        reflowForcePending = false;
+      }, delay);
     }
     function insertReflowCaretMarker() {
       const selection = window.getSelection();
@@ -3017,7 +3176,7 @@ function studioHtmlV2(payload, libs) {
       return true;
     }
     function handleHeadingEnter(event) {
-      if (event.key !== 'Enter') return false;
+      if (event.key !== 'Enter' || isHistoryShortcut(event)) return false;
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount) return false;
       const range = selection.getRangeAt(0);
@@ -3048,6 +3207,226 @@ function studioHtmlV2(payload, libs) {
       const beforeText = headingTextBeforeRange(heading, range);
       return insertBlankParagraphNearHeading(heading, !beforeText);
     }
+    function listMarkerElement() {
+      const marker = document.createElement('span');
+      marker.className = 'xhs-list-marker xhs-list-marker-dot';
+      marker.contentEditable = 'false';
+      return marker;
+    }
+    function buildListLine(entry) {
+      const p = document.createElement('p');
+      p.className = 'xhs-p xhs-block xhs-list-line';
+      p.dataset.listType = 'unordered';
+      const body = document.createElement('span');
+      body.className = 'xhs-list-body';
+      body.innerHTML = stripListMarkerFromHtml(entry.html) || '<br>';
+      p.append(listMarkerElement(), body);
+      return p;
+    }
+    function buildListLines(items) {
+      return items.map((entry) => buildListLine(entry));
+    }
+    function collectContiguousListLines(line) {
+      if (!line?.classList?.contains('xhs-list-line')) return [line].filter(Boolean);
+      const listType = line.dataset.listType || 'unordered';
+      const group = [line];
+      let prev = line.previousElementSibling;
+      while (prev?.classList?.contains('xhs-caret-anchor')) prev = prev.previousElementSibling;
+      while (prev?.classList?.contains('xhs-list-line') && (prev.dataset.listType || 'unordered') === listType) {
+        group.unshift(prev);
+        prev = prev.previousElementSibling;
+        while (prev?.classList?.contains('xhs-caret-anchor')) prev = prev.previousElementSibling;
+      }
+      let next = line.nextElementSibling;
+      while (next?.classList?.contains('xhs-caret-anchor')) next = next.nextElementSibling;
+      while (next?.classList?.contains('xhs-list-line') && (next.dataset.listType || 'unordered') === listType) {
+        group.push(next);
+        next = next.nextElementSibling;
+        while (next?.classList?.contains('xhs-caret-anchor')) next = next.nextElementSibling;
+      }
+      return group;
+    }
+    function renumberContiguousListLines(activeLine) {
+      collectContiguousListLines(activeLine).forEach((line) => {
+        line.dataset.listType = 'unordered';
+        const marker = line.querySelector('.xhs-list-marker');
+        if (marker && !marker.classList.contains('xhs-list-marker-dot')) {
+          marker.replaceWith(listMarkerElement());
+        }
+      });
+    }
+    function splitListBodyHtml(textEl, range) {
+      const holder = document.createElement('div');
+      holder.appendChild(range.cloneContents());
+      const afterHtml = normalizeInlineHtml(holder.innerHTML || '');
+      const beforeRange = document.createRange();
+      beforeRange.selectNodeContents(textEl);
+      beforeRange.setEnd(range.startContainer, range.startOffset);
+      const beforeHolder = document.createElement('div');
+      beforeHolder.appendChild(beforeRange.cloneContents());
+      const beforeHtml = normalizeInlineHtml(beforeHolder.innerHTML || '');
+      return { beforeHtml, afterHtml };
+    }
+    function convertListLineToParagraph(line) {
+      const body = line?.querySelector?.('.xhs-list-body');
+      if (!body || !line?.classList?.contains('xhs-list-line')) return null;
+      const p = document.createElement('p');
+      p.className = 'xhs-p xhs-block';
+      p.innerHTML = body.innerHTML || '<br>';
+      line.replaceWith(p);
+      return p;
+    }
+    function removeEmptyListLine(line) {
+      const frame = line?.closest?.('[contenteditable="true"]');
+      let nextFocus = line.nextElementSibling;
+      while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.nextElementSibling;
+      if (!nextFocus) {
+        nextFocus = line.previousElementSibling;
+        while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.previousElementSibling;
+      }
+      line.remove();
+      if (nextFocus && frame) {
+        frame.focus({ preventScroll: true });
+        setCaretInside(nearestCaretTarget(nextFocus));
+      }
+      return nextFocus;
+    }
+    function handleParagraphBackspace(event) {
+      if (event.key !== 'Backspace' || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const frame = event.currentTarget;
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
+      if (!isEditableParagraphBlock(block)) return false;
+      if (!isCaretAtFieldStart(range, block)) return false;
+      event.preventDefault();
+      const prev = block.previousElementSibling;
+      while (prev?.classList?.contains('xhs-caret-anchor')) prev = prev.previousElementSibling;
+      if (!cleanText(block.textContent)) {
+        block.remove();
+        if (prev) {
+          frame.focus({ preventScroll: true });
+          setCaretAtFieldEnd(nearestCaretTarget(prev) || prev);
+        }
+      } else if (prev && isEditableParagraphBlock(prev)) {
+        const mergeOffset = (prev.textContent || '').length;
+        prev.innerHTML = normalizeInlineHtml((prev.innerHTML || '') + (block.innerHTML || ''));
+        block.remove();
+        frame.focus({ preventScroll: true });
+        const textNode = prev.firstChild;
+        if (textNode?.nodeType === Node.TEXT_NODE) {
+          const nextRange = document.createRange();
+          nextRange.setStart(textNode, Math.min(mergeOffset, textNode.textContent.length));
+          nextRange.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(nextRange);
+        } else {
+          setCaretAtFieldEnd(prev);
+        }
+      } else {
+        return false;
+      }
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(false);
+      return true;
+    }
+    function handleParagraphEnter(event) {
+      if (event.key !== 'Enter' || event.shiftKey || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const frame = event.currentTarget;
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
+      if (!isEditableParagraphBlock(block)) return false;
+      event.preventDefault();
+      if (isCaretAtFieldStart(range, block)) {
+        const emptyP = makeEmptyParagraph();
+        block.before(emptyP);
+        frame.focus({ preventScroll: true });
+        setCaretInside(block);
+      } else if (isCaretAtFieldEnd(range, block)) {
+        const emptyP = makeEmptyParagraph();
+        block.after(emptyP);
+        frame.focus({ preventScroll: true });
+        setCaretInside(emptyP);
+      } else {
+        const { beforeHtml, afterHtml } = splitParagraphHtml(block, range);
+        block.innerHTML = beforeHtml || '<br>';
+        const nextP = makeEmptyParagraph();
+        if (afterHtml) nextP.innerHTML = afterHtml;
+        block.after(nextP);
+        frame.focus({ preventScroll: true });
+        setCaretInside(nextP);
+      }
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(false);
+      return true;
+    }
+    function handleListBackspace(event) {
+      if (event.key !== 'Backspace' || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const parent = range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement;
+      const textEl = parent?.closest?.('.xhs-list-body');
+      const line = textEl?.closest?.('.xhs-list-line');
+      if (!textEl || !line || !stageScale.contains(line)) return false;
+      if (!isCaretAtFieldStart(range, textEl)) return false;
+      event.preventDefault();
+      const frame = line.closest('[contenteditable="true"]');
+      if (!cleanText(textEl.textContent)) {
+        removeEmptyListLine(line);
+      } else {
+        const p = convertListLineToParagraph(line);
+        if (p && frame) {
+          frame.focus({ preventScroll: true });
+          setCaretInside(p);
+        }
+      }
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(false);
+      return true;
+    }
+    function handleListEnter(event) {
+      if (event.key !== 'Enter' || event.shiftKey || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const parent = range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement;
+      const textEl = parent?.closest?.('.xhs-list-body');
+      const line = textEl?.closest?.('.xhs-list-line');
+      if (!textEl || !line || !stageScale.contains(line)) return false;
+      event.preventDefault();
+      const frame = line.closest('[contenteditable="true"]');
+      if (isCaretAtFieldStart(range, textEl)) {
+        const newLine = buildListLine({ html: '<br>', plain: '' });
+        line.before(newLine);
+        renumberContiguousListLines(line);
+        frame?.focus({ preventScroll: true });
+        setCaretInside(textEl);
+        saveCurrentPage({ skipNormalize: true });
+        scheduleOverflowReflow(false);
+        return true;
+      }
+      const { beforeHtml, afterHtml } = splitListBodyHtml(textEl, range);
+      textEl.innerHTML = beforeHtml || '<br>';
+      const nextLine = buildListLine({ html: afterHtml || '<br>', plain: '' });
+      line.after(nextLine);
+      renumberContiguousListLines(line);
+      const nextBody = nextLine.querySelector('.xhs-list-body');
+      if (nextBody) {
+        frame?.focus({ preventScroll: true });
+        setCaretInside(nextBody);
+      }
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(false);
+      return true;
+    }
     function directFlowChild(frame, node, offset = 0) {
       let element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       if (node === frame) {
@@ -3061,7 +3440,7 @@ function studioHtmlV2(payload, libs) {
     function caretFieldForBlock(block, node) {
       const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       return element?.closest?.('.xhs-heading-title, .xhs-heading-number') ||
-        block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-reason-text') ||
+        block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body') ||
         block;
     }
     function isCaretAtFieldStart(range, field) {
@@ -3076,6 +3455,76 @@ function studioHtmlV2(payload, libs) {
       } finally {
         probe.detach?.();
       }
+    }
+    function isCaretAtFieldEnd(range, field) {
+      if (!range?.collapsed || !field) return false;
+      const probe = document.createRange();
+      try {
+        probe.selectNodeContents(field);
+        probe.setStart(range.startContainer, range.startOffset);
+        return !cleanText(probe.toString().replace(String.fromCharCode(8288), ''));
+      } catch (_) {
+        return false;
+      } finally {
+        probe.detach?.();
+      }
+    }
+    function isHistoryShortcut(event) {
+      const key = String(event.key || '').toLowerCase();
+      const mod = Boolean(event.ctrlKey || event.metaKey);
+      return mod && (key === 'z' || key === 'y' || (event.shiftKey && key === 'z'));
+    }
+    function isHistoryInputType(inputType) {
+      return /^history(?:Undo|Redo)$/.test(String(inputType || ''));
+    }
+    function cancelPendingReflow() {
+      window.clearTimeout(reflowTimer);
+      window.clearTimeout(layoutReflowTimer);
+      reflowForcePending = false;
+    }
+    function isStructuralHaloBlock(node) {
+      return node?.classList?.contains('xhs-heading') ||
+        node?.classList?.contains('xhs-callout') ||
+        node?.classList?.contains('xhs-quote') ||
+        node?.classList?.contains('xhs-table-block') ||
+        node?.classList?.contains('xhs-image-block') ||
+        node?.classList?.contains('xhs-image-grid');
+    }
+    function isHaloTargetBlock(node) {
+      return isStructuralHaloBlock(node);
+    }
+    function isEditableParagraphBlock(block) {
+      return Boolean(block?.classList?.contains('xhs-p') &&
+        !block.classList.contains('xhs-manual-blank') &&
+        !block.classList.contains('xhs-list-line') &&
+        !block.classList.contains('xhs-caret-anchor'));
+    }
+    function makeEmptyParagraph() {
+      const p = document.createElement('p');
+      p.className = 'xhs-p xhs-block';
+      p.innerHTML = '<br>';
+      return p;
+    }
+    function splitParagraphHtml(block, range) {
+      const holder = document.createElement('div');
+      holder.appendChild(range.cloneContents());
+      const afterHtml = normalizeInlineHtml(holder.innerHTML || '');
+      const beforeRange = document.createRange();
+      beforeRange.selectNodeContents(block);
+      beforeRange.setEnd(range.startContainer, range.startOffset);
+      const beforeHolder = document.createElement('div');
+      beforeHolder.appendChild(beforeRange.cloneContents());
+      const beforeHtml = normalizeInlineHtml(beforeHolder.innerHTML || '');
+      return { beforeHtml, afterHtml };
+    }
+    function setCaretAtFieldEnd(field) {
+      const selection = window.getSelection();
+      if (!selection || !field) return;
+      const range = document.createRange();
+      range.selectNodeContents(field);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
     }
     function isCaretAtFlowBlockStart(range, block) {
       if (!range?.collapsed || !block) return false;
@@ -3115,31 +3564,24 @@ function studioHtmlV2(payload, libs) {
       return { blanks, firstContent };
     }
     function nearestCaretTarget(block) {
-      return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-reason-text') || block;
+      return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body') || block;
     }
-    function stripEphemeralEmptyParagraphs(frame) {
-      Array.from(frame?.children || []).forEach((node) => {
-        if (node.classList?.contains('xhs-manual-blank') || node.classList?.contains('xhs-caret-anchor')) return;
-        if (!isEmptyGeneratedFlowBlock(node)) return;
-        if (!node.classList?.contains('xhs-p') && !node.classList?.contains('xhs-rich')) return;
-        node.remove();
-      });
-    }
-    function armManualBlankDeleteGuard() {
-      manualBlankDeleteGuardUntil = Date.now() + 250;
-    }
-    function shouldRebalanceFlowPages(frame) {
-      return Boolean(frame?.closest?.('.xhs-body-card'));
+    function markManualBlankDeleteHandled() {
+      manualBlankDeleteKeydownHandled = true;
+      window.clearTimeout(manualBlankDeleteKeydownTimer);
+      manualBlankDeleteKeydownTimer = window.setTimeout(() => {
+        manualBlankDeleteKeydownHandled = false;
+      }, 80);
     }
     function finalizeManualBlankDelete(frame, caretTarget) {
-      stripEphemeralEmptyParagraphs(frame);
-      ensureEditorCaretAnchors(stageScale);
-      if (caretTarget?.isConnected) setCaretInside(nearestCaretTarget(caretTarget));
-      armManualBlankDeleteGuard();
-      saveCurrentPage();
-      scheduleOverflowReflow(shouldRebalanceFlowPages(frame));
+      if (caretTarget?.isConnected) {
+        frame.focus({ preventScroll: true });
+        setCaretInside(nearestCaretTarget(caretTarget));
+      }
+      saveCurrentPage({ skipNormalize: true });
     }
     function handleManualBlankDelete(event) {
+      if (isHistoryShortcut(event)) return false;
       const key = event.key || (event.inputType === 'deleteContentForward' ? 'Delete' :
         (event.inputType === 'deleteContentBackward' ? 'Backspace' : ''));
       if (key !== 'Backspace' && key !== 'Delete') return false;
@@ -3148,6 +3590,7 @@ function studioHtmlV2(payload, libs) {
           event.preventDefault();
           return true;
         }
+        if (isHistoryInputType(event.inputType)) return false;
       }
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
@@ -3160,15 +3603,13 @@ function studioHtmlV2(payload, libs) {
         event.preventDefault();
         const isLeadingBlank = leading.blanks.includes(block);
         const target = isLeadingBlank ? leading.firstContent : (block.nextElementSibling || block.previousElementSibling);
-        (isLeadingBlank ? leading.blanks : [block]).forEach((blank) => blank.remove());
+        const blanksToRemove = isLeadingBlank ? [block] : [block];
+        blanksToRemove.forEach((blank) => blank.remove());
         finalizeManualBlankDelete(frame, target);
-        if (event.type === 'keydown') {
-          manualBlankDeleteKeydownHandled = true;
-          queueMicrotask(() => { manualBlankDeleteKeydownHandled = false; });
-        }
+        if (event.type === 'keydown' || event.type === 'beforeinput') markManualBlankDeleteHandled();
         return true;
       }
-      if (key !== 'Backspace') return false;
+      if (!isStructuralHaloBlock(block)) return false;
       const field = caretFieldForBlock(block, range.startContainer);
       const atBlockStart = isCaretAtFlowBlockStart(range, block);
       const headingNumber = block.classList.contains('xhs-heading')
@@ -3176,11 +3617,22 @@ function studioHtmlV2(payload, libs) {
         : null;
       const caretInsideHeadingNumber = Boolean(headingNumber &&
         (range.startContainer === headingNumber || headingNumber.contains(range.startContainer)));
-      if (!atBlockStart && !caretInsideHeadingNumber && !isCaretAtFieldStart(range, field)) return false;
+      const atFieldStart = isCaretAtFieldStart(range, field);
+      if (key === 'Delete' && leading.firstContent === block && leading.blanks.length &&
+        (atBlockStart || atFieldStart || caretInsideHeadingNumber)) {
+        event.preventDefault();
+        leading.blanks.slice(0, 1).forEach((blank) => blank.remove());
+        const caretTarget = caretInsideHeadingNumber && headingNumber ? headingNumber : field;
+        finalizeManualBlankDelete(frame, caretTarget);
+        if (event.type === 'keydown' || event.type === 'beforeinput') markManualBlankDeleteHandled();
+        return true;
+      }
+      if (key !== 'Backspace') return false;
+      if (!atBlockStart && !caretInsideHeadingNumber && !atFieldStart) return false;
       const leadingBlanks = leading.firstContent === block ? leading.blanks : [];
       const blanks = leadingBlanks.length
-        ? leadingBlanks
-        : contiguousManualBlanksBefore(block);
+        ? leadingBlanks.slice(0, 1)
+        : contiguousManualBlanksBefore(block).slice(-1);
       if (!blanks.length) return false;
       event.preventDefault();
       blanks.forEach((blank) => blank.remove());
@@ -3188,10 +3640,7 @@ function studioHtmlV2(payload, libs) {
         ? headingNumber
         : field;
       finalizeManualBlankDelete(frame, caretTarget);
-      if (event.type === 'keydown') {
-        manualBlankDeleteKeydownHandled = true;
-        queueMicrotask(() => { manualBlankDeleteKeydownHandled = false; });
-      }
+      if (event.type === 'keydown' || event.type === 'beforeinput') markManualBlankDeleteHandled();
       return true;
     }
     function bindBlockHalo() {
@@ -3231,7 +3680,10 @@ function studioHtmlV2(payload, libs) {
         return sibling?.classList?.contains('xhs-manual-blank') ? sibling : null;
       }
       function syncBlankControls(block) {
-        const hasBefore = Boolean(adjacentManualBlank(block, 'before'));
+        const frame = block?.closest?.('[contenteditable="true"]');
+        const leading = frame ? leadingManualBlankContext(frame) : null;
+        const hasBefore = Boolean(adjacentManualBlank(block, 'before')) ||
+          Boolean(leading?.firstContent === block && leading.blanks.length);
         const hasAfter = Boolean(adjacentManualBlank(block, 'after'));
         btnBefore.style.left = hasBefore ? 'calc(50% - 13px)' : '50%';
         btnBeforeRemove.style.left = 'calc(50% + 13px)';
@@ -3290,7 +3742,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(shouldRebalanceFlowPages(targetBlock));
+        scheduleOverflowReflow(true);
       });
       btnAfter.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -3301,38 +3753,57 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(shouldRebalanceFlowPages(targetBlock));
+        scheduleOverflowReflow(true);
       });
       function removeAdjacentBlank(e, direction) {
         e.preventDefault();
         if (!targetBlock) return;
-        const blank = adjacentManualBlank(targetBlock, direction);
-        if (!blank) return;
-        blank.remove();
-        ensureEditorCaretAnchors(stageScale);
-        saveCurrentPage();
+        const frame = targetBlock.closest?.('[contenteditable="true"]');
+        const leading = frame ? leadingManualBlankContext(frame) : { blanks: [], firstContent: null };
+        if (direction === 'before' && leading.firstContent === targetBlock && leading.blanks.length) {
+          leading.blanks.slice(0, 1).forEach((blank) => blank.remove());
+        } else {
+          const blank = adjacentManualBlank(targetBlock, direction);
+          if (!blank) return;
+          blank.remove();
+        }
+        saveCurrentPage({ skipNormalize: true });
         showHalo(targetBlock);
-        scheduleOverflowReflow(shouldRebalanceFlowPages(targetBlock));
       }
       btnBeforeRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'before'));
       btnAfterRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'after'));
       const frame = stageScale.querySelector('.xhs-cover-tail-frame') ||
         stageScale.querySelector('.xhs-body-card .xhs-body-frame');
       if (!frame) return;
+      frame.addEventListener('mousedown', (e) => {
+        const blank = e.target.closest?.('.xhs-manual-blank');
+        if (blank && frame.contains(blank)) {
+          e.preventDefault();
+          setCaretInside(blank);
+        }
+      });
       frame.addEventListener('mouseover', (e) => {
-        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-reason-stack, .xhs-table-block, .xhs-heading');
-        if (hard && frame.contains(hard)) showHalo(hard);
+        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-table-block, .xhs-heading');
+        if (hard && frame.contains(hard) && isHaloTargetBlock(hard)) showHalo(hard);
       });
       frame.addEventListener('mouseleave', hideHalo);
     }
     function bindEditableReflow() {
       stageScale.querySelectorAll('[contenteditable="true"]').forEach((editable) => {
-        if (editable.classList.contains('xhs-body-frame')) {
+        if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+          editable.addEventListener('keydown', handleParagraphBackspace);
+          editable.addEventListener('keydown', handleParagraphEnter);
+          editable.addEventListener('keydown', handleListBackspace);
           editable.addEventListener('keydown', handleManualBlankDelete);
           editable.addEventListener('beforeinput', (event) => {
+            if (isHistoryInputType(event.inputType)) {
+              cancelPendingReflow();
+              return;
+            }
             if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) handleManualBlankDelete(event);
           });
           editable.addEventListener('keydown', handleHeadingEnter);
+          editable.addEventListener('keydown', handleListEnter);
           editable.addEventListener('paste', (event) => handleImagePaste(event, editable));
         }
         if (editable.classList.contains('cover-title') || editable.classList.contains('cover-subtitle')) {
@@ -3354,10 +3825,21 @@ function studioHtmlV2(payload, libs) {
             enforceCoverSubtitleLimit(editable);
             balanceCoverSubtitle();
           }
-          const force = editable.classList.contains('xhs-body-frame') &&
-            /insertFromPaste|deleteContent|deleteByCut|historyUndo|historyRedo/.test(inputType);
-          if (editable.classList.contains('xhs-body-frame') && activeHeadingEditField()) scheduleHeadingNormalize();
-          scheduleOverflowReflow(force);
+          if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+            if (isHistoryInputType(inputType)) {
+              cancelPendingReflow();
+              scheduleLightSave();
+              return;
+            }
+            scheduleLightSave();
+            if (activeHeadingEditField()) scheduleHeadingNormalize();
+            if (/insertFromPaste|insertParagraph|insertLineBreak|insertText/.test(inputType)) {
+              window.setTimeout(() => {
+                if (editable.scrollHeight > editable.clientHeight + 8) scheduleOverflowReflow(false);
+              }, 80);
+            }
+            return;
+          }
         });
       });
     }
@@ -3704,7 +4186,7 @@ function studioHtmlV2(payload, libs) {
       if (shouldSave) saveCurrentPage();
     }
     function reorderableFlowNode(target) {
-      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-reason-stack, .xhs-table-block, .xhs-image-grid, .xhs-image-block');
+      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-image-grid, .xhs-image-block');
     }
     function flowBlocksInBody(bodyFrame) {
       return Array.from(bodyFrame.children).filter((node) => {
@@ -3715,7 +4197,7 @@ function studioHtmlV2(payload, libs) {
           node.classList?.contains('xhs-p') ||
           node.classList?.contains('xhs-callout') ||
           node.classList?.contains('xhs-quote') ||
-          node.classList?.contains('xhs-reason-stack') ||
+          node.classList?.contains('xhs-list-line') ||
           node.classList?.contains('xhs-table-block') ||
           node.classList?.contains('xhs-rich');
       });
@@ -4303,7 +4785,7 @@ function studioHtmlV2(payload, libs) {
       saveCurrentPage();
     }
     function applyFormattingMultiBlock(range, className) {
-      const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-reason-text';
+      const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body';
       const frame = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
@@ -4352,7 +4834,7 @@ function studioHtmlV2(payload, libs) {
       toggleInlineClass('xhs-green-underline', 'box-shadow');
     }
     function blockNestHost(node) {
-      return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-reason-text');
+      return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-list-body');
     }
     function nextAutoHeadingNumber() {
       const existingLevel1 = stageScale.querySelectorAll('.xhs-heading[data-level="1"], .xhs-heading:not([data-level])');
@@ -4372,8 +4854,8 @@ function studioHtmlV2(payload, libs) {
       if (quote) return { type: 'quote', el: quote };
       const callout = el.closest('.xhs-callout');
       if (callout) return { type: 'card', el: callout };
-      const list = el.closest('.xhs-reason-stack');
-      if (list) return { type: 'list', el: list };
+      const list = el.closest('.xhs-list-line');
+      if (list) return { type: 'list', el: list, listType: list.dataset.listType || 'unordered' };
       return null;
     }
     function flowBlockContentHtml(info) {
@@ -4387,7 +4869,8 @@ function studioHtmlV2(payload, libs) {
         return body ? body.innerHTML : info.el.innerHTML;
       }
       if (info.type === 'list') {
-        return Array.from(info.el.querySelectorAll('.xhs-reason-text')).map((node) => node.innerHTML).join('<br>');
+        const body = info.el.querySelector('.xhs-list-body');
+        return body ? body.innerHTML : info.el.innerHTML;
       }
       return info.el.innerHTML;
     }
@@ -4402,7 +4885,8 @@ function studioHtmlV2(payload, libs) {
         return textWithBreaks(body || info.el);
       }
       if (info.type === 'list') {
-        return Array.from(info.el.querySelectorAll('.xhs-reason-text')).map((node) => textWithBreaks(node)).join('\\n');
+        const body = info.el.querySelector('.xhs-list-body');
+        return textWithBreaks(body || info.el);
       }
       return textWithBreaks(info.el);
     }
@@ -4429,12 +4913,12 @@ function studioHtmlV2(payload, libs) {
       if (targetType === 'list') {
         const html = stripListMarkerFromHtml(normalizeInlineHtml(flowBlockContentHtml(info)));
         const plain = stripLeadingListMarkerText(cleanText(flowBlockPlainText(info)));
-        return buildReasonStack([{ html, plain }], 'unordered');
+        return buildListLine({ html, plain });
       }
       return null;
     }
     function focusFlowBlock(block) {
-      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-reason-text') || block;
+      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body') || block;
       if (target) setCaretInside(target);
     }
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
@@ -4444,17 +4928,12 @@ function studioHtmlV2(payload, libs) {
       const sameType = info.type === targetType && (targetType !== 'heading' || info.level === targetLevel);
       if (sameType) {
         if (info.type === 'list') {
-          const frag = document.createDocumentFragment();
-          info.el.querySelectorAll('.xhs-reason-text').forEach((node) => {
-            const p = document.createElement('p');
-            p.className = 'xhs-p xhs-block';
-            p.innerHTML = node.innerHTML;
-            frag.appendChild(p);
-          });
-          const firstP = frag.firstElementChild;
-          info.el.replaceWith(frag);
+          const p = document.createElement('p');
+          p.className = 'xhs-p xhs-block';
+          p.innerHTML = flowBlockContentHtml(info);
+          info.el.replaceWith(p);
           selection?.removeAllRanges();
-          if (firstP) setCaretInside(firstP);
+          setCaretInside(p);
         } else {
           const p = document.createElement('p');
           p.className = 'xhs-p xhs-block';
@@ -4649,18 +5128,26 @@ function studioHtmlV2(payload, libs) {
         items: [{ html: normalizeInlineHtml(holder.innerHTML || plain), plain }],
       };
     }
-    function buildReasonStack(items, listType = 'unordered') {
-      const stack = document.createElement('section');
-      stack.className = 'xhs-reason-stack xhs-block';
-      stack.dataset.listType = listType;
-      stack.innerHTML = items.map((entry, index) => {
-        const marker = listType === 'ordered'
-          ? '<span class="xhs-reason-number">' + esc(String(index + 1)) + '</span>'
-          : '<span class="xhs-reason-dot"></span>';
-        return '<section class="xhs-reason-card">' + marker +
-          '<span class="xhs-reason-text">' + stripListMarkerFromHtml(entry.html) + '</span></section>';
-      }).join('');
-      return stack;
+    function inferListTypeFromItems() {
+      return 'unordered';
+    }
+    function insertListLines(lines, item, parent) {
+      if (!lines.length) return;
+      const frag = document.createDocumentFragment();
+      lines.forEach((line) => frag.appendChild(line));
+      if (item.mode === 'blocks') {
+        const first = item.blocks[0];
+        first.before(frag);
+        item.blocks.forEach((block) => block.remove());
+        return;
+      }
+      const sourceBlock = parent?.closest?.('.xhs-p, .xhs-rich, .xhs-list-line');
+      if (sourceBlock && stageScale.contains(sourceBlock) && rangeCoversEntireBlock(item.range, sourceBlock)) {
+        sourceBlock.replaceWith(frag);
+        return;
+      }
+      item.range.deleteContents();
+      item.range.insertNode(frag);
     }
     function makeListBlock() {
       if (tryToggleOrSwitchFlowBlock('list')) return;
@@ -4677,20 +5164,8 @@ function studioHtmlV2(payload, libs) {
         alert('请先选中至少一行文字。多段/多行会拆成多条序列。');
         return;
       }
-      const stack = buildReasonStack(collected.items, 'unordered');
-      if (collected.mode === 'blocks') {
-        const first = collected.blocks[0];
-        first.before(stack);
-        collected.blocks.forEach((block) => block.remove());
-      } else {
-        const sourceBlock = parent?.closest?.('.xhs-p, .xhs-rich');
-        if (sourceBlock && stageScale.contains(sourceBlock) && rangeCoversEntireBlock(item.range, sourceBlock)) {
-          sourceBlock.replaceWith(stack);
-        } else {
-          item.range.deleteContents();
-          item.range.insertNode(stack);
-        }
-      }
+      const lines = buildListLines(collected.items);
+      insertListLines(lines, collected, parent);
       item.selection.removeAllRanges();
       saveCurrentPage();
       scheduleOverflowReflow(true);
@@ -5186,7 +5661,7 @@ function studioHtmlV2(payload, libs) {
       if (frame) selectFrame(frame);
     }
     [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
-      button.addEventListener('mousedown', (event) => event.preventDefault());
+      button?.addEventListener('mousedown', (event) => event.preventDefault());
     });
     document.getElementById('boldBtn').addEventListener('click', boldSelection);
     headingBtn1.addEventListener('click', () => makeHeadingBlock('1'));
@@ -5195,7 +5670,7 @@ function studioHtmlV2(payload, libs) {
     greenTextBtn.addEventListener('click', applyGreenText);
     greenUnderlineBtn.addEventListener('click', applyGreenUnderline);
     keypointBtn.addEventListener('click', makeKeypointBlock);
-    listBtn.addEventListener('click', makeListBlock);
+    listBtn?.addEventListener('click', makeListBlock);
     coverImageOnBtn?.addEventListener('click', () => applyCoverImageMode(true));
     coverImageOffBtn?.addEventListener('click', () => applyCoverImageMode(false));
     fontWechatBtn.addEventListener('click', () => setFontMode('wechat'));
@@ -5225,6 +5700,13 @@ function studioHtmlV2(payload, libs) {
     imageSplitGridBtn.addEventListener('click', splitSelectedImageGrid);
     [imageWidthRange, imageHeightRange, imageZoomRange, imageXRange, imageYRange].forEach((input) => {
       input.addEventListener('input', applyImageStyle);
+    });
+    document.addEventListener('selectionchange', () => {
+      if (!stageScale?.isConnected) return;
+      syncPanelTools();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (isHistoryShortcut(event)) cancelPendingReflow();
     });
     document.addEventListener('keydown', (event) => {
       if (!selectedFrame) return;
@@ -5270,14 +5752,15 @@ function main() {
   const resolved = resolveInput(opts.input);
   try {
     const markdown = fs.readFileSync(resolved.markdownFile, "utf8");
-    const { frontmatter } = parseFrontmatter(markdown);
+    const { frontmatter, chineseMeta } = prepareMarkdownBody(markdown);
     const title = opts.title || extractTitle(markdown) || path.basename(resolved.markdownFile, path.extname(resolved.markdownFile));
-    const subtitle = opts.subtitle || frontmatter.subtitle || "";
+    const subtitle = opts.subtitle || frontmatter.subtitle || chineseMeta.subtitle || "";
     const base = slugify(title);
     const outDir = path.resolve(opts.outputDir || path.join(path.dirname(resolved.markdownFile), `${base}-xhs`));
     fs.mkdirSync(outDir, { recursive: true });
 
-    const sourceHtml = renderNativeXhsSourceHtml(resolved.markdownFile, markdown, title);
+    const coverTitleExplicit = isCoverTitleExplicit(markdown, opts.title);
+    const sourceHtml = renderNativeXhsSourceHtml(resolved.markdownFile, markdown, title, { coverTitleExplicit });
     const extracted = extractWechatContent(sourceHtml);
     const markdownVideoWarnings = extractMarkdownVideoWarnings(markdown);
     const seenWarningSrc = new Set();
