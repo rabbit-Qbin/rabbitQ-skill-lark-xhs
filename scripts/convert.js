@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.10";
+const VERSION = "0.8.12";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -1054,6 +1054,7 @@ function studioHtmlV2(payload, libs) {
     let imageIdCounter = 0;
     let caretMarkerCounter = 0;
     let manualBlankDeleteGuardUntil = 0;
+    let manualBlankDeleteKeydownHandled = false;
     const boundFrames = new WeakSet();
     const imageResizeObserver = window.ResizeObserver ? new ResizeObserver((entries) => {
       entries.forEach((entry) => {
@@ -2298,8 +2299,25 @@ function studioHtmlV2(payload, libs) {
     function isPlainSplittable(block) {
       return block.classList.contains('xhs-p') || block.classList.contains('xhs-rich');
     }
+    function isAtomicFlowBlock(block) {
+      return block.classList.contains('xhs-heading') ||
+        block.classList.contains('xhs-callout') ||
+        block.classList.contains('xhs-quote') ||
+        block.classList.contains('xhs-reason-stack') ||
+        block.classList.contains('xhs-image-block') ||
+        block.classList.contains('xhs-image-grid') ||
+        block.classList.contains('xhs-table-block');
+    }
     function isSplittableTextBlock(block) {
-      return isPlainSplittable(block) || block.classList.contains('xhs-table-block');
+      return isPlainSplittable(block) && !isAtomicFlowBlock(block);
+    }
+    function sanitizeMergedFlowBlocks(blocks) {
+      return blocks.filter((node) => {
+        if (node.classList?.contains('xhs-manual-blank') || node.dataset?.xhsPageBreak === '1') return true;
+        if (node.classList?.contains('xhs-caret-anchor')) return false;
+        if (isEmptyGeneratedFlowBlock(node) && isPlainSplittable(node)) return false;
+        return true;
+      });
     }
     function preferredTextSplitIndex(text, best, total) {
       if (!text || best <= 2 || best >= total - 1) return best;
@@ -2423,10 +2441,8 @@ function studioHtmlV2(payload, libs) {
       };
     }
     function splitTextBlockToFit(block, available) {
-      if (isPlainSplittable(block)) return splitPlainTextBlock(block, available);
-      if (block.classList.contains('xhs-callout')) return splitCalloutBlock(block, available);
-      if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
-      return null;
+      if (!isSplittableTextBlock(block)) return null;
+      return splitPlainTextBlock(block, available);
     }
     function paginateBlocks(blocks) {
       const nextPages = [];
@@ -2453,12 +2469,14 @@ function studioHtmlV2(payload, libs) {
             remaining = config.pageLimit;
           }
           if (current.length && h > remaining) {
-            const split = splitTextBlockToFit(block, remaining);
-            if (split) {
-              current.push(split.head);
-              pushPage();
-              pending = split.tail;
-              continue;
+            if (isSplittableTextBlock(block)) {
+              const split = splitTextBlockToFit(block, remaining);
+              if (split) {
+                current.push(split.head);
+                pushPage();
+                pending = split.tail;
+                continue;
+              }
             }
             pushPage();
             continue;
@@ -2883,6 +2901,7 @@ function studioHtmlV2(payload, libs) {
     }
     function scheduleOverflowReflow(force = false) {
       window.clearTimeout(reflowTimer);
+      if (force) manualBlankDeleteGuardUntil = Date.now() + 900;
       reflowTimer = window.setTimeout(() => {
         const frame = stageScale.querySelector('.xhs-cover-tail-frame') ||
           stageScale.querySelector('.xhs-body-card .xhs-body-frame');
@@ -2891,6 +2910,8 @@ function studioHtmlV2(payload, libs) {
           return;
         }
         saveCurrentPage();
+        // Continuous-flow rebalance: merge all body pages and re-paginate.
+        // force=true after blank-line edits so freed space pulls content back up.
         if (force || frame.scrollHeight > frame.clientHeight + 8) reflow();
       }, 520);
     }
@@ -3068,6 +3089,17 @@ function studioHtmlV2(payload, libs) {
       while (previous?.classList?.contains('xhs-caret-anchor')) previous = previous.previousElementSibling;
       return previous?.classList?.contains('xhs-manual-blank') ? previous : null;
     }
+    function contiguousManualBlanksBefore(block) {
+      const blanks = [];
+      let sibling = block?.previousElementSibling;
+      while (sibling?.classList?.contains('xhs-caret-anchor')) sibling = sibling.previousElementSibling;
+      while (sibling?.classList?.contains('xhs-manual-blank')) {
+        blanks.unshift(sibling);
+        sibling = sibling.previousElementSibling;
+        while (sibling?.classList?.contains('xhs-caret-anchor')) sibling = sibling.previousElementSibling;
+      }
+      return blanks;
+    }
     function leadingManualBlankContext(frame) {
       const blanks = [];
       let firstContent = null;
@@ -3096,20 +3128,23 @@ function studioHtmlV2(payload, libs) {
     function armManualBlankDeleteGuard() {
       manualBlankDeleteGuardUntil = Date.now() + 250;
     }
+    function shouldRebalanceFlowPages(frame) {
+      return Boolean(frame?.closest?.('.xhs-body-card'));
+    }
     function finalizeManualBlankDelete(frame, caretTarget) {
       stripEphemeralEmptyParagraphs(frame);
       ensureEditorCaretAnchors(stageScale);
       if (caretTarget?.isConnected) setCaretInside(nearestCaretTarget(caretTarget));
       armManualBlankDeleteGuard();
       saveCurrentPage();
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(shouldRebalanceFlowPages(frame));
     }
     function handleManualBlankDelete(event) {
       const key = event.key || (event.inputType === 'deleteContentForward' ? 'Delete' :
         (event.inputType === 'deleteContentBackward' ? 'Backspace' : ''));
       if (key !== 'Backspace' && key !== 'Delete') return false;
       if (event.type === 'beforeinput') {
-        if (Date.now() < manualBlankDeleteGuardUntil) {
+        if (manualBlankDeleteKeydownHandled) {
           event.preventDefault();
           return true;
         }
@@ -3127,6 +3162,10 @@ function studioHtmlV2(payload, libs) {
         const target = isLeadingBlank ? leading.firstContent : (block.nextElementSibling || block.previousElementSibling);
         (isLeadingBlank ? leading.blanks : [block]).forEach((blank) => blank.remove());
         finalizeManualBlankDelete(frame, target);
+        if (event.type === 'keydown') {
+          manualBlankDeleteKeydownHandled = true;
+          queueMicrotask(() => { manualBlankDeleteKeydownHandled = false; });
+        }
         return true;
       }
       if (key !== 'Backspace') return false;
@@ -3139,7 +3178,9 @@ function studioHtmlV2(payload, libs) {
         (range.startContainer === headingNumber || headingNumber.contains(range.startContainer)));
       if (!atBlockStart && !caretInsideHeadingNumber && !isCaretAtFieldStart(range, field)) return false;
       const leadingBlanks = leading.firstContent === block ? leading.blanks : [];
-      const blanks = leadingBlanks.length ? leadingBlanks : [previousManualBlank(block)].filter(Boolean);
+      const blanks = leadingBlanks.length
+        ? leadingBlanks
+        : contiguousManualBlanksBefore(block);
       if (!blanks.length) return false;
       event.preventDefault();
       blanks.forEach((blank) => blank.remove());
@@ -3147,6 +3188,10 @@ function studioHtmlV2(payload, libs) {
         ? headingNumber
         : field;
       finalizeManualBlankDelete(frame, caretTarget);
+      if (event.type === 'keydown') {
+        manualBlankDeleteKeydownHandled = true;
+        queueMicrotask(() => { manualBlankDeleteKeydownHandled = false; });
+      }
       return true;
     }
     function bindBlockHalo() {
@@ -3245,7 +3290,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(shouldRebalanceFlowPages(targetBlock));
       });
       btnAfter.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -3256,7 +3301,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(shouldRebalanceFlowPages(targetBlock));
       });
       function removeAdjacentBlank(e, direction) {
         e.preventDefault();
@@ -3267,7 +3312,7 @@ function studioHtmlV2(payload, libs) {
         ensureEditorCaretAnchors(stageScale);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(shouldRebalanceFlowPages(targetBlock));
       }
       btnBeforeRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'before'));
       btnAfterRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'after'));
@@ -5119,7 +5164,7 @@ function studioHtmlV2(payload, libs) {
         const frame = holder.querySelector('.xhs-body-frame');
         Array.from(frame?.children || []).forEach((node) => merged.appendChild(node));
       });
-      const blocks = Array.from(merged.children);
+      const blocks = sanitizeMergedFlowBlocks(Array.from(merged.children));
       const baseBlocks = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       if (!coverImageEnabled) {
