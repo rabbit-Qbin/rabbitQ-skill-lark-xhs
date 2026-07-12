@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.26";
+const VERSION = "0.8.27";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -573,12 +573,45 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     }
     return "";
   }
+  function lastMarkdownBlockKind() {
+    const last = blocks[blocks.length - 1] || "";
+    if (!last) return "none";
+    if (last.includes("data-xhs-flow-blank")) return "blank";
+    if (last.includes("data-xhs-heading-level")) return "heading";
+    if (last.includes("data-xhs-block-type=\"list\"")) return "list";
+    if (last.includes("data-xhs-block-type=\"table\"")) return "table";
+    if (last.includes("data-xhs-page-break")) return "pagebreak";
+    if (last.includes("<img")) return "image";
+    if (last.includes("data-xhs-block-type=\"callout\"")) return "callout";
+    if (last.includes("data-xhs-block-type=\"quote\"")) return "quote";
+    if (last.startsWith("<p>")) return "prose";
+    if (/<section[^>]*><strong>/.test(last)) return "prose";
+    return "other";
+  }
   function isMarkdownHeadingLine(text) {
     return /^#{1,6}\s+/.test(String(text || "").trim());
   }
-  function lastMarkdownBlockIsHeading() {
-    const last = blocks[blocks.length - 1] || "";
-    return /data-xhs-heading-level/i.test(last);
+  function upcomingMarkdownLineKind(text) {
+    const line = String(text || "").trim();
+    if (!line) return "none";
+    if (isMarkdownHeadingLine(line)) return "heading";
+    if (/^!\[/.test(line)) return "image";
+    if (markdownListType(line)) return "list";
+    if (/^>\s?/.test(line)) return "quote";
+    if (/^`{3}/.test(line)) return "code";
+    if (splitMarkdownTableRow(line).length >= 2) return "table";
+    const strongOnly = line.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)$/);
+    if (strongOnly && plainMarkdownText(line).length >= 18) return "callout";
+    return "prose";
+  }
+  function shouldInsertMarkdownFlowBlank(upcoming) {
+    const last = lastMarkdownBlockKind();
+    const next = upcomingMarkdownLineKind(upcoming);
+    const structural = new Set(["heading", "list", "image", "table", "quote", "pagebreak", "blank", "none", "other", "code"]);
+    if (structural.has(last) || structural.has(next)) return false;
+    if (last === "prose" && next === "prose") return true;
+    if (last === "callout" && next === "prose") return true;
+    return false;
   }
   function pushFlowBlank() {
     const last = blocks[blocks.length - 1] || "";
@@ -656,7 +689,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
       const hadBlocks = blocks.length > 0;
       const hadPending = paragraph.length > 0 || list.length > 0 || quote.length > 0 || code.length > 0;
       flushAll();
-      if (!upcoming || isMarkdownHeadingLine(upcoming) || lastMarkdownBlockIsHeading()) continue;
+      if (!upcoming || !shouldInsertMarkdownFlowBlank(upcoming)) continue;
       if (hadBlocks || hadPending) pushFlowBlank();
       continue;
     }
@@ -3602,12 +3635,20 @@ function studioHtmlV2(payload, libs) {
         manualBlankDeleteKeydownHandled = false;
       }, 80);
     }
+    function scheduleReflowAfterBlankRemoval() {
+      cancelPendingReflow();
+      reflowTimer = window.setTimeout(() => {
+        reflow();
+        reflowForcePending = false;
+      }, 180);
+    }
     function finalizeManualBlankDelete(frame, caretTarget) {
       if (caretTarget?.isConnected) {
         frame.focus({ preventScroll: true });
         setCaretInside(nearestCaretTarget(caretTarget));
       }
       saveCurrentPage({ skipNormalize: true });
+      scheduleReflowAfterBlankRemoval();
     }
     function handleManualBlankDelete(event) {
       if (isHistoryShortcut(event)) return false;
@@ -3798,6 +3839,7 @@ function studioHtmlV2(payload, libs) {
         }
         saveCurrentPage({ skipNormalize: true });
         showHalo(targetBlock);
+        scheduleReflowAfterBlankRemoval();
       }
       btnBeforeRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'before'));
       btnAfterRemove.addEventListener('mousedown', (e) => removeAdjacentBlank(e, 'after'));

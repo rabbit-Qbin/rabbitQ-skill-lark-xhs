@@ -160,6 +160,34 @@ async function main() {
   assert.match(blankHtml, /data-xhs-flow-blank="1"/);
   assert.match(blankHtml, /<p><strong>金句：卡片和正文之间要留一空行。<\/strong><\/p>\s*<p data-xhs-flow-blank="1"[\s\S]*?<p>这是下一段正文/);
 
+  const tightSourceDir = path.join(root, "tight-spacing-source");
+  const tightOutputDir = path.join(root, "tight-spacing-output");
+  fs.mkdirSync(tightSourceDir, { recursive: true });
+  const tightMarkdown = [
+    "## 01 间距回归",
+    "",
+    "**结论：卡片后只跟正文，不额外撑开。**",
+    "",
+    "正文段落。",
+    "",
+    "![示意图](fixture.png)",
+    "",
+    "图片后的正文。",
+  ].join("\n");
+  fs.writeFileSync(path.join(tightSourceDir, "article.md"), tightMarkdown, "utf8");
+  fs.writeFileSync(path.join(tightSourceDir, "fixture.png"), fixturePng);
+  const tightConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), tightSourceDir, "-o", tightOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(tightConvert.status, 0, tightConvert.stderr || tightConvert.stdout);
+  const tightHtml = fs.readFileSync(path.join(tightOutputDir, "xhs-studio.html"), "utf8");
+  const tightTemplate = tightHtml.match(/<template id="wechatTemplate">([\s\S]*?)<\/template>/)?.[1] || "";
+  assert.ok(tightTemplate.length > 0);
+  assert.match(tightTemplate, /<p>正文段落。<\/p>\s*<section><img/);
+  assert.match(tightTemplate, /<section><img[\s\S]*?<\/section>\s*<p>图片后的正文。<\/p>/);
+
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
   assert.match(html, /data-xhs-block-type="quote"/);
