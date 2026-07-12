@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.9";
+const VERSION = "0.8.10";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -1053,6 +1053,7 @@ function studioHtmlV2(payload, libs) {
     let splitFlowCounter = 0;
     let imageIdCounter = 0;
     let caretMarkerCounter = 0;
+    let manualBlankDeleteGuardUntil = 0;
     const boundFrames = new WeakSet();
     const imageResizeObserver = window.ResizeObserver ? new ResizeObserver((entries) => {
       entries.forEach((entry) => {
@@ -2103,10 +2104,12 @@ function studioHtmlV2(payload, libs) {
         if (node.classList?.contains('xhs-manual-blank')) return;
         if (isEmptyGeneratedFlowBlock(node)) {
           // Empty xhs-p/xhs-rich with a <br> was created by pressing Enter —
-          // promote to manual-blank instead of deleting it.
+          // promote to manual-blank instead of deleting it. Skip promotion
+          // right after a custom blank delete: browser leftovers must be dropped.
           if (!node.classList.contains('xhs-caret-anchor') &&
               (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) &&
-              node.querySelector('br')) {
+              node.querySelector('br') &&
+              Date.now() >= manualBlankDeleteGuardUntil) {
             node.classList.add('xhs-manual-blank');
             node.innerHTML = '<br>';
             changed = true;
@@ -2161,7 +2164,8 @@ function studioHtmlV2(payload, libs) {
             // Empty xhs-p/xhs-rich with a <br>: user pressed Enter — keep as blank line.
             if (!node.classList.contains('xhs-caret-anchor') &&
                 (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) &&
-                node.querySelector('br')) {
+                node.querySelector('br') &&
+                Date.now() >= manualBlankDeleteGuardUntil) {
               node.classList.add('xhs-manual-blank');
               node.innerHTML = '<br>';
               normalized.push(node);
@@ -3081,10 +3085,35 @@ function studioHtmlV2(payload, libs) {
     function nearestCaretTarget(block) {
       return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-reason-text') || block;
     }
+    function stripEphemeralEmptyParagraphs(frame) {
+      Array.from(frame?.children || []).forEach((node) => {
+        if (node.classList?.contains('xhs-manual-blank') || node.classList?.contains('xhs-caret-anchor')) return;
+        if (!isEmptyGeneratedFlowBlock(node)) return;
+        if (!node.classList?.contains('xhs-p') && !node.classList?.contains('xhs-rich')) return;
+        node.remove();
+      });
+    }
+    function armManualBlankDeleteGuard() {
+      manualBlankDeleteGuardUntil = Date.now() + 250;
+    }
+    function finalizeManualBlankDelete(frame, caretTarget) {
+      stripEphemeralEmptyParagraphs(frame);
+      ensureEditorCaretAnchors(stageScale);
+      if (caretTarget?.isConnected) setCaretInside(nearestCaretTarget(caretTarget));
+      armManualBlankDeleteGuard();
+      saveCurrentPage();
+      scheduleOverflowReflow(false);
+    }
     function handleManualBlankDelete(event) {
       const key = event.key || (event.inputType === 'deleteContentForward' ? 'Delete' :
         (event.inputType === 'deleteContentBackward' ? 'Backspace' : ''));
       if (key !== 'Backspace' && key !== 'Delete') return false;
+      if (event.type === 'beforeinput') {
+        if (Date.now() < manualBlankDeleteGuardUntil) {
+          event.preventDefault();
+          return true;
+        }
+      }
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
       const range = selection.getRangeAt(0);
@@ -3097,9 +3126,7 @@ function studioHtmlV2(payload, libs) {
         const isLeadingBlank = leading.blanks.includes(block);
         const target = isLeadingBlank ? leading.firstContent : (block.nextElementSibling || block.previousElementSibling);
         (isLeadingBlank ? leading.blanks : [block]).forEach((blank) => blank.remove());
-        if (target?.isConnected) setCaretInside(nearestCaretTarget(target));
-        saveCurrentPage();
-        scheduleOverflowReflow(false);
+        finalizeManualBlankDelete(frame, target);
         return true;
       }
       if (key !== 'Backspace') return false;
@@ -3119,9 +3146,7 @@ function studioHtmlV2(payload, libs) {
       const caretTarget = (atBlockStart || caretInsideHeadingNumber) && headingNumber
         ? headingNumber
         : field;
-      setCaretInside(caretTarget);
-      saveCurrentPage();
-      scheduleOverflowReflow(false);
+      finalizeManualBlankDelete(frame, caretTarget);
       return true;
     }
     function bindBlockHalo() {

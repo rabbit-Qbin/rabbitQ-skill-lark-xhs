@@ -229,6 +229,41 @@ async function main() {
       assert.ok(bodyPageBlankState.firstText.length > 0);
     }
 
+    // Regression: deleting a mid-page manual-blank must not resurrect phantom blanks after reflow.
+    await page.locator("#pageTabs button").nth(1).click();
+    await page.waitForTimeout(100);
+    const midPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
+    await midPageFrame.evaluate((frame) => {
+      const blocks = Array.from(frame.querySelectorAll(".xhs-p, .xhs-rich, .xhs-heading")).filter((node) => (
+        node.textContent?.replace(/\s+/g, " ").trim().length > 0
+      ));
+      const anchor = blocks[1] || blocks[0];
+      if (!anchor) return;
+      const blank = document.createElement("p");
+      blank.className = "xhs-p xhs-block xhs-manual-blank";
+      blank.innerHTML = "<br>";
+      anchor.before(blank);
+      frame.focus();
+      const range = document.createRange();
+      range.selectNodeContents(blank);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(900);
+    const midPageBlankState = await midPageFrame.evaluate((frame) => ({
+      manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
+      emptyParagraphCount: Array.from(frame.querySelectorAll(".xhs-p, .xhs-rich")).filter((node) => (
+        !node.classList.contains("xhs-manual-blank") &&
+        !node.classList.contains("xhs-caret-anchor") &&
+        !node.textContent?.replace(/\s+/g, "").length
+      )).length,
+    }));
+    assert.strictEqual(midPageBlankState.manualBlankCount, 0);
+    assert.strictEqual(midPageBlankState.emptyParagraphCount, 0);
+
     const pageCount = await page.locator("#pageTabs button").count();
     const content = { quotes: [], callouts: [], labels: [], lists: [], tables: [] };
     let calloutPageIndex = -1;
