@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.30";
+const VERSION = "0.8.31";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -5538,11 +5538,64 @@ function studioHtmlV2(payload, libs) {
       }
       persistDraft();
     }
-    function applyStudioState(state) {
+    function studioPlainTextFromPages(pageList) {
+      const holder = document.createElement('div');
+      (pageList || []).forEach((page) => {
+        if (!page || page.type === 'cover') {
+          if (page?.tailHtml) holder.insertAdjacentHTML('beforeend', page.tailHtml);
+          return;
+        }
+        if (page.html) holder.insertAdjacentHTML('beforeend', page.html);
+      });
+      return (holder.textContent || '').replace(/\s+/g, '');
+    }
+    function templatePlainText() {
+      return extractBlocksFromTemplate()
+        .map((node) => node.textContent || '')
+        .join('')
+        .replace(/\s+/g, '');
+    }
+    function hasOrphanSplitBlocks(pageList) {
+      const blocks = [];
+      (pageList || []).forEach((page) => {
+        if (!page) return;
+        if (page.type === 'cover' && page.tailHtml) {
+          const holder = document.createElement('div');
+          holder.innerHTML = page.tailHtml;
+          holder.querySelectorAll('[data-split]').forEach((node) => blocks.push(node));
+        }
+        if (page.type === 'body' && page.html) {
+          const holder = document.createElement('div');
+          holder.innerHTML = page.html;
+          holder.querySelectorAll('[data-split]').forEach((node) => blocks.push(node));
+        }
+      });
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        const kind = block.dataset?.split;
+        const flowId = block.dataset?.flowId;
+        if (!kind || !flowId) continue;
+        const next = blocks[i + 1];
+        if (kind === 'head' && (!next || next.dataset?.flowId !== flowId)) return true;
+        if (kind === 'tail' && (!blocks[i - 1] || blocks[i - 1].dataset?.flowId !== flowId)) return true;
+      }
+      return false;
+    }
+    function isDraftCorrupted(state) {
+      if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
+      if (hasOrphanSplitBlocks(state.pages)) return true;
+      const templateText = templatePlainText();
+      const draftText = studioPlainTextFromPages(state.pages);
+      if (!templateText || !draftText) return false;
+      if (draftText.length < templateText.length * 0.9) return true;
+      const sentinels = ['持续debug', '快速开始', '先在飞书云文档导出'];
+      return sentinels.some((phrase) => templateText.includes(phrase) && !draftText.includes(phrase));
+    }
+    function applyStudioState(state, options = {}) {
       if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
       restoringState = true;
       try {
-        let shouldReflowSavedDraft = state.version !== config.version;
+        let shouldReflowSavedDraft = Boolean(options.forceReflow) || state.version !== config.version;
         function sanitizeStoredHtml(html) {
           const holder = document.createElement('div');
           holder.innerHTML = String(html || '');
@@ -5581,7 +5634,7 @@ function studioHtmlV2(payload, libs) {
       }
     }
     function restoreSavedStudioState() {
-      if (applyStudioState(embeddedState)) return true;
+      if (embeddedState && applyStudioState(embeddedState)) return true;
       try {
         const raw = localStorage.getItem(draftStorageKey());
         if (!raw) return false;
@@ -5589,7 +5642,11 @@ function studioHtmlV2(payload, libs) {
         if (config.sourceFingerprint && state.sourceFingerprint && state.sourceFingerprint !== config.sourceFingerprint) {
           return false;
         }
-        return applyStudioState(state);
+        if (isDraftCorrupted(state)) {
+          localStorage.removeItem(draftStorageKey());
+          return false;
+        }
+        return applyStudioState(state, { forceReflow: true });
       } catch (_) {}
       return false;
     }

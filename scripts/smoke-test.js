@@ -211,6 +211,29 @@ async function main() {
   assert.match(tightTemplate, /<p>正文段落。<\/p>\s*<section><img/);
   assert.match(tightTemplate, /<section><img[\s\S]*?<\/section>\s*<p>图片后的正文。<\/p>/);
 
+  const flowSourceDir = path.join(root, "flow-continuity-source");
+  const flowOutputDir = path.join(root, "flow-continuity-output");
+  fs.mkdirSync(flowSourceDir, { recursive: true });
+  const flowMarkdown = [
+    "# 连续流回归",
+    "",
+    "**结论：一句话：写完就能发，不用一张张拼图。**",
+    "",
+    "此工具为本兔自用工具、持续debug中…符合本人写作及编辑图文习惯和审美，如果有其他可以跟Codex交互修改skills哦！比如样式或者对于一些子标题的识别规则等等……",
+    "",
+    "## 快速开始",
+    "",
+    "先在飞书云文档导出 markdown（包括附件！）",
+  ].join("\n");
+  fs.writeFileSync(path.join(flowSourceDir, "article.md"), flowMarkdown, "utf8");
+  const flowConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), flowSourceDir, "-o", flowOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(flowConvert.status, 0, flowConvert.stderr || flowConvert.stdout);
+  const flowHtmlPath = path.join(flowOutputDir, "xhs-studio.html");
+
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
   assert.match(html, /data-xhs-block-type="quote"/);
@@ -1034,6 +1057,57 @@ async function main() {
     assert.strictEqual(await page.locator('[data-paper-pattern="none"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#coverImageOnBtn").evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#bodyFontRange").inputValue(), "36");
+
+    const flowPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await flowPage.addInitScript(() => localStorage.clear());
+    await flowPage.goto(`file://${flowHtmlPath}`);
+    await flowPage.waitForTimeout(500);
+
+    async function collectAllBodyTextFrom(targetPage) {
+      const count = await targetPage.locator("#pageTabs button").count();
+      const chunks = [];
+      for (let index = 0; index < count; index += 1) {
+        await targetPage.locator("#pageTabs button").nth(index).click();
+        await targetPage.waitForTimeout(40);
+        const bodyLocator = targetPage.locator("#stageScale .xhs-body-frame");
+        const coverTailLocator = targetPage.locator("#stageScale .xhs-cover-tail-frame");
+        const bodyText = (await bodyLocator.count()) ? (await bodyLocator.innerText()).trim() : "";
+        const coverTailText = (await coverTailLocator.count()) ? (await coverTailLocator.innerText()).trim() : "";
+        chunks.push([bodyText, coverTailText].filter(Boolean).join("\n"));
+      }
+      return chunks.join("\n");
+    }
+
+    const flowBodyText = await collectAllBodyTextFrom(flowPage);
+    assert.match(flowBodyText, /持续debug/);
+    assert.match(flowBodyText, /快速开始/);
+    assert.match(flowBodyText, /先在飞书云文档导出 markdown/);
+
+    await flowPage.locator("#pageTabs button").first().click();
+    await flowPage.waitForTimeout(120);
+    await flowPage.click("#coverImageOffBtn");
+    await flowPage.waitForTimeout(300);
+    const flowAfterCoverToggle = await collectAllBodyTextFrom(flowPage);
+    assert.match(flowAfterCoverToggle, /持续debug/, "cover toggle reflow should keep full paragraph");
+
+    await flowPage.evaluate(() => {
+      const state = JSON.parse(localStorage.getItem(draftStorageKey()));
+      let corrupted = false;
+      for (const page of state.pages) {
+        for (const field of ["html", "tailHtml"]) {
+          if (!page[field] || !/此工具为本兔自用工具/.test(page[field])) continue;
+          page[field] = page[field].replace(/持续debug[\s\S]*?规则等等……/, "");
+          corrupted = true;
+        }
+      }
+      if (!corrupted) throw new Error("missing target page for corruption test");
+      localStorage.setItem(draftStorageKey(), JSON.stringify(state));
+    });
+    await flowPage.reload();
+    await flowPage.waitForTimeout(500);
+    const healedFlowText = await collectAllBodyTextFrom(flowPage);
+    assert.match(healedFlowText, /持续debug/, "corrupted draft should be discarded on reload");
+    await flowPage.close();
   } finally {
     await browser.close();
     fs.rmSync(root, { recursive: true, force: true });
