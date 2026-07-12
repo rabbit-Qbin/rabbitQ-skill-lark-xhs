@@ -139,6 +139,29 @@ async function main() {
   assert.match(chineseHtml, /<section data-xhs-heading-level="1"[\s\S]*?<strong>小节<\/strong>/);
   assert.match(chineseHtml, /<section><strong>正文一级章节<\/strong><\/section>/);
 
+  const boldListSourceDir = path.join(root, "bold-list-source");
+  const boldListOutputDir = path.join(root, "bold-list-output");
+  fs.mkdirSync(boldListSourceDir, { recursive: true });
+  const boldListMarkdown = [
+    "## 封面模式",
+    "",
+    "1. **有封面图**：上图下文",
+    "",
+    "2. **关封面图**：标题占上半页",
+  ].join("\n");
+  fs.writeFileSync(path.join(boldListSourceDir, "article.md"), boldListMarkdown, "utf8");
+  const boldListConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), boldListSourceDir, "-o", boldListOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(boldListConvert.status, 0, boldListConvert.stderr || boldListConvert.stdout);
+  const boldListHtml = fs.readFileSync(path.join(boldListOutputDir, "xhs-studio.html"), "utf8");
+  assert.match(boldListHtml, /data-list-type="ordered"/);
+  assert.match(boldListHtml, /<strong[^>]*>有封面图<\/strong>/);
+  assert.match(boldListHtml, /<strong[^>]*>关封面图<\/strong>/);
+  assert.doesNotMatch(boldListHtml, /有封面图\*\*/);
+
   const blankSourceDir = path.join(root, "flow-blank-source");
   const blankOutputDir = path.join(root, "flow-blank-output");
   fs.mkdirSync(blankSourceDir, { recursive: true });
@@ -527,6 +550,8 @@ async function main() {
     const valueParagraph = page.locator("#stageScale .xhs-p").filter({ hasText: "这件事花的时间" }).first();
     await valueParagraph.click();
     await valueParagraph.evaluate((el) => {
+      const editable = el.closest('[contenteditable="true"]');
+      editable?.focus();
       const selection = window.getSelection();
       const range = document.createRange();
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -540,10 +565,18 @@ async function main() {
     });
     const headingCountBeforeEnter = await page.locator("#stageScale .xhs-heading").count();
     const paragraphCountBeforeEnter = await page.locator("#stageScale .xhs-p").count();
+    const fullParagraphTextBefore = ((await valueParagraph.textContent()) || "").replace(/\s+/g, "");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(400);
     assert.strictEqual(await page.locator("#stageScale .xhs-heading").count(), headingCountBeforeEnter);
     assert.ok(await page.locator("#stageScale .xhs-p").count() >= paragraphCountBeforeEnter + 1);
+    const mergedParagraphText = (await page.locator("#stageScale .xhs-p").evaluateAll(
+      (nodes) => nodes.map((node) => node.textContent || "").join(""),
+    )).replace(/\s+/g, "");
+    assert.ok(
+      mergedParagraphText.includes(fullParagraphTextBefore),
+      "paragraph text should survive Enter split",
+    );
 
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
     assert.ok(content.tables.length >= 1);

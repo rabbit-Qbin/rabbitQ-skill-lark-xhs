@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.29";
+const VERSION = "0.8.30";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -440,7 +440,8 @@ function stripLeadingListMarkerText(text) {
   let value = String(text || "").trim();
   for (let i = 0; i < 5; i += 1) {
     const next = value
-      .replace(/^(?:[-*+•·◦]\s*)/, "")
+      .replace(/^(?:[-+•·◦]\s*)/, "")
+      .replace(/^\*\s+/, "")
       .replace(/^(?:\d+[.)、．]\s*)/, "")
       .replace(/^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|（\d+）|\(\d+\))\s*/, "")
       .replace(/^[1-9](?=[\u4e00-\u9fff])/, "")
@@ -535,11 +536,17 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
   }
   function pushList() {
     if (!list.length) return;
-    const cards = list.map((item) => {
+    const listType = list[0].type || "unordered";
+    const cards = list.map((item, index) => {
+      const bodyHtml = inlineMarkdownToHtml(item.text, markdownFile);
+      if (listType === "ordered") {
+        const marker = String(item.marker || index + 1);
+        return `<section><span>${escapeHtml(marker)}.</span><span>${bodyHtml}</span></section>`;
+      }
       const marker = '<span style="border-radius:50%;display:inline-block;width:10px;height:10px;background:#57b560;"></span>';
-      return `<section>${marker}<span>${inlineMarkdownToHtml(stripLeadingListMarkerText(item.text), markdownFile)}</span></section>`;
+      return `<section>${marker}<span>${bodyHtml}</span></section>`;
     }).join("");
-    blocks.push(`<section data-xhs-block-type="list" style="background:#f3f8f1;" data-list-type="unordered">${cards}</section>`);
+    blocks.push(`<section data-xhs-block-type="list" style="background:#f3f8f1;" data-list-type="${listType}">${cards}</section>`);
     list = [];
   }
   function pushQuote() {
@@ -1802,7 +1809,8 @@ function studioHtmlV2(payload, libs) {
       let value = String(text || '').trim();
       for (let i = 0; i < 5; i += 1) {
         const next = value
-          .replace(/^(?:[-*+•·◦]\\s*)/, '')
+          .replace(/^(?:[-+•·◦]\\s*)/, '')
+          .replace(/^\\*\\s+/, '')
           .replace(/^(?:\\d+[.)、．]\\s*)/, '')
           .replace(/^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|（\\d+）|\\(\\d+\\))\\s*/, '')
           .replace(/^[1-9](?=[\\u4e00-\\u9fff])/, '')
@@ -3325,15 +3333,18 @@ function studioHtmlV2(payload, libs) {
       });
     }
     function splitListBodyHtml(textEl, range) {
-      const holder = document.createElement('div');
-      holder.appendChild(range.cloneContents());
-      const afterHtml = normalizeInlineHtml(holder.innerHTML || '');
       const beforeRange = document.createRange();
       beforeRange.selectNodeContents(textEl);
       beforeRange.setEnd(range.startContainer, range.startOffset);
       const beforeHolder = document.createElement('div');
       beforeHolder.appendChild(beforeRange.cloneContents());
       const beforeHtml = normalizeInlineHtml(beforeHolder.innerHTML || '');
+      const afterRange = document.createRange();
+      afterRange.selectNodeContents(textEl);
+      afterRange.setStart(range.startContainer, range.startOffset);
+      const afterHolder = document.createElement('div');
+      afterHolder.appendChild(afterRange.cloneContents());
+      const afterHtml = normalizeInlineHtml(afterHolder.innerHTML || '');
       return { beforeHtml, afterHtml };
     }
     function convertListLineToParagraph(line) {
@@ -3400,15 +3411,11 @@ function studioHtmlV2(payload, libs) {
       scheduleOverflowReflow(false);
       return true;
     }
-    function handleParagraphEnter(event) {
-      if (event.key !== 'Enter' || event.shiftKey || isHistoryShortcut(event)) return false;
-      const selection = window.getSelection();
-      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
-      const range = selection.getRangeAt(0);
-      const frame = event.currentTarget;
+    function performParagraphEnter(frame, range) {
+      if (paragraphEnterKeydownHandled) return false;
       const block = directFlowChild(frame, range.startContainer, range.startOffset);
       if (!isEditableParagraphBlock(block)) return false;
-      event.preventDefault();
+      markParagraphEnterHandled();
       if (isCaretAtFieldStart(range, block)) {
         const emptyP = makeEmptyParagraph();
         block.before(emptyP);
@@ -3428,10 +3435,35 @@ function studioHtmlV2(payload, libs) {
         frame.focus({ preventScroll: true });
         setCaretInside(nextP);
       }
-      markParagraphEnterHandled();
+      return true;
+    }
+    function handleParagraphEnter(event) {
+      if (event.key !== 'Enter' || event.shiftKey || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const frame = event.currentTarget;
+      if (!performParagraphEnter(frame, range)) return false;
+      event.preventDefault();
+      event.stopPropagation();
       saveCurrentPage({ skipNormalize: true });
       scheduleParagraphOverflowCheck(frame);
       return true;
+    }
+    function handleBodyParagraphBeforeInput(event) {
+      if (event.inputType !== 'insertParagraph') return;
+      if (paragraphEnterKeydownHandled) {
+        event.preventDefault();
+        return;
+      }
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return;
+      const range = selection.getRangeAt(0);
+      const frame = event.currentTarget;
+      if (!performParagraphEnter(frame, range)) return;
+      event.preventDefault();
+      saveCurrentPage({ skipNormalize: true });
+      scheduleParagraphOverflowCheck(frame);
     }
     function handleListBackspace(event) {
       if (event.key !== 'Backspace' || isHistoryShortcut(event)) return false;
@@ -3579,15 +3611,18 @@ function studioHtmlV2(payload, libs) {
       return p;
     }
     function splitParagraphHtml(block, range) {
-      const holder = document.createElement('div');
-      holder.appendChild(range.cloneContents());
-      const afterHtml = normalizeInlineHtml(holder.innerHTML || '');
       const beforeRange = document.createRange();
       beforeRange.selectNodeContents(block);
       beforeRange.setEnd(range.startContainer, range.startOffset);
       const beforeHolder = document.createElement('div');
       beforeHolder.appendChild(beforeRange.cloneContents());
       const beforeHtml = normalizeInlineHtml(beforeHolder.innerHTML || '');
+      const afterRange = document.createRange();
+      afterRange.selectNodeContents(block);
+      afterRange.setStart(range.startContainer, range.startOffset);
+      const afterHolder = document.createElement('div');
+      afterHolder.appendChild(afterRange.cloneContents());
+      const afterHtml = normalizeInlineHtml(afterHolder.innerHTML || '');
       return { beforeHtml, afterHtml };
     }
     function setCaretAtFieldEnd(field) {
@@ -3651,14 +3686,10 @@ function studioHtmlV2(payload, libs) {
       window.clearTimeout(paragraphEnterKeydownTimer);
       paragraphEnterKeydownTimer = window.setTimeout(() => {
         paragraphEnterKeydownHandled = false;
-      }, 100);
+      }, 320);
     }
     function scheduleParagraphOverflowCheck(frame) {
-      window.requestAnimationFrame(() => {
-        if (frame?.isConnected && frame.scrollHeight > frame.clientHeight + 8) {
-          scheduleOverflowReflow(false);
-        }
-      });
+      scheduleLightSave();
     }
     function scheduleReflowAfterBlankRemoval() {
       cancelPendingReflow();
@@ -3887,23 +3918,24 @@ function studioHtmlV2(payload, libs) {
     function bindEditableReflow() {
       stageScale.querySelectorAll('[contenteditable="true"]').forEach((editable) => {
         if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
-          editable.addEventListener('keydown', handleParagraphBackspace);
-          editable.addEventListener('keydown', handleParagraphEnter);
-          editable.addEventListener('keydown', handleListBackspace);
-          editable.addEventListener('keydown', handleManualBlankDelete);
+          editable.addEventListener('keydown', handleParagraphEnter, true);
+          editable.addEventListener('keydown', handleListEnter, true);
           editable.addEventListener('beforeinput', (event) => {
             if (isHistoryInputType(event.inputType)) {
               cancelPendingReflow();
               return;
             }
+            handleBodyParagraphBeforeInput(event);
             if (event.inputType === 'insertParagraph' && paragraphEnterKeydownHandled) {
               event.preventDefault();
               return;
             }
             if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) handleManualBlankDelete(event);
-          });
+          }, true);
+          editable.addEventListener('keydown', handleParagraphBackspace);
+          editable.addEventListener('keydown', handleListBackspace);
+          editable.addEventListener('keydown', handleManualBlankDelete);
           editable.addEventListener('keydown', handleHeadingEnter);
-          editable.addEventListener('keydown', handleListEnter);
           editable.addEventListener('paste', (event) => handleImagePaste(event, editable));
         }
         if (editable.classList.contains('cover-title') || editable.classList.contains('cover-subtitle')) {
