@@ -513,6 +513,38 @@ async function main() {
     assert.strictEqual(paragraphHaloState.isParagraph, true);
     assert.strictEqual(paragraphHaloState.haloVisible, false);
 
+    let enterTestPageIndex = -1;
+    const enterPageTabCount = await page.locator("#pageTabs button").count();
+    for (let index = 0; index < enterPageTabCount; index += 1) {
+      await page.locator("#pageTabs button").nth(index).click();
+      await page.waitForTimeout(50);
+      if (await page.locator("#stageScale .xhs-p").filter({ hasText: "这件事花的时间" }).count() > 0) {
+        enterTestPageIndex = index;
+        break;
+      }
+    }
+    assert.ok(enterTestPageIndex >= 0, "expected paragraph for Enter regression");
+    const valueParagraph = page.locator("#stageScale .xhs-p").filter({ hasText: "这件事花的时间" }).first();
+    await valueParagraph.click();
+    await valueParagraph.evaluate((el) => {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const textNode = walker.nextNode();
+      if (!textNode) return;
+      const offset = Math.min(4, textNode.textContent.length);
+      range.setStart(textNode, offset);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    const headingCountBeforeEnter = await page.locator("#stageScale .xhs-heading").count();
+    const paragraphCountBeforeEnter = await page.locator("#stageScale .xhs-p").count();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    assert.strictEqual(await page.locator("#stageScale .xhs-heading").count(), headingCountBeforeEnter);
+    assert.ok(await page.locator("#stageScale .xhs-p").count() >= paragraphCountBeforeEnter + 1);
+
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
     assert.ok(content.tables.length >= 1);
     assert.ok(content.tables.length >= 2, "long table should split across pages instead of clipping");

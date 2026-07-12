@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.27";
+const VERSION = "0.8.28";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -1189,6 +1189,8 @@ function studioHtmlV2(payload, libs) {
     let caretMarkerCounter = 0;
     let manualBlankDeleteKeydownHandled = false;
     let manualBlankDeleteKeydownTimer = null;
+    let paragraphEnterKeydownHandled = false;
+    let paragraphEnterKeydownTimer = null;
     const boundFrames = new WeakSet();
     const imageResizeObserver = window.ResizeObserver ? new ResizeObserver((entries) => {
       entries.forEach((entry) => {
@@ -3233,6 +3235,7 @@ function studioHtmlV2(payload, libs) {
       if (beforeHeading) heading.before(p);
       else heading.after(p);
       setCaretInside(p);
+      markParagraphEnterHandled();
       saveCurrentPage();
       scheduleOverflowReflow(true);
       return true;
@@ -3262,12 +3265,15 @@ function studioHtmlV2(payload, libs) {
         range.collapse(true);
         selection.removeAllRanges();
         selection.addRange(range);
+        markParagraphEnterHandled();
         saveCurrentPage();
         scheduleOverflowReflow(true);
         return true;
       }
       const beforeText = headingTextBeforeRange(heading, range);
-      return insertBlankParagraphNearHeading(heading, !beforeText);
+      const inserted = insertBlankParagraphNearHeading(heading, !beforeText);
+      if (inserted) markParagraphEnterHandled();
+      return inserted;
     }
     function listMarkerElement() {
       const marker = document.createElement('span');
@@ -3403,15 +3409,15 @@ function studioHtmlV2(payload, libs) {
       if (!isEditableParagraphBlock(block)) return false;
       event.preventDefault();
       if (isCaretAtFieldStart(range, block)) {
-        const blank = makeManualBlank();
-        block.before(blank);
+        const emptyP = makeEmptyParagraph();
+        block.before(emptyP);
         frame.focus({ preventScroll: true });
-        setCaretInside(blank);
+        setCaretInside(emptyP);
       } else if (isCaretAtFieldEnd(range, block)) {
-        const blank = makeManualBlank();
-        block.after(blank);
+        const emptyP = makeEmptyParagraph();
+        block.after(emptyP);
         frame.focus({ preventScroll: true });
-        setCaretInside(blank);
+        setCaretInside(emptyP);
       } else {
         const { beforeHtml, afterHtml } = splitParagraphHtml(block, range);
         block.innerHTML = beforeHtml || '<br>';
@@ -3421,8 +3427,9 @@ function studioHtmlV2(payload, libs) {
         frame.focus({ preventScroll: true });
         setCaretInside(nextP);
       }
+      markParagraphEnterHandled();
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(false);
+      scheduleParagraphOverflowCheck(frame);
       return true;
     }
     function handleListBackspace(event) {
@@ -3471,8 +3478,9 @@ function studioHtmlV2(payload, libs) {
         renumberContiguousListLines(line);
         frame?.focus({ preventScroll: true });
         setCaretInside(textEl);
+        markParagraphEnterHandled();
         saveCurrentPage({ skipNormalize: true });
-        scheduleOverflowReflow(false);
+        scheduleParagraphOverflowCheck(frame);
         return true;
       }
       const { beforeHtml, afterHtml } = splitListBodyHtml(textEl, range);
@@ -3485,8 +3493,9 @@ function studioHtmlV2(payload, libs) {
         frame?.focus({ preventScroll: true });
         setCaretInside(nextBody);
       }
+      markParagraphEnterHandled();
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(false);
+      scheduleParagraphOverflowCheck(frame);
       return true;
     }
     function directFlowChild(frame, node, offset = 0) {
@@ -3556,7 +3565,8 @@ function studioHtmlV2(payload, libs) {
       return isStructuralHaloBlock(node);
     }
     function isEditableParagraphBlock(block) {
-      return Boolean(block?.classList?.contains('xhs-p') &&
+      return Boolean(block?.classList &&
+        (block.classList.contains('xhs-p') || block.classList.contains('xhs-rich')) &&
         !block.classList.contains('xhs-manual-blank') &&
         !block.classList.contains('xhs-list-line') &&
         !block.classList.contains('xhs-caret-anchor'));
@@ -3634,6 +3644,20 @@ function studioHtmlV2(payload, libs) {
       manualBlankDeleteKeydownTimer = window.setTimeout(() => {
         manualBlankDeleteKeydownHandled = false;
       }, 80);
+    }
+    function markParagraphEnterHandled() {
+      paragraphEnterKeydownHandled = true;
+      window.clearTimeout(paragraphEnterKeydownTimer);
+      paragraphEnterKeydownTimer = window.setTimeout(() => {
+        paragraphEnterKeydownHandled = false;
+      }, 100);
+    }
+    function scheduleParagraphOverflowCheck(frame) {
+      window.requestAnimationFrame(() => {
+        if (frame?.isConnected && frame.scrollHeight > frame.clientHeight + 8) {
+          scheduleOverflowReflow(false);
+        }
+      });
     }
     function scheduleReflowAfterBlankRemoval() {
       cancelPendingReflow();
@@ -3871,6 +3895,10 @@ function studioHtmlV2(payload, libs) {
               cancelPendingReflow();
               return;
             }
+            if (event.inputType === 'insertParagraph' && paragraphEnterKeydownHandled) {
+              event.preventDefault();
+              return;
+            }
             if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) handleManualBlankDelete(event);
           });
           editable.addEventListener('keydown', handleHeadingEnter);
@@ -3904,6 +3932,7 @@ function studioHtmlV2(payload, libs) {
             }
             scheduleLightSave();
             if (activeHeadingEditField()) scheduleHeadingNormalize();
+            if (inputType === 'insertParagraph' && paragraphEnterKeydownHandled) return;
             if (/insertFromPaste|insertParagraph|insertLineBreak|insertText/.test(inputType)) {
               window.setTimeout(() => {
                 if (editable.scrollHeight > editable.clientHeight + 8) scheduleOverflowReflow(false);
