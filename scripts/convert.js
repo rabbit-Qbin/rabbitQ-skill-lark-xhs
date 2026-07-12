@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.24";
+const VERSION = "0.8.26";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -566,6 +566,25 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     pushQuote();
     pushCode();
   }
+  function peekNextSubstantiveLine(startIndex) {
+    for (let i = startIndex + 1; i < lines.length; i += 1) {
+      const trimmed = String(lines[i] || "").trim();
+      if (trimmed) return trimmed;
+    }
+    return "";
+  }
+  function isMarkdownHeadingLine(text) {
+    return /^#{1,6}\s+/.test(String(text || "").trim());
+  }
+  function lastMarkdownBlockIsHeading() {
+    const last = blocks[blocks.length - 1] || "";
+    return /data-xhs-heading-level/i.test(last);
+  }
+  function pushFlowBlank() {
+    const last = blocks[blocks.length - 1] || "";
+    if (String(last).includes("data-xhs-flow-blank")) return;
+    blocks.push('<p data-xhs-flow-blank="1"><br /></p>');
+  }
   function pushImage(alt, src) {
     const cleanSrc = unescapeMarkdownUrl(src);
     if (/\.(?:mp4|mov|m4v|webm|avi|mkv)(?:[?#].*)?$/i.test(cleanSrc)) return;
@@ -633,7 +652,12 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
         break;
       }
       if (list.length && upcomingListType && upcomingListType === list[0].type) continue;
+      const upcoming = peekNextSubstantiveLine(lineIndex);
+      const hadBlocks = blocks.length > 0;
+      const hadPending = paragraph.length > 0 || list.length > 0 || quote.length > 0 || code.length > 0;
       flushAll();
+      if (!upcoming || isMarkdownHeadingLine(upcoming) || lastMarkdownBlockIsHeading()) continue;
+      if (hadBlocks || hadPending) pushFlowBlank();
       continue;
     }
     const imgOnly = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
@@ -2336,6 +2360,9 @@ function studioHtmlV2(payload, libs) {
         marker.setAttribute('aria-hidden', 'true');
         return [marker];
       }
+      if (el.getAttribute?.('data-xhs-flow-blank') === '1' || el.dataset?.xhsFlowBlank === '1') {
+        return [makeManualBlank()];
+      }
       if (isHeroBlock(el, index)) return [];
       const text = cleanText(el.textContent);
       const imgs = Array.from(el.querySelectorAll('img')).filter((img) => img.getAttribute('src'));
@@ -2426,7 +2453,8 @@ function studioHtmlV2(payload, libs) {
     }
     function isPlainSplittable(block) {
       return (block.classList.contains('xhs-p') || block.classList.contains('xhs-rich')) &&
-        !block.classList.contains('xhs-list-line');
+        !block.classList.contains('xhs-list-line') &&
+        !block.classList.contains('xhs-manual-blank');
     }
     function isAtomicFlowBlock(block) {
       return block.classList.contains('xhs-heading') ||
@@ -2434,7 +2462,8 @@ function studioHtmlV2(payload, libs) {
         block.classList.contains('xhs-quote') ||
         block.classList.contains('xhs-image-block') ||
         block.classList.contains('xhs-image-grid') ||
-        block.classList.contains('xhs-table-block');
+        block.classList.contains('xhs-table-block') ||
+        block.classList.contains('xhs-manual-blank');
     }
     function isSplittableTextBlock(block) {
       return isPlainSplittable(block) && !isAtomicFlowBlock(block);
@@ -3341,15 +3370,15 @@ function studioHtmlV2(payload, libs) {
       if (!isEditableParagraphBlock(block)) return false;
       event.preventDefault();
       if (isCaretAtFieldStart(range, block)) {
-        const emptyP = makeEmptyParagraph();
-        block.before(emptyP);
+        const blank = makeManualBlank();
+        block.before(blank);
         frame.focus({ preventScroll: true });
-        setCaretInside(block);
+        setCaretInside(blank);
       } else if (isCaretAtFieldEnd(range, block)) {
-        const emptyP = makeEmptyParagraph();
-        block.after(emptyP);
+        const blank = makeManualBlank();
+        block.after(blank);
         frame.focus({ preventScroll: true });
-        setCaretInside(emptyP);
+        setCaretInside(blank);
       } else {
         const { beforeHtml, afterHtml } = splitParagraphHtml(block, range);
         block.innerHTML = beforeHtml || '<br>';
@@ -5617,25 +5646,28 @@ function studioHtmlV2(payload, libs) {
         button.textContent = '批量导出 PNG ZIP';
       }
     }
+    function stripReflowArtifacts(holder) {
+      removeAutoLineBreaks(holder);
+      stripCaretAnchors(holder);
+      holder.querySelectorAll?.('.xhs-caret-marker').forEach((node) => node.remove());
+    }
     function reflow(preferredImageId = '') {
       const caretMarkerId = insertReflowCaretMarker();
       const rememberedImageId = preferredImageId || (selectedFrame?.classList.contains('cover-image-frame') ? '' : ensureImageId(frameBlock()));
-      saveCurrentPage();
+      saveCurrentPage({ skipNormalize: true });
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       if (!cover.tailHtml) cover.tailHtml = '';
       const merged = document.createElement('div');
       if (cover.tailHtml) {
         const tailHolder = document.createElement('div');
         tailHolder.innerHTML = '<div class="xhs-body-frame">' + cover.tailHtml + '</div>';
-        removeAutoLineBreaks(tailHolder);
-        normalizeEditableBodyBlocks(tailHolder);
+        stripReflowArtifacts(tailHolder);
         Array.from(tailHolder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
       }
       pages.filter((page) => page.type === 'body').forEach((page) => {
         const holder = document.createElement('div');
         holder.innerHTML = '<div class="xhs-body-frame">' + page.html + '</div>';
-        removeAutoLineBreaks(holder);
-        normalizeEditableBodyBlocks(holder);
+        stripReflowArtifacts(holder);
         const frame = holder.querySelector('.xhs-body-frame');
         Array.from(frame?.children || []).forEach((node) => merged.appendChild(node));
       });

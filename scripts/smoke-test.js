@@ -139,6 +139,27 @@ async function main() {
   assert.match(chineseHtml, /<section data-xhs-heading-level="1"[\s\S]*?<strong>小节<\/strong>/);
   assert.match(chineseHtml, /<section><strong>正文一级章节<\/strong><\/section>/);
 
+  const blankSourceDir = path.join(root, "flow-blank-source");
+  const blankOutputDir = path.join(root, "flow-blank-output");
+  fs.mkdirSync(blankSourceDir, { recursive: true });
+  const blankMarkdown = [
+    "# 空行回归",
+    "",
+    "**金句：卡片和正文之间要留一空行。**",
+    "",
+    "这是下一段正文。",
+  ].join("\n");
+  fs.writeFileSync(path.join(blankSourceDir, "article.md"), blankMarkdown, "utf8");
+  const blankConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), blankSourceDir, "-o", blankOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(blankConvert.status, 0, blankConvert.stderr || blankConvert.stdout);
+  const blankHtml = fs.readFileSync(path.join(blankOutputDir, "xhs-studio.html"), "utf8");
+  assert.match(blankHtml, /data-xhs-flow-blank="1"/);
+  assert.match(blankHtml, /<p><strong>金句：卡片和正文之间要留一空行。<\/strong><\/p>\s*<p data-xhs-flow-blank="1"[\s\S]*?<p>这是下一段正文/);
+
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
   assert.match(html, /data-xhs-block-type="quote"/);
@@ -221,6 +242,11 @@ async function main() {
     await page.waitForTimeout(500);
     const tailFrameHeadingCount = await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").count();
     assert.ok(tailFrameHeadingCount > 0, "expected a heading to flow into the cover tail frame");
+    const tailFrameBaseline = await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => ({
+      manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
+      caretAnchorCount: frame.querySelectorAll(".xhs-caret-anchor").length,
+      firstChildIsHeading: frame.firstElementChild?.classList.contains("xhs-heading") || false,
+    }));
     await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").first().evaluate((heading) => {
       const blank = document.createElement("p");
       blank.className = "xhs-p xhs-block xhs-manual-blank";
@@ -242,17 +268,20 @@ async function main() {
       caretAnchorCount: frame.querySelectorAll(".xhs-caret-anchor").length,
       firstChildIsHeading: frame.firstElementChild?.classList.contains("xhs-heading") || false,
     }));
-    assert.strictEqual(tailFrameBlankState.manualBlankCount, 0);
+    assert.strictEqual(tailFrameBlankState.manualBlankCount, tailFrameBaseline.manualBlankCount);
     assert.strictEqual(tailFrameBlankState.caretAnchorCount, 0);
-    assert.strictEqual(tailFrameBlankState.firstChildIsHeading, true);
+    assert.strictEqual(tailFrameBlankState.firstChildIsHeading, tailFrameBaseline.firstChildIsHeading);
     // Persisted state (survives switching pages away and back) must stay clean too.
     await page.locator("#pageTabs button").nth(1).click();
     await page.waitForTimeout(100);
     await page.locator("#pageTabs button").first().click();
     await page.waitForTimeout(100);
     assert.strictEqual(await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => (
-      frame.querySelectorAll(".xhs-caret-anchor, .xhs-manual-blank").length
+      frame.querySelectorAll(".xhs-caret-anchor").length
     )), 0);
+    assert.strictEqual(await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => (
+      frame.querySelectorAll(".xhs-manual-blank").length
+    )), tailFrameBaseline.manualBlankCount);
     await page.click("#coverImageOnBtn");
     await page.waitForTimeout(500);
 
@@ -261,6 +290,15 @@ async function main() {
       await page.locator("#pageTabs button").nth(2).click();
       await page.waitForTimeout(100);
       const bodyPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
+      const bodyPageBaseline = await bodyPageFrame.evaluate((frame) => ({
+        manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
+        leadingIsBlank: Boolean(
+          frame.firstElementChild?.classList.contains("xhs-manual-blank") ||
+          ((frame.firstElementChild?.classList.contains("xhs-p") || frame.firstElementChild?.classList.contains("xhs-rich")) &&
+            !frame.firstElementChild?.textContent?.replace(/\s+/g, "").length),
+        ),
+        firstText: frame.firstElementChild?.textContent?.replace(/\s+/g, " ").trim() || "",
+      }));
       await bodyPageFrame.evaluate((frame) => {
         const blank = document.createElement("p");
         blank.className = "xhs-p xhs-block xhs-manual-blank";
@@ -287,15 +325,23 @@ async function main() {
         ),
         firstText: frame.firstElementChild?.textContent?.replace(/\s+/g, " ").trim() || "",
       }));
-      assert.strictEqual(bodyPageBlankState.manualBlankCount, 0);
-      assert.strictEqual(bodyPageBlankState.leadingIsBlank, false);
-      assert.ok(bodyPageBlankState.firstText.length > 0);
+      assert.strictEqual(bodyPageBlankState.manualBlankCount, bodyPageBaseline.manualBlankCount);
+      assert.strictEqual(bodyPageBlankState.leadingIsBlank, bodyPageBaseline.leadingIsBlank);
+      assert.strictEqual(bodyPageBlankState.firstText, bodyPageBaseline.firstText);
     }
 
     // Regression: deleting a mid-page manual-blank must not resurrect phantom blanks after reflow.
     await page.locator("#pageTabs button").nth(1).click();
     await page.waitForTimeout(100);
     const midPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
+    const midPageBaseline = await midPageFrame.evaluate((frame) => ({
+      manualBlankCount: frame.querySelectorAll(".xhs-manual-blank").length,
+      emptyParagraphCount: Array.from(frame.querySelectorAll(".xhs-p, .xhs-rich")).filter((node) => (
+        !node.classList.contains("xhs-manual-blank") &&
+        !node.classList.contains("xhs-caret-anchor") &&
+        !node.textContent?.replace(/\s+/g, "").length
+      )).length,
+    }));
     await midPageFrame.evaluate((frame) => {
       const blocks = Array.from(frame.querySelectorAll(".xhs-p, .xhs-rich, .xhs-heading")).filter((node) => (
         node.textContent?.replace(/\s+/g, " ").trim().length > 0
@@ -324,8 +370,8 @@ async function main() {
         !node.textContent?.replace(/\s+/g, "").length
       )).length,
     }));
-    assert.strictEqual(midPageBlankState.manualBlankCount, 0);
-    assert.strictEqual(midPageBlankState.emptyParagraphCount, 0);
+    assert.strictEqual(midPageBlankState.manualBlankCount, midPageBaseline.manualBlankCount);
+    assert.strictEqual(midPageBlankState.emptyParagraphCount, midPageBaseline.emptyParagraphCount);
 
     const pageCount = await page.locator("#pageTabs button").count();
     const content = { quotes: [], callouts: [], labels: [], lists: [], tables: [] };
