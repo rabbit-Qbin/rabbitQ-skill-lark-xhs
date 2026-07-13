@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.31";
+const VERSION = "0.8.32";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -904,6 +904,7 @@ function studioHtmlV2(payload, libs) {
     .main { padding: 20px; overflow: auto; }
     .toolbar { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 0 0 14px; }
     .notice { max-width: 760px; margin: 0 auto 14px; padding: 11px 14px; border: 1px solid #f4c78b; border-radius: 10px; background: #fff7e8; color: #7a4a12; font-size: 13px; line-height: 1.55; font-weight: 700; }
+    .notice.runtime-notice { border-color: #9ec5fe; background: #eef6ff; color: #174a7a; }
     .page-tabs { display: flex; gap: 7px; justify-content: center; flex-wrap: wrap; margin: 0 0 16px; }
     .page-tabs button { min-width: 42px; padding: 8px 10px; }
     .stage-wrap { width: min(70vw, 620px); aspect-ratio: ${width} / ${height}; position: relative; margin: 0 auto 24px; }
@@ -1025,6 +1026,7 @@ function studioHtmlV2(payload, libs) {
   <div class="app">
     <main class="main">
       ${warnings.length ? `<div class="notice">原稿里有 ${warnings.length} 个视频链接。小红书图文卡片这里只放图片，视频已跳过；需要视频请在小红书发布页单独上传，或先截帧/转图片再放入卡片。</div>` : ""}
+      <div id="runtimeNotice" class="notice runtime-notice" hidden></div>
       <div class="toolbar">
         <button id="boldBtn" class="dark">B 加粗</button>
         <button id="headingBtn1">一级标题</button>
@@ -1220,6 +1222,7 @@ function studioHtmlV2(payload, libs) {
     const stageScale = document.getElementById('stageScale');
     const pageTabs = document.getElementById('pageTabs');
     const pageInfo = document.getElementById('pageInfo');
+    const runtimeNotice = document.getElementById('runtimeNotice');
     const imageList = document.getElementById('imageList');
     const imageTools = document.getElementById('imageTools');
     const imageInput = document.getElementById('imageInput');
@@ -1395,6 +1398,11 @@ function studioHtmlV2(payload, libs) {
         .replace(/line-height\\s*:\\s*[0-9.]+\\s*;?/gi, '')
         .replace(/color\\s*:\\s*#(?:303832|161a17)\\s*;?/gi, '')
         .replace(/letter-spacing\\s*:\\s*[^;"]+;?/gi, '');
+    }
+    function htmlTextContent(html) {
+      const holder = document.createElement('div');
+      holder.innerHTML = String(html || '');
+      return holder.textContent || '';
     }
     function clearUnderlineInlineStyles(node) {
       if (!node?.style) return;
@@ -1870,19 +1878,24 @@ function studioHtmlV2(payload, libs) {
         const plain = stripLeadingListMarkerText(cleanText(node.textContent));
         return plain ? { html, plain } : null;
       }).filter(Boolean);
-      return items.length ? buildListLines(items) : [];
+      return items.length ? buildListLines(items, listType) : [];
     }
     function mergeAdjacentListParagraphs(blocks) {
       const merged = [];
       let buffer = [];
+      let bufferType = '';
       function flushBuffer() {
         if (!buffer.length) return;
-        const lines = buildReasonStackFromParagraphs(buffer, 'unordered');
+        const lines = buildReasonStackFromParagraphs(buffer, bufferType || 'unordered');
         lines.forEach((line) => merged.push(line));
         buffer = [];
+        bufferType = '';
       }
       blocks.forEach((block) => {
         if (block.classList?.contains('xhs-p') && paragraphLooksLikeListItem(block)) {
+          const nextType = paragraphListType(block) || 'unordered';
+          if (buffer.length && bufferType !== nextType) flushBuffer();
+          bufferType = nextType;
           buffer.push(block);
           return;
         }
@@ -1906,6 +1919,7 @@ function studioHtmlV2(payload, libs) {
       return listCards >= 2 || (/background\\s*:\\s*#f3f8f1/i.test(style) && listCards >= 1);
     }
     function reasonListLinesFromElement(el) {
+      const listType = el.dataset?.listType === 'ordered' ? 'ordered' : 'unordered';
       const items = Array.from(el.children).map((child) => {
         const spans = Array.from(child.querySelectorAll('span'));
         const contentSpan = spans.find((span) => {
@@ -1916,7 +1930,7 @@ function studioHtmlV2(payload, libs) {
         const plain = stripLeadingListMarkerText(cleanText(textHtml.replace(/<[^>]*>/g, '')));
         return plain ? { html: textHtml, plain } : null;
       }).filter(Boolean);
-      return buildListLines(items, 'unordered');
+      return buildListLines(items, listType);
     }
     function reasonListLinesFromStack(stack) {
       const items = Array.from(stack.querySelectorAll('.xhs-reason-card, .xhs-reason-text')).map((node) => {
@@ -1930,24 +1944,26 @@ function studioHtmlV2(payload, libs) {
     function normalizeListLinesInFrame(frame) {
       if (!frame) return false;
       let changed = false;
+      const processed = new Set();
       Array.from(frame.querySelectorAll('.xhs-list-line')).forEach((line) => {
-        if (line.dataset.listType !== 'unordered') {
-          line.dataset.listType = 'unordered';
-          changed = true;
-        }
-        const body = line.querySelector('.xhs-list-body');
-        if (body) {
-          const stripped = stripListMarkerFromHtml(body.innerHTML);
-          if (stripped !== body.innerHTML) {
-            body.innerHTML = stripped || '<br>';
+        if (processed.has(line)) return;
+        const listType = line.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
+        const group = collectContiguousListLines(line);
+        group.forEach((item, index) => {
+          processed.add(item);
+          if (item.dataset.listType !== listType) {
+            item.dataset.listType = listType;
             changed = true;
           }
-        }
-        const marker = line.querySelector('.xhs-list-marker');
-        if (marker && !marker.classList.contains('xhs-list-marker-dot')) {
-          marker.replaceWith(listMarkerElement());
-          changed = true;
-        }
+          const marker = item.querySelector('.xhs-list-marker');
+          const markerIsValid = listType === 'ordered'
+            ? Boolean(marker?.classList.contains('xhs-list-marker-ordered') && cleanText(marker.textContent) === String(index + 1) + '.')
+            : Boolean(marker?.classList.contains('xhs-list-marker-dot'));
+          if (!markerIsValid) {
+            marker?.replaceWith(listMarkerElement(listType, index + 1));
+            changed = true;
+          }
+        });
       });
       return changed;
     }
@@ -2821,7 +2837,8 @@ function studioHtmlV2(payload, libs) {
       pageTabs.innerHTML = pages.map((_, i) => '<button class="' + (i === pageIndex ? 'active' : '') + '" data-index="' + i + '">' + String(i + 1).padStart(2, '0') + '</button>').join('');
       pageTabs.querySelectorAll('button').forEach((button) => {
         button.addEventListener('click', () => {
-          saveCurrentPage();
+          saveCurrentPage({ skipNormalize: true });
+          persistDraftCheckpoint();
           pageIndex = Number(button.dataset.index);
           selectedFrame = null;
           renderAll();
@@ -3284,24 +3301,32 @@ function studioHtmlV2(payload, libs) {
       if (inserted) markParagraphEnterHandled();
       return inserted;
     }
-    function listMarkerElement() {
+    function listMarkerElement(listType = 'unordered', index = 1) {
       const marker = document.createElement('span');
-      marker.className = 'xhs-list-marker xhs-list-marker-dot';
+      if (listType === 'ordered') {
+        marker.className = 'xhs-list-marker xhs-list-marker-ordered';
+        marker.textContent = String(index) + '.';
+      } else {
+        marker.className = 'xhs-list-marker xhs-list-marker-dot';
+      }
       marker.contentEditable = 'false';
       return marker;
     }
-    function buildListLine(entry) {
+    function buildListLine(entry, listType = 'unordered', index = 1, options = {}) {
+      const normalizedType = listType === 'ordered' ? 'ordered' : 'unordered';
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-list-line';
-      p.dataset.listType = 'unordered';
+      p.dataset.listType = normalizedType;
       const body = document.createElement('span');
       body.className = 'xhs-list-body';
-      body.innerHTML = stripListMarkerFromHtml(entry.html) || '<br>';
-      p.append(listMarkerElement(), body);
+      body.innerHTML = options.preserveBodyHtml
+        ? (entry.html || '<br>')
+        : (stripListMarkerFromHtml(entry.html) || '<br>');
+      p.append(listMarkerElement(normalizedType, index), body);
       return p;
     }
-    function buildListLines(items) {
-      return items.map((entry) => buildListLine(entry));
+    function buildListLines(items, listType = 'unordered') {
+      return items.map((entry, index) => buildListLine(entry, listType, index + 1));
     }
     function collectContiguousListLines(line) {
       if (!line?.classList?.contains('xhs-list-line')) return [line].filter(Boolean);
@@ -3324,12 +3349,11 @@ function studioHtmlV2(payload, libs) {
       return group;
     }
     function renumberContiguousListLines(activeLine) {
-      collectContiguousListLines(activeLine).forEach((line) => {
-        line.dataset.listType = 'unordered';
+      const listType = activeLine?.dataset?.listType === 'ordered' ? 'ordered' : 'unordered';
+      collectContiguousListLines(activeLine).forEach((line, index) => {
+        line.dataset.listType = listType;
         const marker = line.querySelector('.xhs-list-marker');
-        if (marker && !marker.classList.contains('xhs-list-marker-dot')) {
-          marker.replaceWith(listMarkerElement());
-        }
+        marker?.replaceWith(listMarkerElement(listType, index + 1));
       });
     }
     function splitListBodyHtml(textEl, range) {
@@ -3338,14 +3362,18 @@ function studioHtmlV2(payload, libs) {
       beforeRange.setEnd(range.startContainer, range.startOffset);
       const beforeHolder = document.createElement('div');
       beforeHolder.appendChild(beforeRange.cloneContents());
-      const beforeHtml = normalizeInlineHtml(beforeHolder.innerHTML || '');
+      const beforeHtml = beforeHolder.innerHTML || '';
       const afterRange = document.createRange();
       afterRange.selectNodeContents(textEl);
       afterRange.setStart(range.startContainer, range.startOffset);
       const afterHolder = document.createElement('div');
       afterHolder.appendChild(afterRange.cloneContents());
-      const afterHtml = normalizeInlineHtml(afterHolder.innerHTML || '');
-      return { beforeHtml, afterHtml };
+      const afterHtml = afterHolder.innerHTML || '';
+      return {
+        beforeHtml,
+        afterHtml,
+        valid: htmlTextContent(beforeHtml) + htmlTextContent(afterHtml) === (textEl.textContent || ''),
+      };
     }
     function convertListLineToParagraph(line) {
       const body = line?.querySelector?.('.xhs-list-body');
@@ -3415,22 +3443,30 @@ function studioHtmlV2(payload, libs) {
       if (paragraphEnterKeydownHandled) return false;
       const block = directFlowChild(frame, range.startContainer, range.startOffset);
       if (!isEditableParagraphBlock(block)) return false;
-      markParagraphEnterHandled();
+      saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
       if (isCaretAtFieldStart(range, block)) {
+        markParagraphEnterHandled();
         const emptyP = makeEmptyParagraph();
         block.before(emptyP);
         frame.focus({ preventScroll: true });
         setCaretInside(emptyP);
       } else if (isCaretAtFieldEnd(range, block)) {
+        markParagraphEnterHandled();
         const emptyP = makeEmptyParagraph();
         block.after(emptyP);
         frame.focus({ preventScroll: true });
         setCaretInside(emptyP);
       } else {
-        const { beforeHtml, afterHtml } = splitParagraphHtml(block, range);
+        const { beforeHtml, afterHtml, valid } = splitParagraphHtml(block, range);
+        if (!valid) return false;
+        markParagraphEnterHandled();
         block.innerHTML = beforeHtml || '<br>';
         const nextP = makeEmptyParagraph();
-        if (afterHtml) nextP.innerHTML = afterHtml;
+        if (afterHtml) {
+          nextP.innerHTML = afterHtml;
+          nextP.classList.remove('xhs-manual-blank');
+        }
         block.after(nextP);
         frame.focus({ preventScroll: true });
         setCaretInside(nextP);
@@ -3450,15 +3486,27 @@ function studioHtmlV2(payload, libs) {
       scheduleParagraphOverflowCheck(frame);
       return true;
     }
+    function rangeFromBeforeInputEvent(event) {
+      try {
+        const target = event.getTargetRanges?.()[0];
+        if (target?.startContainer && target?.endContainer) {
+          const range = document.createRange();
+          range.setStart(target.startContainer, target.startOffset);
+          range.setEnd(target.endContainer, target.endOffset);
+          return range;
+        }
+      } catch (_) {}
+      const selection = window.getSelection();
+      return selection?.rangeCount ? selection.getRangeAt(0) : null;
+    }
     function handleBodyParagraphBeforeInput(event) {
       if (event.inputType !== 'insertParagraph') return;
       if (paragraphEnterKeydownHandled) {
         event.preventDefault();
         return;
       }
-      const selection = window.getSelection();
-      if (!selection || !selection.rangeCount || !selection.isCollapsed) return;
-      const range = selection.getRangeAt(0);
+      const range = rangeFromBeforeInputEvent(event);
+      if (!range || !range.collapsed) return;
       const frame = event.currentTarget;
       if (!performParagraphEnter(frame, range)) return;
       event.preventDefault();
@@ -3503,10 +3551,13 @@ function studioHtmlV2(payload, libs) {
       const textEl = parent?.closest?.('.xhs-list-body');
       const line = textEl?.closest?.('.xhs-list-line');
       if (!textEl || !line || !stageScale.contains(line)) return false;
-      event.preventDefault();
       const frame = line.closest('[contenteditable="true"]');
+      const listType = line.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
+      saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
       if (isCaretAtFieldStart(range, textEl)) {
-        const newLine = buildListLine({ html: '<br>', plain: '' });
+        event.preventDefault();
+        const newLine = buildListLine({ html: '<br>', plain: '' }, listType, 1, { preserveBodyHtml: true });
         line.before(newLine);
         renumberContiguousListLines(line);
         frame?.focus({ preventScroll: true });
@@ -3516,9 +3567,16 @@ function studioHtmlV2(payload, libs) {
         scheduleParagraphOverflowCheck(frame);
         return true;
       }
-      const { beforeHtml, afterHtml } = splitListBodyHtml(textEl, range);
+      const { beforeHtml, afterHtml, valid } = splitListBodyHtml(textEl, range);
+      if (!valid) return false;
+      event.preventDefault();
       textEl.innerHTML = beforeHtml || '<br>';
-      const nextLine = buildListLine({ html: afterHtml || '<br>', plain: '' });
+      const nextLine = buildListLine(
+        { html: afterHtml || '<br>', plain: '' },
+        listType,
+        1,
+        { preserveBodyHtml: true },
+      );
       line.after(nextLine);
       renumberContiguousListLines(line);
       const nextBody = nextLine.querySelector('.xhs-list-body');
@@ -3606,9 +3664,14 @@ function studioHtmlV2(payload, libs) {
     }
     function makeEmptyParagraph() {
       const p = document.createElement('p');
-      p.className = 'xhs-p xhs-block';
+      p.className = 'xhs-p xhs-block xhs-manual-blank';
       p.innerHTML = '<br>';
       return p;
+    }
+    function normalizeFilledManualBlanks(root) {
+      root?.querySelectorAll?.('.xhs-manual-blank').forEach((blank) => {
+        if (cleanText(blank.textContent || '')) blank.classList.remove('xhs-manual-blank');
+      });
     }
     function splitParagraphHtml(block, range) {
       const beforeRange = document.createRange();
@@ -3616,14 +3679,18 @@ function studioHtmlV2(payload, libs) {
       beforeRange.setEnd(range.startContainer, range.startOffset);
       const beforeHolder = document.createElement('div');
       beforeHolder.appendChild(beforeRange.cloneContents());
-      const beforeHtml = normalizeInlineHtml(beforeHolder.innerHTML || '');
+      const beforeHtml = beforeHolder.innerHTML || '';
       const afterRange = document.createRange();
       afterRange.selectNodeContents(block);
       afterRange.setStart(range.startContainer, range.startOffset);
       const afterHolder = document.createElement('div');
       afterHolder.appendChild(afterRange.cloneContents());
-      const afterHtml = normalizeInlineHtml(afterHolder.innerHTML || '');
-      return { beforeHtml, afterHtml };
+      const afterHtml = afterHolder.innerHTML || '';
+      return {
+        beforeHtml,
+        afterHtml,
+        valid: htmlTextContent(beforeHtml) + htmlTextContent(afterHtml) === (block.textContent || ''),
+      };
     }
     function setCaretAtFieldEnd(field) {
       const selection = window.getSelection();
@@ -3689,7 +3756,7 @@ function studioHtmlV2(payload, libs) {
       }, 320);
     }
     function scheduleParagraphOverflowCheck(frame) {
-      scheduleLightSave();
+      scheduleOverflowReflow(true);
     }
     function scheduleReflowAfterBlankRemoval() {
       cancelPendingReflow();
@@ -3958,6 +4025,7 @@ function studioHtmlV2(payload, libs) {
             balanceCoverSubtitle();
           }
           if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+            normalizeFilledManualBlanks(editable);
             if (isHistoryInputType(inputType)) {
               cancelPendingReflow();
               scheduleLightSave();
@@ -3966,6 +4034,10 @@ function studioHtmlV2(payload, libs) {
             scheduleLightSave();
             if (activeHeadingEditField()) scheduleHeadingNormalize();
             if (inputType === 'insertParagraph' && paragraphEnterKeydownHandled) return;
+            if (/^deleteContent(?:Backward|Forward)$/.test(inputType)) {
+              scheduleOverflowReflow(true);
+              return;
+            }
             if (/insertFromPaste|insertParagraph|insertLineBreak|insertText/.test(inputType)) {
               window.setTimeout(() => {
                 if (editable.scrollHeight > editable.clientHeight + 8) scheduleOverflowReflow(false);
@@ -4574,7 +4646,8 @@ function studioHtmlV2(payload, libs) {
       });
       const page = pages[pageIndex];
       const label = page?.type === 'cover' ? '封面页' : '正文页';
-      pageInfo.textContent = pages.length ? label + ' · 当前第 ' + (pageIndex + 1) + ' / ' + pages.length + ' 页' : '暂无分页';
+      const coverFlowHint = page?.type === 'cover' && !coverImageEnabled ? ' · 正文已接入封面下半区' : '';
+      pageInfo.textContent = pages.length ? label + ' · 当前第 ' + (pageIndex + 1) + ' / ' + pages.length + ' 页' + coverFlowHint : '暂无分页';
     }
     function renderAll() {
       renderTabs();
@@ -5479,9 +5552,17 @@ function studioHtmlV2(payload, libs) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
     let restoringState = false;
+    function showRuntimeNotice(message) {
+      if (!runtimeNotice || !message) return;
+      runtimeNotice.textContent = message;
+      runtimeNotice.hidden = false;
+    }
     function draftStorageKey() {
       return 'rabbitQ-lark-xhs-draft:' + config.title + ':' + config.width + 'x' + config.height + ':' +
         (config.sourceFingerprint || config.version || 'default');
+    }
+    function draftCheckpointKey() {
+      return draftStorageKey() + ':checkpoint';
     }
     function serializeStudioState() {
       return {
@@ -5512,11 +5593,18 @@ function studioHtmlV2(payload, libs) {
         localStorage.setItem(draftStorageKey(), JSON.stringify(serializeStudioState()));
       } catch (_) {}
     }
+    function persistDraftCheckpoint() {
+      if (restoringState || !pages.length) return;
+      try {
+        localStorage.setItem(draftCheckpointKey(), JSON.stringify(serializeStudioState()));
+      } catch (_) {}
+    }
     function resetStudioToInitial() {
       if (!window.confirm('确定恢复初始状态吗？当前文字、图片、主题和排版修改都会被清除。')) return;
       restoringState = true;
       try {
         localStorage.removeItem(draftStorageKey());
+        localStorage.removeItem(draftCheckpointKey());
         pageIndex = 0;
         selectedFrame = null;
         selectedFlowBlock = null;
@@ -5548,6 +5636,31 @@ function studioHtmlV2(payload, libs) {
         if (page.html) holder.insertAdjacentHTML('beforeend', page.html);
       });
       return (holder.textContent || '').replace(/\s+/g, '');
+    }
+    function studioFlowIntegritySignature(pageList) {
+      const merged = document.createElement('div');
+      (pageList || []).forEach((page) => {
+        if (!page) return;
+        const htmlParts = page.type === 'cover' ? [page.tailHtml || ''] : [page.html || ''];
+        htmlParts.forEach((html) => {
+          if (!html) return;
+          const holder = document.createElement('div');
+          holder.innerHTML = '<div class="xhs-body-frame">' + html + '</div>';
+          stripReflowArtifacts(holder);
+          Array.from(holder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
+        });
+      });
+      const blocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(merged.children)));
+      return blocks.map((block) => {
+        if (block.classList?.contains('xhs-manual-blank')) return '⟦BLANK⟧';
+        if (block.dataset?.xhsPageBreak === '1' || block.classList?.contains('xhs-page-break')) return '⟦BREAK⟧';
+        const text = (block.textContent || '').replace(/\s+/g, '');
+        const images = Array.from(block.querySelectorAll?.('img') || []).map((img) => {
+          const src = img.getAttribute('src') || '';
+          return '⟦IMG:' + src.slice(-160) + '⟧';
+        }).join('');
+        return text + images;
+      }).join('');
     }
     function templatePlainText() {
       return extractBlocksFromTemplate()
@@ -5634,7 +5747,13 @@ function studioHtmlV2(payload, libs) {
       }
     }
     function restoreSavedStudioState() {
-      if (embeddedState && applyStudioState(embeddedState)) return true;
+      if (embeddedState) {
+        if (isDraftCorrupted(embeddedState)) {
+          showRuntimeNotice('检测到“保存编辑 HTML”中的正文不完整，已回退到源稿重新分页。');
+        } else if (applyStudioState(embeddedState, { forceReflow: true })) {
+          return true;
+        }
+      }
       try {
         const raw = localStorage.getItem(draftStorageKey());
         if (!raw) return false;
@@ -5644,6 +5763,15 @@ function studioHtmlV2(payload, libs) {
         }
         if (isDraftCorrupted(state)) {
           localStorage.removeItem(draftStorageKey());
+          const checkpointRaw = localStorage.getItem(draftCheckpointKey());
+          if (checkpointRaw) {
+            const checkpoint = JSON.parse(checkpointRaw);
+            if (!isDraftCorrupted(checkpoint) && applyStudioState(checkpoint, { forceReflow: true })) {
+              showRuntimeNotice('检测到本地草稿正文不完整，已恢复到上一次安全编辑状态。');
+              return true;
+            }
+          }
+          showRuntimeNotice('检测到本地草稿正文不完整，已清除损坏草稿并回退到源稿。');
           return false;
         }
         return applyStudioState(state, { forceReflow: true });
@@ -5816,6 +5944,10 @@ function studioHtmlV2(payload, libs) {
       const caretMarkerId = insertReflowCaretMarker();
       const rememberedImageId = preferredImageId || (selectedFrame?.classList.contains('cover-image-frame') ? '' : ensureImageId(frameBlock()));
       saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
+      const previousPages = pages.map((page) => ({ ...page }));
+      const previousPageIndex = pageIndex;
+      const beforeIntegrity = studioFlowIntegritySignature(previousPages);
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       if (!cover.tailHtml) cover.tailHtml = '';
       const merged = document.createElement('div');
@@ -5841,6 +5973,15 @@ function studioHtmlV2(payload, libs) {
         cover.tailHtml = '';
         pages = [cover].concat(paginateBlocks(flowBlocks));
       }
+      const afterIntegrity = studioFlowIntegritySignature(pages);
+      if (beforeIntegrity !== afterIntegrity) {
+        pages = previousPages;
+        pageIndex = Math.min(previousPageIndex, Math.max(0, pages.length - 1));
+        selectedFrame = null;
+        renderAll();
+        showRuntimeNotice('检测到本次重排会改变正文、图片或空行顺序，已自动撤回重排并保留原内容。');
+        return false;
+      }
       const caretPageIndex = pageIndexForCaretMarker(caretMarkerId);
       const nextIndex = pageIndexForImageId(rememberedImageId);
       pageIndex = caretPageIndex >= 0
@@ -5852,6 +5993,7 @@ function studioHtmlV2(payload, libs) {
       const rememberedBlock = findImageBlockById(stageScale, rememberedImageId);
       const frame = rememberedBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);
+      return true;
     }
     [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());

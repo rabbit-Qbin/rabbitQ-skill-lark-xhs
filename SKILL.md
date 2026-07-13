@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持手动分页（---）、连续分页、封面开关、主题组合、引用/卡片/序列/表格、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.8.30
+version: 0.8.32
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -236,8 +236,10 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 - **只有「切行」才断流：** Markdown 空行、Studio 里 Enter 新段、Shift+Enter 段内软换行、`---` 手动分页。标题、卡片、引用、序列、图片是结构块，保持完整，不拦腰切断。
 - 普通正文边界**不显示** `+` / `−` 空行按钮；空行靠 Enter / Backspace / 删行，和平时写字一样。
 - **Enter**：在普通正文里拆出新段落。**不会**删掉后面的标题、图片或其它块（v0.8.28 已修双触发吞字）。
+- Enter 会先验证拆分前后正文逐字等价；有序/无序列表会保留类型、粗体和光标后的完整文字。浏览器只触发 `beforeinput` 时也使用目标 Range 处理。
 - **Shift+Enter**：在同一段内软换行，不拆段。
 - 删除空行后，Studio 会跨页 reflow，后面页文字自动往上接续填空。
+- reflow 前后会核对正文、图片、手动空行和分页符的完整签名；若发现内容或顺序变化，会自动回滚并显示提示。
 - 飞书导出在图片/标题/列表周围的空行**不会**自动转成空行块（v0.8.27）；仅正文↔正文、卡片→正文保留源稿空行。
 
 ### 图片
@@ -252,6 +254,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 ### 状态与输出
 
 - localStorage 自动保存当前文章草稿；草稿键和源文件指纹包含 Skill 版本，重新生成或升级后不会被旧草稿覆盖。
+- 结构编辑前保存安全检查点；localStorage 或“保存编辑 HTML”的正文损坏时，会恢复检查点或源稿，并在 Studio 顶部明确提示。
 - “保存编辑 HTML”把当前状态嵌入新 HTML，重新打开仍保持编辑结果。
 - “一键复原”确认后清除当前文章草稿并恢复初始内容、图片、主题和布局。
 - PNG ZIP 导出必须与预览一致，每页尺寸相同，默认 1080 × 1440。

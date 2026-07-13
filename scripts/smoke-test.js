@@ -259,6 +259,60 @@ async function main() {
   assert.ok(executablePath, "No Chromium browser found; set PLAYWRIGHT_CHROMIUM_EXECUTABLE");
   const browser = await chromium.launch({ headless: true, executablePath });
   try {
+    const orderedPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await orderedPage.addInitScript(() => localStorage.clear());
+    await orderedPage.goto(`file://${path.join(boldListOutputDir, "xhs-studio.html")}`);
+    await orderedPage.waitForTimeout(500);
+    const orderedListPageIndex = await orderedPage.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (document.querySelector('#stageScale .xhs-list-line[data-list-type="ordered"]')) return index;
+      }
+      return -1;
+    });
+    assert.ok(orderedListPageIndex >= 0, "expected ordered list page in Studio runtime");
+    await orderedPage.locator("#pageTabs button").nth(orderedListPageIndex).click();
+    await orderedPage.waitForTimeout(100);
+    assert.strictEqual(
+      await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"]').count(),
+      2,
+      "ordered Markdown lists must remain ordered in the Studio runtime",
+    );
+    const orderedFirstBody = orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"] .xhs-list-body').first();
+    const orderedFirstText = (await orderedFirstBody.textContent()) || "";
+    await orderedFirstBody.evaluate((body) => {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      let remaining = Math.max(1, (body.textContent || "").indexOf("：") + 1);
+      while (node && remaining > node.textContent.length) {
+        remaining -= node.textContent.length;
+        node = walker.nextNode();
+      }
+      if (!node) throw new Error("missing ordered-list caret node");
+      range.setStart(node, Math.min(remaining, node.textContent.length));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      body.closest('[contenteditable="true"]')?.focus();
+    });
+    await orderedPage.keyboard.press("Enter");
+    await orderedPage.waitForTimeout(250);
+    await orderedPage.evaluate(() => reflow());
+    await orderedPage.waitForTimeout(350);
+    const orderedAfterEnter = await orderedPage.locator("#stageScale .xhs-list-line").evaluateAll((lines) => ({
+      types: lines.map((line) => line.dataset.listType || ""),
+      text: lines.map((line) => line.querySelector(".xhs-list-body")?.textContent || "").join(""),
+      boldCount: lines.reduce((total, line) => total + line.querySelectorAll(".xhs-list-body strong").length, 0),
+    }));
+    assert.ok(orderedAfterEnter.types.length >= 3);
+    assert.ok(orderedAfterEnter.types.every((type) => type === "ordered"));
+    assert.ok(orderedAfterEnter.text.includes(orderedFirstText), "list text after caret must survive Enter and reflow");
+    assert.ok(orderedAfterEnter.boldCount >= 2, "bold markup in ordered lists must survive Enter and reflow");
+    await orderedPage.close();
+
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await page.goto(`file://${htmlPath}`);
     await page.waitForTimeout(500);
@@ -301,6 +355,7 @@ async function main() {
     await page.click("#coverImageOffBtn");
     await page.waitForTimeout(500);
     assert.strictEqual(await page.locator("#coverThemeTools").isVisible(), false);
+    assert.match(await page.locator("#pageInfo").innerText(), /正文已接入封面下半区/);
     assert.ok(await page.locator("#stageScale .xhs-cover-tail-frame").count());
     assert.ok(await page.locator("#stageScale .xhs-cover-tail-frame").evaluate((node) => node.children.length >= 2));
     await page.click("#coverImageOnBtn");
@@ -1059,7 +1114,11 @@ async function main() {
     assert.strictEqual(await page.locator("#bodyFontRange").inputValue(), "36");
 
     const flowPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
-    await flowPage.addInitScript(() => localStorage.clear());
+    await flowPage.addInitScript(() => {
+      if (sessionStorage.getItem("rabbitq-flow-test-initialized")) return;
+      localStorage.clear();
+      sessionStorage.setItem("rabbitq-flow-test-initialized", "1");
+    });
     await flowPage.goto(`file://${flowHtmlPath}`);
     await flowPage.waitForTimeout(500);
 
@@ -1083,6 +1142,46 @@ async function main() {
     assert.match(flowBodyText, /快速开始/);
     assert.match(flowBodyText, /先在飞书云文档导出 markdown/);
 
+    const flowSentence = "此工具为本兔自用工具、持续debug中…符合本人写作及编辑图文习惯和审美，如果有其他可以跟Codex交互修改skills哦！比如样式或者对于一些子标题的识别规则等等……";
+    const flowSentencePageIndex = await flowPage.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (Array.from(document.querySelectorAll("#stageScale .xhs-p")).some((node) => (node.textContent || "").includes("此工具为本兔自用工具"))) return index;
+      }
+      return -1;
+    });
+    assert.ok(flowSentencePageIndex >= 0, "expected the long flow paragraph for punctuation Enter regression");
+    await flowPage.locator("#pageTabs button").nth(flowSentencePageIndex).click();
+    await flowPage.waitForTimeout(100);
+    const flowSentenceParagraph = flowPage.locator("#stageScale .xhs-p").filter({ hasText: "此工具为本兔自用工具" }).first();
+    await flowSentenceParagraph.evaluate((paragraph) => {
+      const targetOffset = (paragraph.textContent || "").indexOf("、") + 1;
+      const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      let remaining = targetOffset;
+      while (node && remaining > node.textContent.length) {
+        remaining -= node.textContent.length;
+        node = walker.nextNode();
+      }
+      if (!node) throw new Error("missing punctuation caret node");
+      const range = document.createRange();
+      range.setStart(node, Math.min(remaining, node.textContent.length));
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      paragraph.closest('[contenteditable="true"]')?.focus();
+    });
+    await flowPage.keyboard.press("Enter");
+    await flowPage.waitForTimeout(900);
+    const flowAfterPunctuationEnter = (await collectAllBodyTextFrom(flowPage)).replace(/\s+/g, "");
+    assert.ok(flowAfterPunctuationEnter.includes(flowSentence.replace(/\s+/g, "")), "paragraph tail after 、 must survive Enter and automatic reflow");
+    await flowPage.evaluate(() => reflow());
+    await flowPage.waitForTimeout(400);
+    const flowAfterExplicitReflow = (await collectAllBodyTextFrom(flowPage)).replace(/\s+/g, "");
+    assert.ok(flowAfterExplicitReflow.includes(flowSentence.replace(/\s+/g, "")), "paragraph tail after 、 must survive explicit reflow");
+
     await flowPage.locator("#pageTabs button").first().click();
     await flowPage.waitForTimeout(120);
     await flowPage.click("#coverImageOffBtn");
@@ -1095,9 +1194,12 @@ async function main() {
       let corrupted = false;
       for (const page of state.pages) {
         for (const field of ["html", "tailHtml"]) {
-          if (!page[field] || !/此工具为本兔自用工具/.test(page[field])) continue;
-          page[field] = page[field].replace(/持续debug[\s\S]*?规则等等……/, "");
-          corrupted = true;
+          if (!page[field] || !/持续debug/.test(page[field])) continue;
+          const nextHtml = page[field].replace(/持续debug[\s\S]*?规则等等……/g, "");
+          if (nextHtml !== page[field]) {
+            page[field] = nextHtml;
+            corrupted = true;
+          }
         }
       }
       if (!corrupted) throw new Error("missing target page for corruption test");
@@ -1107,6 +1209,41 @@ async function main() {
     await flowPage.waitForTimeout(500);
     const healedFlowText = await collectAllBodyTextFrom(flowPage);
     assert.match(healedFlowText, /持续debug/, "corrupted draft should be discarded on reload");
+    assert.strictEqual(await flowPage.locator("#runtimeNotice").isVisible(), true, "draft self-heal must be visible to the user");
+    assert.match(await flowPage.locator("#runtimeNotice").innerText(), /正文不完整/);
+
+    const corruptedEmbeddedState = await flowPage.evaluate(() => serializeStudioState());
+    let embeddedWasCorrupted = false;
+    for (const savedPage of corruptedEmbeddedState.pages) {
+      for (const field of ["html", "tailHtml"]) {
+        if (!savedPage[field] || !/持续debug/.test(savedPage[field])) continue;
+        const nextHtml = savedPage[field].replace(/持续debug[\s\S]*?规则等等……/g, "");
+        if (nextHtml !== savedPage[field]) {
+          savedPage[field] = nextHtml;
+          embeddedWasCorrupted = true;
+        }
+      }
+    }
+    assert.strictEqual(embeddedWasCorrupted, true, "missing target page for embedded-state corruption test");
+    const embeddedHtmlPath = path.join(flowOutputDir, "xhs-studio-corrupted-embedded.html");
+    const embeddedPayload = JSON.stringify(corruptedEmbeddedState)
+      .replace(/</g, "\\u003c")
+      .replace(/>/g, "\\u003e")
+      .replace(/&/g, "\\u0026");
+    const embeddedHtml = fs.readFileSync(flowHtmlPath, "utf8").replace(
+      "const embeddedState = /* XHS_EMBEDDED_STATE */ null;",
+      `const embeddedState = /* XHS_EMBEDDED_STATE */ ${embeddedPayload};`,
+    );
+    fs.writeFileSync(embeddedHtmlPath, embeddedHtml, "utf8");
+    const embeddedPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await embeddedPage.addInitScript(() => localStorage.clear());
+    await embeddedPage.goto(`file://${embeddedHtmlPath}`);
+    await embeddedPage.waitForTimeout(600);
+    const healedEmbeddedText = await collectAllBodyTextFrom(embeddedPage);
+    assert.match(healedEmbeddedText, /持续debug/, "corrupted embeddedState should fall back to the source template");
+    assert.strictEqual(await embeddedPage.locator("#runtimeNotice").isVisible(), true, "embeddedState self-heal must be visible to the user");
+    assert.match(await embeddedPage.locator("#runtimeNotice").innerText(), /保存编辑 HTML.*正文不完整/);
+    await embeddedPage.close();
     await flowPage.close();
   } finally {
     await browser.close();

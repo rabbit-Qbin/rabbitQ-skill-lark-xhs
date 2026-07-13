@@ -111,6 +111,8 @@ node scripts/convert.js article.md --subtitle "一眼分清假视频问题，附
 
 列表结构优先于内容关键词。列表项中出现“卡片”“重点”等词，仍保持列表。
 
+Studio 内在列表项中按 Enter 会拆出同类型的新列表项：有序列表保持有序、无序列表保持圆点，粗体和光标后的正文必须完整保留。
+
 ## 表格
 
 推荐使用标准 GFM pipe table：
