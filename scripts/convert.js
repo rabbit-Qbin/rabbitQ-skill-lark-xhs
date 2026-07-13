@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.32";
+const VERSION = "0.8.33";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -887,7 +887,7 @@ function studioHtmlV2(payload, libs) {
       --xhs-accent: #4d7fd2;
       --xhs-accent-strong: #2e5fb2;
       --xhs-accent-soft: rgba(77, 127, 210, .16);
-      --xhs-accent-pale: #f3f7ff;
+      --xhs-accent-pale: #f5faff;
       --xhs-underline: #b8cbee;
       --xhs-cover-bg: #ffffff;
       --xhs-cover-border: #b8cbee;
@@ -1275,7 +1275,7 @@ function studioHtmlV2(payload, libs) {
     };
     const ACCENT_THEMES = {
       green: { accent: '#5fa66a', strong: '#2f7d3b', soft: 'rgba(95,166,106,.18)', pale: '#f4faf3', underline: '#b8ddb4' },
-      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.16)', pale: '#f3f7ff', underline: '#b8cbee' },
+      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.16)', pale: '#f5faff', underline: '#b8cbee' },
       pink: { accent: '#d7789b', strong: '#b94f76', soft: 'rgba(215,120,155,.16)', pale: '#fff5f8', underline: '#efbfd0' },
       teal: { accent: '#47a69e', strong: '#227a73', soft: 'rgba(71,166,158,.16)', pale: '#f1fbf9', underline: '#abdcd6' },
       orange: { accent: '#d99542', strong: '#b66b18', soft: 'rgba(217,149,66,.16)', pale: '#fff8ec', underline: '#edcea3' },
@@ -5819,7 +5819,7 @@ function studioHtmlV2(payload, libs) {
         accent: styles.getPropertyValue('--xhs-accent').trim() || '#4d7fd2',
         accentStrong: styles.getPropertyValue('--xhs-accent-strong').trim() || '#2e5fb2',
         accentSoft: styles.getPropertyValue('--xhs-accent-soft').trim() || 'rgba(77,127,210,.16)',
-        accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f3f7ff',
+        accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f5faff',
         underline: styles.getPropertyValue('--xhs-underline').trim() || '#b8cbee',
       };
     }
