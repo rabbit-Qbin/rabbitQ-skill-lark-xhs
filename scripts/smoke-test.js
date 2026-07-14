@@ -601,6 +601,62 @@ async function main() {
     assert.strictEqual(sequenceQuoteStyle.fontFamily, sequenceCardState.fontFamily);
     await orderedPage.close();
 
+    // Regression: the same list-backspace rule must work when an environment
+    // emits only beforeinput (for example, some IMEs and virtual keyboards).
+    const beforeInputPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await beforeInputPage.addInitScript(() => localStorage.clear());
+    await beforeInputPage.goto(`file://${path.join(boldListOutputDir, "xhs-studio.html")}`);
+    await beforeInputPage.waitForTimeout(300);
+    const beforeInputListPageIndex = await beforeInputPage.evaluate(() => {
+      for (const [index, tab] of Array.from(document.querySelectorAll('#pageTabs button')).entries()) {
+        tab.click();
+        if (document.querySelector('#stageScale .xhs-list-line .xhs-list-body')) return index;
+      }
+      return -1;
+    });
+    await beforeInputPage.locator('#pageTabs button').nth(beforeInputListPageIndex).click();
+    const beforeInputListState = await beforeInputPage.evaluate(() => {
+      const body = document.querySelector('#stageScale .xhs-list-line .xhs-list-body');
+      const frame = body.closest('[contenteditable="true"]');
+      const sample = body.textContent || '';
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      frame.focus();
+      const event = new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'deleteContentBackward',
+      });
+      const allowed = frame.dispatchEvent(event);
+      return {
+        allowed,
+        plainText: Array.from(frame.querySelectorAll('.xhs-p:not(.xhs-list-line)')).map((node) => node.textContent || ''),
+        sample,
+      };
+    });
+    assert.strictEqual(beforeInputListState.allowed, false, 'list beforeinput should be handled by the Studio command chain');
+    assert.ok(beforeInputListState.plainText.some((text) => text.includes(beforeInputListState.sample.slice(0, 4))), 'beforeinput list backspace should unlist into a paragraph');
+    await beforeInputPage.locator('#pageTabs button').first().click();
+    const coverUndoState = await beforeInputPage.evaluate(async () => {
+      const title = document.querySelector('.cover-title');
+      const suffix = '封面撤回';
+      title.focus();
+      title.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: suffix }));
+      title.append(document.createTextNode(suffix));
+      title.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: suffix }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { suffix, withSuffix: title.textContent.includes(suffix) };
+    });
+    assert.strictEqual(coverUndoState.withSuffix, true);
+    await beforeInputPage.keyboard.press('Control+z');
+    await beforeInputPage.waitForTimeout(100);
+    assert.strictEqual(await beforeInputPage.locator('.cover-title').innerText().then((text) => text.includes(coverUndoState.suffix)), false, 'cover text should also use Studio undo history');
+    await beforeInputPage.close();
+
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await page.goto(`file://${htmlPath}`);
     await page.waitForTimeout(500);

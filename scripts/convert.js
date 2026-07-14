@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.40";
+const VERSION = "0.8.41";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -1198,6 +1198,7 @@ function studioHtmlV2(payload, libs) {
     const editorRedoStack = [];
     let historyTypingTimer = null;
     let historyTypingActive = false;
+    let historyTypingTarget = null;
     let applyingEditorHistory = false;
     let layoutReflowTimer = null;
     let imageReflowTimer = null;
@@ -3439,7 +3440,8 @@ function studioHtmlV2(payload, libs) {
       return nextFocus;
     }
     function handleParagraphBackspace(event) {
-      if (event.key !== 'Backspace' || isHistoryShortcut(event)) return false;
+      const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
+      if (key !== 'Backspace' || isHistoryShortcut(event)) return false;
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
       const range = selection.getRangeAt(0);
@@ -3575,7 +3577,8 @@ function studioHtmlV2(payload, libs) {
       scheduleParagraphOverflowCheck(frame);
     }
     function handleListBackspace(event) {
-      if (event.key !== 'Backspace' || isHistoryShortcut(event)) return false;
+      const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
+      if (key !== 'Backspace' || isHistoryShortcut(event)) return false;
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
       const range = selection.getRangeAt(0);
@@ -4080,15 +4083,18 @@ function studioHtmlV2(payload, libs) {
       stageScale.querySelectorAll('[contenteditable="true"]').forEach((editable) => {
         editable.addEventListener('compositionstart', beginTextComposition);
         editable.addEventListener('compositionend', () => finishTextComposition(editable));
+        editable.addEventListener('beforeinput', recordHistoryBeforeInput);
         if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
           editable.addEventListener('keydown', handleParagraphEnter, true);
           editable.addEventListener('keydown', handleListEnter, true);
           editable.addEventListener('beforeinput', (event) => {
-            recordHistoryBeforeInput(event);
             if (event.isComposing || isComposingText) return;
             if (isHistoryInputType(event.inputType)) {
               cancelPendingReflow();
               return;
+            }
+            if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) {
+              if (handleListBackspace(event) || handleParagraphBackspace(event) || handleManualBlankDelete(event)) return;
             }
             handleBodyParagraphBeforeInput(event);
             if (event.inputType === 'insertParagraph' && paragraphEnterKeydownHandled) {
@@ -5872,11 +5878,22 @@ function studioHtmlV2(payload, libs) {
       if (isHistoryInputType(event.inputType) || event.isComposing || isComposingText) return;
       const inputType = String(event.inputType || '');
       const isTyping = /^(?:insertText|deleteContent(?:Backward|Forward))$/.test(inputType);
-      if (!isTyping || !historyTypingActive) recordEditorHistory();
-      if (!isTyping) return;
+      const target = event.currentTarget?.isContentEditable
+        ? event.currentTarget
+        : event.target?.closest?.('[contenteditable="true"]');
+      const isNewTarget = target && target !== historyTypingTarget;
+      if (!isTyping || !historyTypingActive || isNewTarget) recordEditorHistory();
+      if (!isTyping) {
+        historyTypingTarget = null;
+        return;
+      }
       historyTypingActive = true;
+      historyTypingTarget = target || null;
       window.clearTimeout(historyTypingTimer);
-      historyTypingTimer = window.setTimeout(() => { historyTypingActive = false; }, 650);
+      historyTypingTimer = window.setTimeout(() => {
+        historyTypingActive = false;
+        historyTypingTarget = null;
+      }, 650);
     }
     function restoreEditorHistory(direction) {
       const source = direction === 'redo' ? editorRedoStack : editorUndoStack;
@@ -6290,6 +6307,14 @@ function studioHtmlV2(payload, libs) {
       if (frame) selectFrame(frame);
       return true;
     }
+    document.querySelectorAll('.toolbar button, .panel button, .panel input[type="range"]').forEach((control) => {
+      control.addEventListener('pointerdown', () => {
+        historyTypingActive = false;
+        historyTypingTarget = null;
+        window.clearTimeout(historyTypingTimer);
+        recordEditorHistory();
+      }, true);
+    });
     [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
       button?.addEventListener('click', () => recordEditorHistory(), true);
@@ -6351,6 +6376,7 @@ function studioHtmlV2(payload, libs) {
       event.stopImmediatePropagation();
       cancelPendingReflow();
       historyTypingActive = false;
+      historyTypingTarget = null;
       window.clearTimeout(historyTypingTimer);
       const redo = event.key.toLowerCase() === 'y' || event.shiftKey;
       restoreEditorHistory(redo ? 'redo' : 'undo');
