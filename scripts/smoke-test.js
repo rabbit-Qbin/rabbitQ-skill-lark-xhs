@@ -320,12 +320,16 @@ async function main() {
         gap: parseFloat(lineStyles.columnGap || lineStyles.gap),
         markerWidth: parseFloat(markerStyles.width),
         markerFontSize: parseFloat(markerStyles.fontSize),
+        markerHeight: parseFloat(markerStyles.height),
         bodyFontSize: parseFloat(lineStyles.fontSize),
+        bodyLineHeight: parseFloat(lineStyles.lineHeight),
       };
     });
     assert.ok(orderedSpacing.gap <= 8, "sequence marker gap should stay visually close to its body");
     assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
     assert.ok(orderedSpacing.markerFontSize < orderedSpacing.bodyFontSize, "ordered sequence marker should be visibly smaller than its body text");
+    assert.ok(Math.abs(orderedSpacing.markerHeight - orderedSpacing.bodyLineHeight) < 0.2, "ordered marker should occupy the body line box for vertical centering");
+    assert.ok(Math.abs(orderedSpacing.markerFontSize - (orderedSpacing.bodyFontSize * 0.8 + 2)) < 0.2, "ordered marker should be two pixels larger than the 80% baseline");
 
     // Inline styles only affect the selected phrase inside a sequence body.
     // They can stack with each other, while each individual style toggles off.

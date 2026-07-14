@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.37";
+const VERSION = "0.8.38";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -877,6 +877,7 @@ function studioHtmlV2(payload, libs) {
       --body-content-height: ${bodyContentHeight}px;
       --body-font: ${bodyFontSize}px;
       --body-line: ${bodyLineHeight};
+      --body-line-px: ${Math.round(bodyFontSize * bodyLineHeight * 100) / 100}px;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
@@ -978,7 +979,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
     .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.18em; margin: 0 0 0.42em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; overflow: visible; }
     .xhs-list-line .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: 0.8em !important; }
-    .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; }
+    .xhs-list-line .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; height: var(--body-line-px); color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; font-size: calc(0.8em + 2px) !important; line-height: 1 !important; }
     .xhs-list-marker-dot::before { content: ''; display: inline-block; width: 0.42em; height: 0.42em; margin-top: 0.58em; border-radius: 50%; background: var(--xhs-accent); }
     .xhs-list-body { flex: 1 1 auto; min-width: 0; max-width: var(--body-text-width); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
     .xhs-list-body span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
@@ -4690,6 +4691,7 @@ function studioHtmlV2(payload, libs) {
       root.setProperty('--body-content-height', contentHeight + 'px');
       root.setProperty('--body-font', fontSize + 'px');
       root.setProperty('--body-line', String(lineHeight));
+      root.setProperty('--body-line-px', (fontSize * lineHeight) + 'px');
       root.setProperty('--cover-title-size', coverTitleRange.value + 'px');
       if (!schedule) return;
       saveCurrentPage();
