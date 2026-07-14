@@ -369,6 +369,64 @@ async function main() {
     assert.strictEqual(compositionState.unchangedWhileComposing, true, "IME composition must not save or rewrite the current page before commit");
     assert.strictEqual(compositionState.savedAfterComposition, true, "committed IME text must save after compositionend");
 
+    // Regression: Backspace from a paragraph directly below a sequence should
+    // continue that sequence instead of leaving behind an orphan marker.
+    const sequenceContinuationTarget = orderedPage.locator('#stageScale .xhs-body-frame').first();
+    await sequenceContinuationTarget.evaluate((frame) => {
+      const lastLine = Array.from(frame.querySelectorAll('.xhs-list-line')).at(-1);
+      const paragraph = document.createElement('p');
+      paragraph.className = 'xhs-p xhs-block';
+      paragraph.textContent = '接回序列的正文';
+      lastLine.after(paragraph);
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      frame.focus();
+    });
+    await orderedPage.keyboard.press('Backspace');
+    const sequenceContinuationState = await sequenceContinuationTarget.evaluate((frame) => ({
+      listText: Array.from(frame.querySelectorAll('.xhs-list-line')).map((line) => line.querySelector('.xhs-list-body')?.textContent || ''),
+      plainText: Array.from(frame.querySelectorAll('.xhs-p:not(.xhs-list-line)')).map((node) => node.textContent || ''),
+    }));
+    assert.ok(sequenceContinuationState.listText.includes('接回序列的正文'), 'Backspace should continue the previous sequence');
+    assert.ok(!sequenceContinuationState.plainText.includes('接回序列的正文'), 'continued text must not remain as a plain paragraph');
+    await orderedPage.keyboard.press('Control+z');
+    await orderedPage.waitForTimeout(120);
+    assert.strictEqual(await orderedPage.locator('#stageScale .xhs-list-body').filter({ hasText: '接回序列的正文' }).count(), 0, 'sequence continuation test should restore its fixture state');
+
+    // Regression: Studio-owned undo/redo must restore a toolbar formatting action
+    // even after the editor serializes its page state.
+    const undoPhrase = '撤回样式';
+    await orderedPage.locator('#stageScale .xhs-list-line .xhs-list-body').first().evaluate((body, phrase) => {
+      const text = document.createTextNode(phrase);
+      body.append(text);
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      body.closest('[contenteditable="true"]')?.focus();
+    }, undoPhrase);
+    await orderedPage.locator('#greenTextBtn').click();
+    assert.strictEqual(await orderedPage.locator('.xhs-green-text').filter({ hasText: undoPhrase }).count(), 1);
+    await orderedPage.locator('#stageScale .xhs-list-line .xhs-list-body').first().evaluate((body) => {
+      body.closest('[contenteditable="true"]')?.focus();
+    });
+    await orderedPage.keyboard.press('Control+z');
+    await orderedPage.waitForTimeout(120);
+    assert.strictEqual(await orderedPage.locator('.xhs-green-text').filter({ hasText: undoPhrase }).count(), 0, 'Ctrl+Z should undo a Studio toolbar action');
+    await orderedPage.keyboard.press('Control+y');
+    await orderedPage.waitForTimeout(120);
+    assert.strictEqual(await orderedPage.locator('.xhs-green-text').filter({ hasText: undoPhrase }).count(), 1, 'Ctrl+Y should redo a Studio toolbar action');
+    await orderedPage.locator('#stageScale .xhs-list-line .xhs-list-body').first().evaluate((body, phrase) => {
+      const styled = Array.from(body.querySelectorAll('.xhs-green-text')).find((node) => node.textContent === phrase);
+      styled?.remove();
+      saveCurrentPage({ skipNormalize: true });
+    }, undoPhrase);
+
     // Inline styles only affect the selected phrase inside a sequence body.
     // They can stack with each other, while each individual style toggles off.
     const inlineListState = await orderedPage.evaluate(() => {
@@ -481,7 +539,10 @@ async function main() {
       return null;
     });
     assert.ok(sequenceCardState, "sequence should switch to a card");
-    assert.ok(orderedAfterEnter.text.split(/\s+/).filter(Boolean).every((part) => sequenceCardState.text.includes(part)));
+    assert.ok(
+      orderedAfterEnter.text.split(/\s+/).filter(Boolean).every((part) => sequenceCardState.text.includes(part)),
+      'sequence conversion lost list text: ' + JSON.stringify({ before: orderedAfterEnter.text, after: sequenceCardState.text }),
+    );
     assert.strictEqual(sequenceCardState.listCount, 0);
     assert.strictEqual(sequenceCardState.fontSize, "34px");
     const cardInlineState = await orderedPage.locator("#stageScale .xhs-callout-body").first().evaluate((body) => {

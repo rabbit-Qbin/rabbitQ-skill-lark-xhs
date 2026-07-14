@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.39";
+const VERSION = "0.8.40";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -1194,6 +1194,11 @@ function studioHtmlV2(payload, libs) {
     let compositionFinishTimer = null;
     let isComposingText = false;
     let compositionNeedsReflow = false;
+    const editorUndoStack = [];
+    const editorRedoStack = [];
+    let historyTypingTimer = null;
+    let historyTypingActive = false;
+    let applyingEditorHistory = false;
     let layoutReflowTimer = null;
     let imageReflowTimer = null;
     let splitFlowCounter = 0;
@@ -3409,6 +3414,17 @@ function studioHtmlV2(payload, libs) {
     }
     function removeEmptyListLine(line) {
       const frame = line?.closest?.('[contenteditable="true"]');
+      let previousList = line.previousElementSibling;
+      while (previousList?.classList?.contains('xhs-caret-anchor')) previousList = previousList.previousElementSibling;
+      if (previousList?.classList?.contains('xhs-list-line') && previousList.dataset.listType === line.dataset.listType) {
+        line.remove();
+        renumberContiguousListLines(previousList);
+        if (frame) {
+          frame.focus({ preventScroll: true });
+          setCaretAtFieldEnd(previousList.querySelector('.xhs-list-body'));
+        }
+        return previousList;
+      }
       let nextFocus = line.nextElementSibling;
       while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.nextElementSibling;
       if (!nextFocus) {
@@ -3434,7 +3450,29 @@ function studioHtmlV2(payload, libs) {
       event.preventDefault();
       const prev = block.previousElementSibling;
       while (prev?.classList?.contains('xhs-caret-anchor')) prev = prev.previousElementSibling;
-      if (!cleanText(block.textContent)) {
+      const previousListBody = prev?.classList?.contains('xhs-list-line')
+        ? prev.querySelector('.xhs-list-body')
+        : null;
+      if (previousListBody) {
+        const currentHtml = normalizeInlineHtml(block.innerHTML || '<br>') || '<br>';
+        if (!cleanText(previousListBody.textContent)) {
+          previousListBody.innerHTML = currentHtml;
+          block.remove();
+          frame.focus({ preventScroll: true });
+          setCaretAtFieldEnd(previousListBody);
+        } else {
+          const continuation = buildListLine(
+            { html: currentHtml, plain: cleanText(block.textContent) },
+            prev.dataset.listType,
+            1,
+            { preserveBodyHtml: true },
+          );
+          block.replaceWith(continuation);
+          renumberContiguousListLines(continuation);
+          frame.focus({ preventScroll: true });
+          setCaretAtFieldEnd(continuation.querySelector('.xhs-list-body'));
+        }
+      } else if (!cleanText(block.textContent)) {
         block.remove();
         if (prev) {
           frame.focus({ preventScroll: true });
@@ -3668,6 +3706,7 @@ function studioHtmlV2(payload, libs) {
       reflowForcePending = false;
     }
     function beginTextComposition() {
+      recordEditorHistory();
       isComposingText = true;
       window.clearTimeout(lightSaveTimer);
       window.clearTimeout(headingNormalizeTimer);
@@ -4045,6 +4084,7 @@ function studioHtmlV2(payload, libs) {
           editable.addEventListener('keydown', handleParagraphEnter, true);
           editable.addEventListener('keydown', handleListEnter, true);
           editable.addEventListener('beforeinput', (event) => {
+            recordHistoryBeforeInput(event);
             if (event.isComposing || isComposingText) return;
             if (isHistoryInputType(event.inputType)) {
               cancelPendingReflow();
@@ -5808,6 +5848,52 @@ function studioHtmlV2(payload, libs) {
         localStorage.setItem(draftCheckpointKey(), JSON.stringify(serializeStudioState()));
       } catch (_) {}
     }
+    function cloneEditorState() {
+      saveCurrentPage({ skipNormalize: true });
+      return JSON.parse(JSON.stringify(serializeStudioState()));
+    }
+    function editorStateSignature(state) {
+      if (!state) return '';
+      const copy = { ...state };
+      delete copy.savedAt;
+      return JSON.stringify(copy);
+    }
+    function recordEditorHistory() {
+      if (restoringState || applyingEditorHistory || !pages.length) return false;
+      const snapshot = cloneEditorState();
+      const previous = editorUndoStack[editorUndoStack.length - 1];
+      editorRedoStack.length = 0;
+      if (editorStateSignature(snapshot) === editorStateSignature(previous)) return false;
+      editorUndoStack.push(snapshot);
+      if (editorUndoStack.length > 80) editorUndoStack.shift();
+      return true;
+    }
+    function recordHistoryBeforeInput(event) {
+      if (isHistoryInputType(event.inputType) || event.isComposing || isComposingText) return;
+      const inputType = String(event.inputType || '');
+      const isTyping = /^(?:insertText|deleteContent(?:Backward|Forward))$/.test(inputType);
+      if (!isTyping || !historyTypingActive) recordEditorHistory();
+      if (!isTyping) return;
+      historyTypingActive = true;
+      window.clearTimeout(historyTypingTimer);
+      historyTypingTimer = window.setTimeout(() => { historyTypingActive = false; }, 650);
+    }
+    function restoreEditorHistory(direction) {
+      const source = direction === 'redo' ? editorRedoStack : editorUndoStack;
+      const destination = direction === 'redo' ? editorUndoStack : editorRedoStack;
+      if (!source.length) return false;
+      const current = cloneEditorState();
+      const next = source.pop();
+      destination.push(current);
+      applyingEditorHistory = true;
+      try {
+        if (!applyStudioState(next, { forceReflow: false })) return false;
+        persistDraft();
+        return true;
+      } finally {
+        applyingEditorHistory = false;
+      }
+    }
     function resetStudioToInitial() {
       if (!window.confirm('确定恢复初始状态吗？当前文字、图片、主题和排版修改都会被清除。')) return;
       restoringState = true;
@@ -6206,6 +6292,7 @@ function studioHtmlV2(payload, libs) {
     }
     [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
+      button?.addEventListener('click', () => recordEditorHistory(), true);
     });
     document.getElementById('boldBtn').addEventListener('click', boldSelection);
     headingBtn1.addEventListener('click', () => makeHeadingBlock('1'));
@@ -6250,7 +6337,23 @@ function studioHtmlV2(payload, libs) {
       syncPanelTools();
     });
     document.addEventListener('keydown', (event) => {
-      if (isHistoryShortcut(event)) cancelPendingReflow();
+      if (isHistoryShortcut(event) || isComposingText) return;
+      const editable = event.target?.isContentEditable
+        ? event.target
+        : event.target?.closest?.('[contenteditable="true"]');
+      if (!editable && !selectedFrame) return;
+      if (event.key === 'Enter' || event.key === 'Backspace' || event.key === 'Delete') recordEditorHistory();
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (!isHistoryShortcut(event)) return;
+      if (event.target?.closest?.('input, textarea, select')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      cancelPendingReflow();
+      historyTypingActive = false;
+      window.clearTimeout(historyTypingTimer);
+      const redo = event.key.toLowerCase() === 'y' || event.shiftKey;
+      restoreEditorHistory(redo ? 'redo' : 'undo');
     });
     document.addEventListener('keydown', (event) => {
       if (!selectedFrame) return;
