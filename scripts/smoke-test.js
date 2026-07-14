@@ -327,41 +327,76 @@ async function main() {
     assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
     assert.ok(orderedSpacing.markerFontSize < orderedSpacing.bodyFontSize, "ordered sequence marker should be visibly smaller than its body text");
 
-    // A broad selection can include the non-editable marker. Inline styles must
-    // still be applied only to the body, so the marker never becomes a flex item
-    // inside a new wrapper and pushes the content right.
+    // Inline styles only affect the selected phrase inside a sequence body.
+    // They can stack with each other, while each individual style toggles off.
     const inlineListState = await orderedPage.evaluate(() => {
       const line = Array.from(document.querySelectorAll('#stageScale .xhs-list-line[data-list-type="ordered"]'))
         .find((item) => (item.querySelector('.xhs-list-body')?.textContent || '').trim());
       if (!line) throw new Error('missing non-empty ordered list body for inline-style test');
-      const selectLine = () => {
+      const body = line.querySelector('.xhs-list-body');
+      const firstText = (() => {
+        const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        let offset = 0;
+        while (node) {
+          if ((node.textContent || '').trim() && !node.parentElement?.closest('.xhs-green-text, .xhs-green-underline')) {
+            return { text: node.textContent || '', offset };
+          }
+          offset += (node.textContent || '').length;
+          node = walker.nextNode();
+        }
+        return null;
+      })();
+      const selectedText = (firstText?.text || '').slice(0, 3);
+      const selectPhrase = () => {
+        const boundary = (offset, preferNextNode) => {
+          const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          let node = walker.nextNode();
+          let remaining = offset;
+          while (node) {
+            const length = (node.textContent || '').length;
+            if (remaining < length || (!preferNextNode && remaining === length)) return { node, offset: remaining };
+            remaining -= length;
+            node = walker.nextNode();
+          }
+          throw new Error('missing list phrase boundary');
+        };
         const range = document.createRange();
-        range.selectNodeContents(line);
+        const start = boundary(firstText.offset, true);
+        const end = boundary(firstText.offset + selectedText.length, false);
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
       };
-      selectLine();
+      const initialUnderlineCount = body.querySelectorAll('.xhs-green-underline').length;
+      selectPhrase();
       document.getElementById("greenUnderlineBtn").click();
-      selectLine();
+      const underlineText = Array.from(body.querySelectorAll('.xhs-green-underline')).find((node) => node.textContent === selectedText)?.textContent || '';
+      const afterUnderlineHtml = body.innerHTML;
+      selectPhrase();
       document.getElementById("greenTextBtn").click();
-      const body = line.querySelector(".xhs-list-body");
-      const afterSwitch = {
+      const afterStack = {
         underlineCount: body.querySelectorAll(".xhs-green-underline").length,
         greenCount: body.querySelectorAll(".xhs-green-text").length,
       };
-      selectLine();
+      selectPhrase();
       document.getElementById("greenTextBtn").click();
       const afterGreenToggle = body.querySelectorAll(".xhs-green-text").length;
-      selectLine();
+      selectPhrase();
       document.getElementById("greenUnderlineBtn").click();
-      selectLine();
-      document.getElementById("greenUnderlineBtn").click();
+      const afterUnderlineToggle = body.querySelectorAll(".xhs-green-underline").length;
       return {
         childClasses: Array.from(line.children).map((child) => child.className),
-        afterSwitch,
+        selectedText,
+        underlineText,
+        initialUnderlineCount,
+        afterUnderlineHtml,
+        afterStack,
+        afterUnderlineToggle,
+        afterUnderlineToggleHtml: body.innerHTML,
         afterGreenToggle,
-        afterUnderlineToggle: body.querySelectorAll(".xhs-green-underline").length,
         bodyText: body.textContent || "",
         lineText: line.textContent || "",
       };
@@ -369,10 +404,11 @@ async function main() {
     assert.deepStrictEqual(inlineListState.childClasses.length, 2, "a sequence line must retain exactly marker and body children");
     assert.ok(inlineListState.childClasses.includes("xhs-list-marker xhs-list-marker-ordered"));
     assert.ok(inlineListState.childClasses.includes("xhs-list-body"));
-    assert.strictEqual(inlineListState.afterSwitch.underlineCount, 0, "switching to green text must remove the previous underline: " + JSON.stringify(inlineListState));
-    assert.ok(inlineListState.afterSwitch.greenCount > 0, "green text should apply inside sequence body: " + JSON.stringify(inlineListState));
-    assert.strictEqual(inlineListState.afterGreenToggle, 0, "clicking green text twice must cancel it");
-    assert.strictEqual(inlineListState.afterUnderlineToggle, 0, "clicking underline twice must cancel it");
+    assert.strictEqual(inlineListState.underlineText, inlineListState.selectedText, "underline must apply only to the selected sequence phrase: " + JSON.stringify(inlineListState));
+    assert.strictEqual(inlineListState.afterStack.underlineCount, inlineListState.initialUnderlineCount + 1, "underline should remain when green text is added");
+    assert.strictEqual(inlineListState.afterStack.greenCount, 1, "green text should stack with underline on the selected phrase");
+    assert.strictEqual(inlineListState.afterGreenToggle, 0, "clicking green text twice must cancel only the green text: " + JSON.stringify(inlineListState));
+    assert.strictEqual(inlineListState.afterUnderlineToggle, inlineListState.initialUnderlineCount, "clicking underline twice must cancel only the underline: " + JSON.stringify(inlineListState));
     assert.ok(inlineListState.lineText.endsWith(inlineListState.bodyText), "sequence body text must not be split into a separate flex column");
 
     // Switching a style from any item converts the complete contiguous sequence.
@@ -406,6 +442,35 @@ async function main() {
     assert.ok(orderedAfterEnter.text.split(/\s+/).filter(Boolean).every((part) => sequenceCardState.text.includes(part)));
     assert.strictEqual(sequenceCardState.listCount, 0);
     assert.strictEqual(sequenceCardState.fontSize, "34px");
+    const cardInlineState = await orderedPage.locator("#stageScale .xhs-callout-body").first().evaluate((body) => {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let text = walker.nextNode();
+      while (text && (!(text.textContent || "").trim() || text.parentElement?.closest(".xhs-green-text, .xhs-green-underline"))) text = walker.nextNode();
+      if (!text) throw new Error("missing card text for inline-style test");
+      const phrase = text.textContent.slice(0, 2);
+      const selectPhrase = (node = text) => {
+        const range = document.createRange();
+        range.setStart(node, 0);
+        range.setEnd(node, Math.min(node.textContent.length, phrase.length));
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      };
+      selectPhrase(); document.getElementById("greenUnderlineBtn").click();
+      const underline = Array.from(body.querySelectorAll(".xhs-green-underline")).find((node) => node.textContent === phrase);
+      const underlineBorder = underline ? getComputedStyle(underline).borderBottomWidth : "";
+      const underlineText = Array.from(body.querySelectorAll(".xhs-green-underline")).find((node) => node.textContent === phrase)?.textContent || "";
+      selectPhrase(underline?.firstChild || text); document.getElementById("greenTextBtn").click();
+      return {
+        phrase,
+        underlineText,
+        underlineBorder,
+        greenText: Array.from(body.querySelectorAll(".xhs-green-text")).find((node) => node.textContent === phrase)?.textContent || "",
+      };
+    });
+    assert.strictEqual(cardInlineState.underlineText, cardInlineState.phrase, "card underline must apply only to the selected phrase");
+    assert.strictEqual(cardInlineState.greenText, cardInlineState.phrase, "card green text must apply only to the selected phrase");
+    assert.notStrictEqual(cardInlineState.underlineBorder, "0px", "card underline must remain visible");
     await orderedPage.locator("#stageScale .xhs-callout-body").first().evaluate((body) => {
       body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       body.closest('[contenteditable="true"]')?.focus();

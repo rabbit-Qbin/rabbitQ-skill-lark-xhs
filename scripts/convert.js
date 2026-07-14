@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.36";
+const VERSION = "0.8.37";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -993,8 +993,6 @@ function studioHtmlV2(payload, libs) {
     .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-    .xhs-callout .xhs-green-text { color: #111; font-weight: 900; }
-    .xhs-callout .xhs-green-underline { background: none; border-bottom: 0; padding: 0; font-weight: 900; }
     .xhs-split-head { margin-bottom: 0 !important; }
     .xhs-p.xhs-split-tail, .xhs-rich.xhs-split-tail { margin-top: 0 !important; }
     .xhs-callout.xhs-split-tail { padding-top: 0.72em; }
@@ -1592,11 +1590,6 @@ function studioHtmlV2(payload, libs) {
     function cleanCalloutBodyHtml(html) {
       const holder = document.createElement('div');
       holder.innerHTML = normalizeInlineHtml(html);
-      Array.from(holder.querySelectorAll('.xhs-green-text, .xhs-green-underline')).reverse().forEach((node) => {
-        const strong = document.createElement('strong');
-        strong.innerHTML = node.innerHTML;
-        node.replaceWith(strong);
-      });
       holder.querySelectorAll('[style]').forEach((node) => {
         const style = node.getAttribute('style') || '';
         if (/box-shadow|background|border-bottom|color\\s*:/i.test(style)) node.removeAttribute('style');
@@ -5022,6 +5015,62 @@ function studioHtmlV2(payload, libs) {
         return null;
       }
     }
+    function fragmentClassNodes(fragment, className) {
+      const nodes = [];
+      Array.from(fragment.childNodes).forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains(className)) nodes.push(node);
+        if (node.nodeType === Node.ELEMENT_NODE) nodes.push(...node.querySelectorAll('.' + className));
+      });
+      return Array.from(new Set(nodes));
+    }
+    function removeClassFromFragment(fragment, className) {
+      fragmentClassNodes(fragment, className).reverse().forEach((node) => {
+        node.classList.remove(className);
+        if (node.tagName === 'SPAN' && !node.className && node.attributes.length === 0) unwrapElement(node);
+      });
+    }
+    function fragmentHasInlineContent(fragment) {
+      return Boolean((fragment.textContent || '').length || fragment.querySelector?.('br, img, code'));
+    }
+    function markedAncestorContainingRange(range, className) {
+      const start = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+      const marked = start?.closest?.('.' + className);
+      if (!marked) return null;
+      return marked.contains(range.endContainer) ? marked : null;
+    }
+    function removeInlineMarkFromRange(range, marked, className) {
+      const beforeRange = document.createRange();
+      beforeRange.selectNodeContents(marked);
+      beforeRange.setEnd(range.startContainer, range.startOffset);
+      const selected = range.cloneContents();
+      removeClassFromFragment(selected, className);
+      const afterRange = document.createRange();
+      afterRange.selectNodeContents(marked);
+      afterRange.setStart(range.endContainer, range.endOffset);
+      const replacement = document.createDocumentFragment();
+      const before = marked.cloneNode(false);
+      before.appendChild(beforeRange.cloneContents());
+      if (fragmentHasInlineContent(before)) replacement.appendChild(before);
+      replacement.appendChild(selected);
+      const after = marked.cloneNode(false);
+      after.appendChild(afterRange.cloneContents());
+      if (fragmentHasInlineContent(after)) replacement.appendChild(after);
+      marked.replaceWith(replacement);
+    }
+    function toggleInlineMarkInRange(range, className) {
+      const marked = markedAncestorContainingRange(range, className);
+      if (marked) {
+        removeInlineMarkFromRange(range, marked, className);
+        return null;
+      }
+      const fragment = range.extractContents();
+      removeClassFromFragment(fragment, className);
+      const span = document.createElement('span');
+      span.className = className;
+      span.appendChild(fragment);
+      range.insertNode(span);
+      return span;
+    }
     function toggleInlineClass(className, marker) {
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount) {
@@ -5055,66 +5104,29 @@ function studioHtmlV2(payload, libs) {
         alert('请先选中要处理的文字，或把光标放在已应用该样式的文字里再点一次取消。');
         return;
       }
-      const selectedExisting = selectedStyledNodes(item.range, className, marker);
-      const existing = closestStyledAncestor(item.range, className, marker);
-      const nodesToUnwrap = selectedExisting.length ? selectedExisting : (existing ? [existing] : []);
-      if (nodesToUnwrap.length) {
-        nodesToUnwrap.forEach(unwrapElement);
-        item.selection.removeAllRanges();
-        saveCurrentPage();
-        return;
-      }
-      // "有色字" and "下划线" are alternative emphasis treatments. Remove
-      // the previous one before applying the next one so spans never stack.
-      const alternateClass = alternateInlineEmphasisClass(className);
-      if (alternateClass) {
-        const offsets = inlineRangeTextOffsets(range);
-        const alternateNodes = selectedStyledNodes(item.range, alternateClass, '');
-        const alternateAncestor = closestStyledAncestor(item.range, alternateClass, '');
-        const nodesToReplace = alternateNodes.length ? alternateNodes : (alternateAncestor ? [alternateAncestor] : []);
-        nodesToReplace.forEach(unwrapElement);
-        range = restoreInlineRange(offsets) || range;
-        item.range = range;
-      }
-      const span = document.createElement('span');
-      span.className = className;
-      try {
-        item.range.surroundContents(span);
-      } catch (_) {
-        const fragment = item.range.extractContents();
-        span.appendChild(fragment);
-        item.range.insertNode(span);
-      }
+      const span = toggleInlineMarkInRange(item.range, className);
       item.selection.removeAllRanges();
-      const styledRange = document.createRange();
-      styledRange.selectNodeContents(span);
-      item.selection.addRange(styledRange);
+      if (span) {
+        const styledRange = document.createRange();
+        styledRange.selectNodeContents(span);
+        item.selection.addRange(styledRange);
+      }
       normalizeNestedFlowBlocks(stageScale);
       normalizeListLinesInFrame(stageScale.querySelector('.xhs-body-frame'));
       saveCurrentPage();
     }
     function applyFormattingMultiBlock(range, className) {
-      const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body';
+      const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-heading-title';
       const frame = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
       const scopeFrame = frame?.closest?.('.xhs-body-frame') || frame;
       if (!scopeFrame) return false;
-      const blocks = Array.from(scopeFrame.querySelectorAll(BLOCK_SELS)).filter((b) => range.intersectsNode(b));
+      const blocks = Array.from(scopeFrame.querySelectorAll(BLOCK_SELS)).filter((block) => {
+        if (block.classList.contains('xhs-list-line')) return false;
+        return range.intersectsNode(block);
+      });
       if (blocks.length < 2) return false;
-      const targetNodes = blocks.flatMap((block) => Array.from(block.querySelectorAll('.' + className)).filter((node) => rangeIntersectsNode(range, node)));
-      if (targetNodes.length) {
-        targetNodes.forEach(unwrapElement);
-        window.getSelection()?.removeAllRanges();
-        normalizeListLinesInFrame(scopeFrame);
-        saveCurrentPage();
-        return true;
-      }
-      const alternateClass = alternateInlineEmphasisClass(className);
-      if (alternateClass) {
-        blocks.flatMap((block) => Array.from(block.querySelectorAll('.' + alternateClass)).filter((node) => rangeIntersectsNode(range, node)))
-          .forEach(unwrapElement);
-      }
       blocks.forEach((block) => {
         const br = document.createRange();
         br.selectNodeContents(block);
@@ -5125,13 +5137,7 @@ function studioHtmlV2(payload, libs) {
           try { br.setEnd(range.endContainer, range.endOffset); } catch (_) {}
         }
         if (br.collapsed) return;
-        const span = document.createElement('span');
-        span.className = className;
-        try { br.surroundContents(span); } catch (_) {
-          const frag = br.extractContents();
-          span.appendChild(frag);
-          br.insertNode(span);
-        }
+        toggleInlineMarkInRange(br, className);
       });
       window.getSelection()?.removeAllRanges();
       normalizeListLinesInFrame(scopeFrame);
