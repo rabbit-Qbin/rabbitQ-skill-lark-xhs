@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.35";
+const VERSION = "0.8.36";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -4927,6 +4927,18 @@ function studioHtmlV2(payload, libs) {
         }
       });
     }
+    function rangeIntersectsNode(range, node) {
+      try {
+        return range.intersectsNode(node);
+      } catch (_) {
+        return false;
+      }
+    }
+    function alternateInlineEmphasisClass(className) {
+      if (className === 'xhs-green-text') return 'xhs-green-underline';
+      if (className === 'xhs-green-underline') return 'xhs-green-text';
+      return '';
+    }
     function adjacentStyledNodeAtCaret(range, className, marker) {
       if (!range.collapsed) return null;
       const container = range.startContainer;
@@ -4950,6 +4962,8 @@ function studioHtmlV2(payload, libs) {
     }
     function inlineFormattingHost(node) {
       const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      const listLine = el?.closest?.('.xhs-list-line');
+      if (listLine) return listLine.querySelector('.xhs-list-body');
       return el?.closest?.('.xhs-list-body, .xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-heading-title') || null;
     }
     function restrictRangeToInlineHost(range) {
@@ -4968,13 +4982,53 @@ function studioHtmlV2(payload, libs) {
       if (!host.contains(range.endContainer)) restricted.setEnd(host, host.childNodes.length);
       return restricted;
     }
+    function inlineRangeTextOffsets(range) {
+      const host = inlineFormattingHost(range.commonAncestorContainer);
+      if (!host) return null;
+      try {
+        const beforeStart = document.createRange();
+        beforeStart.selectNodeContents(host);
+        beforeStart.setEnd(range.startContainer, range.startOffset);
+        const beforeEnd = document.createRange();
+        beforeEnd.selectNodeContents(host);
+        beforeEnd.setEnd(range.endContainer, range.endOffset);
+        return { host, start: beforeStart.toString().length, end: beforeEnd.toString().length };
+      } catch (_) {
+        return null;
+      }
+    }
+    function textBoundaryAtOffset(host, offset) {
+      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      let remaining = Math.max(0, Number(offset) || 0);
+      while (node) {
+        const length = (node.textContent || '').length;
+        if (remaining <= length) return { node, offset: remaining };
+        remaining -= length;
+        node = walker.nextNode();
+      }
+      return { node: host, offset: host.childNodes.length };
+    }
+    function restoreInlineRange(offsets) {
+      if (!offsets?.host?.isConnected) return null;
+      const range = document.createRange();
+      const start = textBoundaryAtOffset(offsets.host, offsets.start);
+      const end = textBoundaryAtOffset(offsets.host, offsets.end);
+      try {
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+        return range;
+      } catch (_) {
+        return null;
+      }
+    }
     function toggleInlineClass(className, marker) {
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount) {
         alert('请先选中要处理的文字。');
         return;
       }
-      const range = restrictRangeToInlineHost(selection.getRangeAt(0));
+      let range = restrictRangeToInlineHost(selection.getRangeAt(0));
       const parent = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
@@ -5010,6 +5064,18 @@ function studioHtmlV2(payload, libs) {
         saveCurrentPage();
         return;
       }
+      // "有色字" and "下划线" are alternative emphasis treatments. Remove
+      // the previous one before applying the next one so spans never stack.
+      const alternateClass = alternateInlineEmphasisClass(className);
+      if (alternateClass) {
+        const offsets = inlineRangeTextOffsets(range);
+        const alternateNodes = selectedStyledNodes(item.range, alternateClass, '');
+        const alternateAncestor = closestStyledAncestor(item.range, alternateClass, '');
+        const nodesToReplace = alternateNodes.length ? alternateNodes : (alternateAncestor ? [alternateAncestor] : []);
+        nodesToReplace.forEach(unwrapElement);
+        range = restoreInlineRange(offsets) || range;
+        item.range = range;
+      }
       const span = document.createElement('span');
       span.className = className;
       try {
@@ -5036,6 +5102,19 @@ function studioHtmlV2(payload, libs) {
       if (!scopeFrame) return false;
       const blocks = Array.from(scopeFrame.querySelectorAll(BLOCK_SELS)).filter((b) => range.intersectsNode(b));
       if (blocks.length < 2) return false;
+      const targetNodes = blocks.flatMap((block) => Array.from(block.querySelectorAll('.' + className)).filter((node) => rangeIntersectsNode(range, node)));
+      if (targetNodes.length) {
+        targetNodes.forEach(unwrapElement);
+        window.getSelection()?.removeAllRanges();
+        normalizeListLinesInFrame(scopeFrame);
+        saveCurrentPage();
+        return true;
+      }
+      const alternateClass = alternateInlineEmphasisClass(className);
+      if (alternateClass) {
+        blocks.flatMap((block) => Array.from(block.querySelectorAll('.' + alternateClass)).filter((node) => rangeIntersectsNode(range, node)))
+          .forEach(unwrapElement);
+      }
       blocks.forEach((block) => {
         const br = document.createRange();
         br.selectNodeContents(block);
@@ -5046,8 +5125,6 @@ function studioHtmlV2(payload, libs) {
           try { br.setEnd(range.endContainer, range.endOffset); } catch (_) {}
         }
         if (br.collapsed) return;
-        const existing = Array.from(block.querySelectorAll('.' + className)).filter((n) => br.intersectsNode(n));
-        if (existing.length) { existing.forEach(unwrapElement); return; }
         const span = document.createElement('span');
         span.className = className;
         try { br.surroundContents(span); } catch (_) {
@@ -5064,7 +5141,7 @@ function studioHtmlV2(payload, libs) {
     function applyGreenText() {
       const sel = window.getSelection();
       if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
-        const r = sel.getRangeAt(0);
+        const r = restrictRangeToInlineHost(sel.getRangeAt(0));
         if (applyFormattingMultiBlock(r, 'xhs-green-text')) return;
       }
       toggleInlineClass('xhs-green-text', 'color:#2f7d3b');
@@ -5072,7 +5149,7 @@ function studioHtmlV2(payload, libs) {
     function applyGreenUnderline() {
       const sel = window.getSelection();
       if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
-        const r = sel.getRangeAt(0);
+        const r = restrictRangeToInlineHost(sel.getRangeAt(0));
         if (applyFormattingMultiBlock(r, 'xhs-green-underline')) return;
       }
       toggleInlineClass('xhs-green-underline', 'box-shadow');

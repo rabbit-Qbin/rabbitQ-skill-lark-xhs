@@ -346,10 +346,22 @@ async function main() {
       selectLine();
       document.getElementById("greenTextBtn").click();
       const body = line.querySelector(".xhs-list-body");
-      return {
-        childClasses: Array.from(line.children).map((child) => child.className),
+      const afterSwitch = {
         underlineCount: body.querySelectorAll(".xhs-green-underline").length,
         greenCount: body.querySelectorAll(".xhs-green-text").length,
+      };
+      selectLine();
+      document.getElementById("greenTextBtn").click();
+      const afterGreenToggle = body.querySelectorAll(".xhs-green-text").length;
+      selectLine();
+      document.getElementById("greenUnderlineBtn").click();
+      selectLine();
+      document.getElementById("greenUnderlineBtn").click();
+      return {
+        childClasses: Array.from(line.children).map((child) => child.className),
+        afterSwitch,
+        afterGreenToggle,
+        afterUnderlineToggle: body.querySelectorAll(".xhs-green-underline").length,
         bodyText: body.textContent || "",
         lineText: line.textContent || "",
       };
@@ -357,8 +369,10 @@ async function main() {
     assert.deepStrictEqual(inlineListState.childClasses.length, 2, "a sequence line must retain exactly marker and body children");
     assert.ok(inlineListState.childClasses.includes("xhs-list-marker xhs-list-marker-ordered"));
     assert.ok(inlineListState.childClasses.includes("xhs-list-body"));
-    assert.ok(inlineListState.underlineCount > 0, "underline should compose inside sequence body: " + JSON.stringify(inlineListState));
-    assert.ok(inlineListState.greenCount > 0, "green text should compose inside sequence body: " + JSON.stringify(inlineListState));
+    assert.strictEqual(inlineListState.afterSwitch.underlineCount, 0, "switching to green text must remove the previous underline: " + JSON.stringify(inlineListState));
+    assert.ok(inlineListState.afterSwitch.greenCount > 0, "green text should apply inside sequence body: " + JSON.stringify(inlineListState));
+    assert.strictEqual(inlineListState.afterGreenToggle, 0, "clicking green text twice must cancel it");
+    assert.strictEqual(inlineListState.afterUnderlineToggle, 0, "clicking underline twice must cancel it");
     assert.ok(inlineListState.lineText.endsWith(inlineListState.bodyText), "sequence body text must not be split into a separate flex column");
 
     // Switching a style from any item converts the complete contiguous sequence.
