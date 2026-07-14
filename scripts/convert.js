@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.34";
+const VERSION = "0.8.35";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -945,6 +945,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
     .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-card code { font-family: inherit !important; font-size: inherit !important; font-weight: inherit; font-style: inherit; line-height: inherit !important; letter-spacing: inherit !important; color: inherit; background: none; }
     .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: flex; column-gap: 0; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
     .xhs-heading-number { flex: 0 0 ${Math.round(headingNumberSize * 1.16)}px; width: ${Math.round(headingNumberSize * 1.16)}px; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
@@ -976,7 +977,7 @@ function studioHtmlV2(payload, libs) {
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
     .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.18em; margin: 0 0 0.42em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; overflow: visible; }
-    .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: inherit; }
+    .xhs-list-line .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: 0.8em !important; }
     .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; }
     .xhs-list-marker-dot::before { content: ''; display: inline-block; width: 0.42em; height: 0.42em; margin-top: 0.58em; border-radius: 50%; background: var(--xhs-accent); }
     .xhs-list-body { flex: 1 1 auto; min-width: 0; max-width: var(--body-text-width); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
@@ -1951,6 +1952,21 @@ function studioHtmlV2(payload, libs) {
         const group = collectContiguousListLines(line);
         group.forEach((item, index) => {
           processed.add(item);
+          // Inline emphasis must live inside the body. Older drafts can contain
+          // a wrapper around the marker and body after a broad text selection.
+          const body = item.querySelector('.xhs-list-body');
+          const markerNode = item.querySelector('.xhs-list-marker');
+          if (body && markerNode && (body.parentElement !== item || markerNode.parentElement !== item || item.children.length !== 2)) {
+            Array.from(item.childNodes).forEach((child) => {
+              if (child === markerNode || child === body) return;
+              // A wrapper already containing the recovered body is only a
+              // temporary outer shell. Otherwise preserve its inline style.
+              if (child.nodeType === Node.ELEMENT_NODE && child.contains(body)) return;
+              body.appendChild(child);
+            });
+            item.replaceChildren(markerNode, body);
+            changed = true;
+          }
           if (item.dataset.listType !== listType) {
             item.dataset.listType = listType;
             changed = true;
@@ -4932,13 +4948,33 @@ function studioHtmlV2(payload, libs) {
       }
       return null;
     }
+    function inlineFormattingHost(node) {
+      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      return el?.closest?.('.xhs-list-body, .xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-heading-title') || null;
+    }
+    function restrictRangeToInlineHost(range) {
+      const startHost = inlineFormattingHost(range.startContainer);
+      const endHost = inlineFormattingHost(range.endContainer);
+      const commonEl = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+      const listBody = commonEl?.closest?.('.xhs-list-line')?.querySelector('.xhs-list-body');
+      const host = startHost && (!endHost || startHost === endHost)
+        ? startHost
+        : (endHost && !startHost ? endHost : (listBody || null));
+      if (!host) return range;
+      const restricted = range.cloneRange();
+      if (!host.contains(range.startContainer)) restricted.setStart(host, 0);
+      if (!host.contains(range.endContainer)) restricted.setEnd(host, host.childNodes.length);
+      return restricted;
+    }
     function toggleInlineClass(className, marker) {
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount) {
         alert('请先选中要处理的文字。');
         return;
       }
-      const range = selection.getRangeAt(0);
+      const range = restrictRangeToInlineHost(selection.getRangeAt(0));
       const parent = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
@@ -4988,6 +5024,7 @@ function studioHtmlV2(payload, libs) {
       styledRange.selectNodeContents(span);
       item.selection.addRange(styledRange);
       normalizeNestedFlowBlocks(stageScale);
+      normalizeListLinesInFrame(stageScale.querySelector('.xhs-body-frame'));
       saveCurrentPage();
     }
     function applyFormattingMultiBlock(range, className) {
@@ -5020,6 +5057,7 @@ function studioHtmlV2(payload, libs) {
         }
       });
       window.getSelection()?.removeAllRanges();
+      normalizeListLinesInFrame(scopeFrame);
       saveCurrentPage();
       return true;
     }

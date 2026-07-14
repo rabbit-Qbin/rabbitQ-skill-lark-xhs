@@ -319,10 +319,47 @@ async function main() {
       return {
         gap: parseFloat(lineStyles.columnGap || lineStyles.gap),
         markerWidth: parseFloat(markerStyles.width),
+        markerFontSize: parseFloat(markerStyles.fontSize),
+        bodyFontSize: parseFloat(lineStyles.fontSize),
       };
     });
     assert.ok(orderedSpacing.gap <= 8, "sequence marker gap should stay visually close to its body");
     assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
+    assert.ok(orderedSpacing.markerFontSize < orderedSpacing.bodyFontSize, "ordered sequence marker should be visibly smaller than its body text");
+
+    // A broad selection can include the non-editable marker. Inline styles must
+    // still be applied only to the body, so the marker never becomes a flex item
+    // inside a new wrapper and pushes the content right.
+    const inlineListState = await orderedPage.evaluate(() => {
+      const line = Array.from(document.querySelectorAll('#stageScale .xhs-list-line[data-list-type="ordered"]'))
+        .find((item) => (item.querySelector('.xhs-list-body')?.textContent || '').trim());
+      if (!line) throw new Error('missing non-empty ordered list body for inline-style test');
+      const selectLine = () => {
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      };
+      selectLine();
+      document.getElementById("greenUnderlineBtn").click();
+      selectLine();
+      document.getElementById("greenTextBtn").click();
+      const body = line.querySelector(".xhs-list-body");
+      return {
+        childClasses: Array.from(line.children).map((child) => child.className),
+        underlineCount: body.querySelectorAll(".xhs-green-underline").length,
+        greenCount: body.querySelectorAll(".xhs-green-text").length,
+        bodyText: body.textContent || "",
+        lineText: line.textContent || "",
+      };
+    });
+    assert.deepStrictEqual(inlineListState.childClasses.length, 2, "a sequence line must retain exactly marker and body children");
+    assert.ok(inlineListState.childClasses.includes("xhs-list-marker xhs-list-marker-ordered"));
+    assert.ok(inlineListState.childClasses.includes("xhs-list-body"));
+    assert.ok(inlineListState.underlineCount > 0, "underline should compose inside sequence body: " + JSON.stringify(inlineListState));
+    assert.ok(inlineListState.greenCount > 0, "green text should compose inside sequence body: " + JSON.stringify(inlineListState));
+    assert.ok(inlineListState.lineText.endsWith(inlineListState.bodyText), "sequence body text must not be split into a separate flex column");
 
     // Switching a style from any item converts the complete contiguous sequence.
     await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"] .xhs-list-body').nth(1).evaluate((body) => {
