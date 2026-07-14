@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.38";
+const VERSION = "0.8.39";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -1191,6 +1191,9 @@ function studioHtmlV2(payload, libs) {
     let reflowForcePending = false;
     let lightSaveTimer = null;
     let headingNormalizeTimer = null;
+    let compositionFinishTimer = null;
+    let isComposingText = false;
+    let compositionNeedsReflow = false;
     let layoutReflowTimer = null;
     let imageReflowTimer = null;
     let splitFlowCounter = 0;
@@ -1766,6 +1769,7 @@ function studioHtmlV2(payload, libs) {
       }
     }
     function scheduleHeadingNormalize() {
+      if (isComposingText) return;
       window.clearTimeout(headingNormalizeTimer);
       headingNormalizeTimer = window.setTimeout(() => {
         const field = activeHeadingEditField();
@@ -3154,14 +3158,23 @@ function studioHtmlV2(payload, libs) {
       persistDraft();
     }
     function scheduleLightSave() {
+      if (isComposingText) return;
       window.clearTimeout(lightSaveTimer);
       lightSaveTimer = window.setTimeout(() => saveCurrentPage({ skipNormalize: true }), 180);
     }
     function scheduleOverflowReflow(force = false) {
+      if (isComposingText) {
+        compositionNeedsReflow = compositionNeedsReflow || force;
+        return;
+      }
       window.clearTimeout(reflowTimer);
       if (force) reflowForcePending = true;
       const delay = force ? 520 : 1400;
       reflowTimer = window.setTimeout(() => {
+        if (isComposingText) {
+          compositionNeedsReflow = compositionNeedsReflow || force || reflowForcePending;
+          return;
+        }
         const frame = stageScale.querySelector('.xhs-cover-tail-frame') ||
           stageScale.querySelector('.xhs-body-card .xhs-body-frame');
         if (!frame) {
@@ -3654,6 +3667,38 @@ function studioHtmlV2(payload, libs) {
       window.clearTimeout(layoutReflowTimer);
       reflowForcePending = false;
     }
+    function beginTextComposition() {
+      isComposingText = true;
+      window.clearTimeout(lightSaveTimer);
+      window.clearTimeout(headingNormalizeTimer);
+      window.clearTimeout(compositionFinishTimer);
+      cancelPendingReflow();
+    }
+    function finishTextComposition(editable) {
+      isComposingText = false;
+      window.clearTimeout(compositionFinishTimer);
+      compositionFinishTimer = window.setTimeout(() => {
+        if (isComposingText || !editable?.isConnected) return;
+        if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+          normalizeFilledManualBlanks(editable);
+          if (activeHeadingEditField()) scheduleHeadingNormalize();
+          scheduleLightSave();
+          const needsReflow = compositionNeedsReflow || editable.scrollHeight > editable.clientHeight + 8;
+          compositionNeedsReflow = false;
+          if (needsReflow) scheduleOverflowReflow(false);
+          return;
+        }
+        if (editable.classList.contains('cover-title')) {
+          sanitizeCoverTitleNode(editable);
+          balanceCoverTitle();
+        }
+        if (editable.classList.contains('cover-subtitle')) {
+          enforceCoverSubtitleLimit(editable);
+          balanceCoverSubtitle();
+        }
+        saveCurrentPage();
+      }, 0);
+    }
     function isStructuralHaloBlock(node) {
       return node?.classList?.contains('xhs-heading') ||
         node?.classList?.contains('xhs-callout') ||
@@ -3994,10 +4039,13 @@ function studioHtmlV2(payload, libs) {
     }
     function bindEditableReflow() {
       stageScale.querySelectorAll('[contenteditable="true"]').forEach((editable) => {
+        editable.addEventListener('compositionstart', beginTextComposition);
+        editable.addEventListener('compositionend', () => finishTextComposition(editable));
         if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
           editable.addEventListener('keydown', handleParagraphEnter, true);
           editable.addEventListener('keydown', handleListEnter, true);
           editable.addEventListener('beforeinput', (event) => {
+            if (event.isComposing || isComposingText) return;
             if (isHistoryInputType(event.inputType)) {
               cancelPendingReflow();
               return;
@@ -4026,6 +4074,7 @@ function studioHtmlV2(payload, libs) {
         }
         editable.addEventListener('input', (event) => {
           const inputType = event.inputType || '';
+          if (event.isComposing || isComposingText) return;
           if (editable.classList.contains('cover-title')) {
             sanitizeCoverTitleNode(editable);
             if (inputType !== 'formatBold') balanceCoverTitle();

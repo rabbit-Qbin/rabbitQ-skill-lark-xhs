@@ -331,6 +331,44 @@ async function main() {
     assert.ok(Math.abs(orderedSpacing.markerHeight - orderedSpacing.bodyLineHeight) < 0.2, "ordered marker should occupy the body line box for vertical centering");
     assert.ok(Math.abs(orderedSpacing.markerFontSize - (orderedSpacing.bodyFontSize * 0.8 + 2)) < 0.2, "ordered marker should be two pixels larger than the 80% baseline");
 
+    // Regression: Chinese IME composition must not trigger save, normalization, or reflow
+    // until the candidate text has been committed.
+    const compositionState = await orderedPage.evaluate(async () => {
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      const body = frame?.querySelector('.xhs-list-body');
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      const node = walker.nextNode();
+      if (!frame || !body || !node) throw new Error('missing list text for IME composition test');
+      const committedText = '组合输入回归';
+      const pageBeforeComposition = pages[pageIndex].html;
+      frame.focus();
+      frame.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      node.textContent += committedText;
+      frame.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertCompositionText',
+        data: committedText,
+      }));
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+      const unchangedWhileComposing = pages[pageIndex].html === pageBeforeComposition;
+      frame.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: committedText }));
+      frame.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: committedText,
+      }));
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+      const savedAfterComposition = pages[pageIndex].html.includes(committedText);
+      node.textContent = node.textContent.slice(0, -committedText.length);
+      saveCurrentPage({ skipNormalize: true });
+      return {
+        unchangedWhileComposing,
+        savedAfterComposition,
+      };
+    });
+    assert.strictEqual(compositionState.unchangedWhileComposing, true, "IME composition must not save or rewrite the current page before commit");
+    assert.strictEqual(compositionState.savedAfterComposition, true, "committed IME text must save after compositionend");
+
     // Inline styles only affect the selected phrase inside a sequence body.
     // They can stack with each other, while each individual style toggles off.
     const inlineListState = await orderedPage.evaluate(() => {
