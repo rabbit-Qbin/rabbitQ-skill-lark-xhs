@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.33";
+const VERSION = "0.8.34";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -854,7 +854,7 @@ function studioHtmlV2(payload, libs) {
   const coverSubtitleSize = Math.max(28, Math.round(width * 34 / DEFAULT_WIDTH));
   const imageFrameHeight = Math.round(height * 0.31);
   const calloutBorder = Math.max(5, Math.round(width * 0.006));
-  const calloutBodySize = Math.max(28, Math.round(bodyFontSize - 3));
+  const supportBodySize = Math.max(28, Math.round(34 * width / DEFAULT_WIDTH));
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
   const headingLevel2Size = headingLevel2FontSize(headingTitleSize);
   const imageGridGap = Math.round(width * 0.018);
@@ -869,7 +869,6 @@ function studioHtmlV2(payload, libs) {
   <title>${escapeHtml(title)} - XHS Studio</title>
   <style>
     * { box-sizing: border-box; }
-    @font-face { font-family: "XHSCoverLatin"; src: local("Times New Roman"); unicode-range: U+0000-00FF; }
     :root {
       --body-pad-x: ${bodyPadX}px;
       --body-pad-top: ${bodyPadTop}px;
@@ -921,7 +920,7 @@ function studioHtmlV2(payload, libs) {
     .cover-title-bar { flex: 0 0 auto; width: ${Math.round(width * 0.12)}px; height: ${Math.max(5, Math.round(width * 0.005))}px; background: var(--xhs-accent); border-radius: 999px; margin: ${Math.round(height * 0.006)}px 0 ${Math.round(height * 0.014)}px; }
     .xhs-cover-card.no-cover-image .cover-media { display: none; }
     .xhs-cover-card.no-cover-image .cover-text { top: 0; height: ${coverSplitY}px; padding-bottom: ${coverNoImagePadBottom}px; z-index: 2; justify-content: flex-start; }
-    .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: "XHSCoverLatin", var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
+    .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
     .cover-subtitle * { font-size: inherit !important; line-height: inherit !important; letter-spacing: inherit; }
     .cover-subtitle strong, .cover-subtitle b, .cover-subtitle .xhs-cover-bold { font-weight: 900 !important; }
     .cover-subtitle::before { content: ""; position: absolute; left: 0; top: 50%; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; transform: translateY(-50%); background: var(--xhs-accent); border-radius: 999px; pointer-events: none; }
@@ -945,7 +944,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-before { top: -11px; }
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
-    .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
     .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: flex; column-gap: 0; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
     .xhs-heading-number { flex: 0 0 ${Math.round(headingNumberSize * 1.16)}px; width: ${Math.round(headingNumberSize * 1.16)}px; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
@@ -955,11 +954,11 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${headingLevel2Size}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
-    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${calloutBodySize}px; line-height: 1.76; font-weight: 760; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
+    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${supportBodySize}px; line-height: 1.76; font-weight: 760; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-callout.xhs-card-frame { border-left: 0; border: 1.5px solid var(--xhs-underline); border-radius: 8px; background: var(--xhs-accent-pale); padding: 0.78em 0.9em; }
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
     .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: 720; }
-    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: var(--body-font); line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: ${supportBodySize}px; line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-block { margin: 0 auto 1.1em; width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
@@ -976,12 +975,12 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
-    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.48em; margin: 0 0 0.42em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; overflow: visible; }
-    .xhs-list-marker { flex: 0 0 1.35em; width: 1.35em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: inherit; }
-    .xhs-list-marker-ordered { color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; }
+    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.18em; margin: 0 0 0.42em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; overflow: visible; }
+    .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: inherit; }
+    .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; }
     .xhs-list-marker-dot::before { content: ''; display: inline-block; width: 0.42em; height: 0.42em; margin-top: 0.58em; border-radius: 50%; background: var(--xhs-accent); }
     .xhs-list-body { flex: 1 1 auto; min-width: 0; max-width: var(--body-text-width); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
-    .xhs-list-body span { font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-list-body span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
     .xhs-table-block { margin: 0 0 1.02em; width: 100%; max-width: var(--body-text-width); overflow: hidden; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
     .xhs-table { width: 100%; border-collapse: collapse; table-layout: fixed; background: #fff; color: #111; font-size: ${Math.max(24, Math.round(bodyFontSize * 0.75))}px; line-height: 1.48; }
     .xhs-table th, .xhs-table td { padding: 0.58em 0.62em; text-align: left; vertical-align: top; word-break: normal; overflow-wrap: anywhere; letter-spacing: 0; }
@@ -1395,6 +1394,7 @@ function studioHtmlV2(payload, libs) {
     function normalizeInlineHtml(html) {
       return String(html || '')
         .replace(/font-size\\s*:\\s*[0-9.]+px\\s*;?/gi, '')
+        .replace(/font-family\\s*:\\s*[^;\"]+;?/gi, '')
         .replace(/line-height\\s*:\\s*[0-9.]+\\s*;?/gi, '')
         .replace(/color\\s*:\\s*#(?:303832|161a17)\\s*;?/gi, '')
         .replace(/letter-spacing\\s*:\\s*[^;"]+;?/gi, '');
@@ -5061,8 +5061,20 @@ function studioHtmlV2(payload, libs) {
       const callout = el.closest('.xhs-callout');
       if (callout) return { type: 'card', el: callout };
       const list = el.closest('.xhs-list-line');
-      if (list) return { type: 'list', el: list, listType: list.dataset.listType || 'unordered' };
+      if (list) {
+        return {
+          type: 'list',
+          el: list,
+          els: collectContiguousListLines(list),
+          listType: list.dataset.listType || 'unordered',
+        };
+      }
       return null;
+    }
+    function flowBlockListBodies(info) {
+      if (info?.type !== 'list') return [];
+      const lines = info.els?.length ? info.els : [info.el];
+      return lines.map((line) => line.querySelector('.xhs-list-body')).filter(Boolean);
     }
     function flowBlockContentHtml(info) {
       if (!info) return '';
@@ -5075,8 +5087,9 @@ function studioHtmlV2(payload, libs) {
         return body ? body.innerHTML : info.el.innerHTML;
       }
       if (info.type === 'list') {
-        const body = info.el.querySelector('.xhs-list-body');
-        return body ? body.innerHTML : info.el.innerHTML;
+        return flowBlockListBodies(info)
+          .map((body) => normalizeInlineHtml(body.innerHTML))
+          .join('<br>');
       }
       return info.el.innerHTML;
     }
@@ -5091,22 +5104,21 @@ function studioHtmlV2(payload, libs) {
         return textWithBreaks(body || info.el);
       }
       if (info.type === 'list') {
-        const body = info.el.querySelector('.xhs-list-body');
-        return textWithBreaks(body || info.el);
+        return flowBlockListBodies(info).map((body) => textWithBreaks(body)).join('\\n');
       }
       return textWithBreaks(info.el);
     }
-    function buildFlowBlockFromContent(targetType, targetLevel, info) {
+    function buildFlowBlocksFromContent(targetType, targetLevel, info) {
       if (targetType === 'heading') {
         const plain = stripHeadingNumberPrefix(flowBlockPlainText(info), '00');
         const number = targetLevel === '1' ? nextAutoHeadingNumber() : '';
-        return makeNewHeadingBlock(number, plain, targetLevel);
+        return [makeNewHeadingBlock(number, plain, targetLevel)];
       }
       if (targetType === 'quote') {
         const block = document.createElement('section');
         block.className = 'xhs-quote xhs-block';
         block.innerHTML = normalizeInlineHtml(flowBlockContentHtml(info));
-        return block;
+        return [block];
       }
       if (targetType === 'card') {
         const label = inferCardLabel(cleanText(flowBlockPlainText(info)));
@@ -5114,14 +5126,38 @@ function studioHtmlV2(payload, libs) {
         block.className = 'xhs-callout xhs-block' + (currentCardStyle === 'frame' ? ' xhs-card-frame' : '');
         block.innerHTML = '<div class="xhs-callout-label">' + esc(label) + '</div><div class="xhs-callout-body">' +
           cleanCalloutBodyHtml(flowBlockContentHtml(info)) + '</div>';
-        return block;
+        return [block];
       }
       if (targetType === 'list') {
         const html = stripListMarkerFromHtml(normalizeInlineHtml(flowBlockContentHtml(info)));
         const plain = stripLeadingListMarkerText(cleanText(flowBlockPlainText(info)));
-        return buildListLine({ html, plain });
+        return [buildListLine({ html, plain })];
       }
-      return null;
+      return [];
+    }
+    function replaceFlowBlock(info, replacements) {
+      const nextBlocks = Array.from(replacements || []).filter(Boolean);
+      if (!info?.el || !nextBlocks.length) return null;
+      if (info.type !== 'list') {
+        info.el.replaceWith(...nextBlocks);
+        return nextBlocks[0];
+      }
+      const lines = info.els?.length ? info.els : [info.el];
+      const first = lines[0];
+      const last = lines[lines.length - 1];
+      const parent = first?.parentNode;
+      if (!parent || last?.parentNode !== parent) return null;
+      const after = last.nextSibling;
+      const fragment = document.createDocumentFragment();
+      nextBlocks.forEach((block) => fragment.appendChild(block));
+      parent.insertBefore(fragment, first);
+      let node = first;
+      while (node && node !== after) {
+        const next = node.nextSibling;
+        node.remove();
+        node = next;
+      }
+      return nextBlocks[0];
     }
     function focusFlowBlock(block) {
       const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body') || block;
@@ -5129,32 +5165,33 @@ function studioHtmlV2(payload, libs) {
     }
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
       const selection = window.getSelection();
-      const info = activeFlowBlockAt(selection?.anchorNode);
+      const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
       const sameType = info.type === targetType && (targetType !== 'heading' || info.level === targetLevel);
+      let replacements = [];
       if (sameType) {
         if (info.type === 'list') {
-          const p = document.createElement('p');
-          p.className = 'xhs-p xhs-block';
-          p.innerHTML = flowBlockContentHtml(info);
-          info.el.replaceWith(p);
-          selection?.removeAllRanges();
-          setCaretInside(p);
+          replacements = flowBlockListBodies(info).map((body) => {
+            const p = document.createElement('p');
+            p.className = 'xhs-p xhs-block';
+            p.innerHTML = normalizeInlineHtml(body.innerHTML) || '<br>';
+            return p;
+          });
         } else {
           const p = document.createElement('p');
           p.className = 'xhs-p xhs-block';
           p.innerHTML = flowBlockContentHtml(info);
-          info.el.replaceWith(p);
-          selection?.removeAllRanges();
-          setCaretInside(p);
+          replacements = [p];
         }
       } else {
-        const replacement = buildFlowBlockFromContent(targetType, targetLevel, info);
-        if (!replacement) return false;
-        info.el.replaceWith(replacement);
-        selection?.removeAllRanges();
-        focusFlowBlock(replacement);
+        replacements = buildFlowBlocksFromContent(targetType, targetLevel, info);
       }
+      const replacement = replaceFlowBlock(info, replacements);
+      if (!replacement) return false;
+      selection?.removeAllRanges();
+      focusFlowBlock(replacement);
+      if (activeFlowBlockAt(replacement)) selectFlowBlock(replacement);
+      else clearSelectedFlowBlock();
       normalizeNestedFlowBlocks(stageScale);
       saveCurrentPage();
       scheduleOverflowReflow(true);

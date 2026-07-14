@@ -158,6 +158,7 @@ async function main() {
   assert.strictEqual(boldListConvert.status, 0, boldListConvert.stderr || boldListConvert.stdout);
   const boldListHtml = fs.readFileSync(path.join(boldListOutputDir, "xhs-studio.html"), "utf8");
   assert.match(boldListHtml, /data-list-type="ordered"/);
+  assert.doesNotMatch(boldListHtml, /XHSCoverLatin|Times New Roman/);
   assert.match(boldListHtml, /<strong[^>]*>有封面图<\/strong>/);
   assert.match(boldListHtml, /<strong[^>]*>关封面图<\/strong>/);
   assert.doesNotMatch(boldListHtml, /有封面图\*\*/);
@@ -311,6 +312,74 @@ async function main() {
     assert.ok(orderedAfterEnter.types.every((type) => type === "ordered"));
     assert.ok(orderedAfterEnter.text.includes(orderedFirstText), "list text after caret must survive Enter and reflow");
     assert.ok(orderedAfterEnter.boldCount >= 2, "bold markup in ordered lists must survive Enter and reflow");
+    const orderedSpacing = await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"]').first().evaluate((line) => {
+      const marker = line.querySelector(".xhs-list-marker");
+      const lineStyles = getComputedStyle(line);
+      const markerStyles = getComputedStyle(marker);
+      return {
+        gap: parseFloat(lineStyles.columnGap || lineStyles.gap),
+        markerWidth: parseFloat(markerStyles.width),
+      };
+    });
+    assert.ok(orderedSpacing.gap <= 8, "sequence marker gap should stay visually close to its body");
+    assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
+
+    // Switching a style from any item converts the complete contiguous sequence.
+    await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"] .xhs-list-body').nth(1).evaluate((body) => {
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await orderedPage.waitForTimeout(900);
+    const sequenceCardState = await orderedPage.evaluate(() => {
+      for (const tab of Array.from(document.querySelectorAll("#pageTabs button"))) {
+        tab.click();
+        const card = document.querySelector("#stageScale .xhs-callout");
+        if (!card) continue;
+        const body = card.querySelector(".xhs-callout-body");
+        const styles = getComputedStyle(body);
+        return {
+          text: body.textContent || "",
+          fontSize: styles.fontSize,
+          fontFamily: styles.fontFamily,
+          listCount: document.querySelectorAll("#stageScale .xhs-list-line").length,
+        };
+      }
+      return null;
+    });
+    assert.ok(sequenceCardState, "sequence should switch to a card");
+    assert.ok(orderedAfterEnter.text.split(/\s+/).filter(Boolean).every((part) => sequenceCardState.text.includes(part)));
+    assert.strictEqual(sequenceCardState.listCount, 0);
+    assert.strictEqual(sequenceCardState.fontSize, "34px");
+    await orderedPage.locator("#stageScale .xhs-callout-body").first().evaluate((body) => {
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      body.closest('[contenteditable="true"]')?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("italicBtn").click();
+    });
+    await orderedPage.waitForTimeout(900);
+    const sequenceQuoteStyle = await orderedPage.evaluate(() => {
+      for (const tab of Array.from(document.querySelectorAll("#pageTabs button"))) {
+        tab.click();
+        const quote = document.querySelector("#stageScale .xhs-quote");
+        if (!quote) continue;
+        const styles = getComputedStyle(quote);
+        return { fontSize: styles.fontSize, fontFamily: styles.fontFamily };
+      }
+      return null;
+    });
+    assert.ok(sequenceQuoteStyle, "sequence card should switch to a quote");
+    assert.strictEqual(sequenceQuoteStyle.fontSize, "34px");
+    assert.strictEqual(sequenceQuoteStyle.fontFamily, sequenceCardState.fontFamily);
     await orderedPage.close();
 
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
@@ -642,19 +711,28 @@ async function main() {
       selection.addRange(range);
     });
     const headingCountBeforeEnter = await page.locator("#stageScale .xhs-heading").count();
-    const paragraphCountBeforeEnter = await page.locator("#stageScale .xhs-p").count();
     const fullParagraphTextBefore = ((await valueParagraph.textContent()) || "").replace(/\s+/g, "");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(400);
     assert.strictEqual(await page.locator("#stageScale .xhs-heading").count(), headingCountBeforeEnter);
-    assert.ok(await page.locator("#stageScale .xhs-p").count() >= paragraphCountBeforeEnter + 1);
-    const mergedParagraphText = (await page.locator("#stageScale .xhs-p").evaluateAll(
-      (nodes) => nodes.map((node) => node.textContent || "").join(""),
-    )).replace(/\s+/g, "");
+    const allParagraphTexts = await page.evaluate(() => {
+      const texts = [];
+      Array.from(document.querySelectorAll("#pageTabs button")).forEach((tab) => {
+        tab.click();
+        document.querySelectorAll("#stageScale .xhs-p").forEach((node) => texts.push(node.textContent || ""));
+      });
+      return texts.map((text) => text.replace(/\s+/g, ""));
+    });
+    const mergedParagraphText = allParagraphTexts.join("");
     assert.ok(
       mergedParagraphText.includes(fullParagraphTextBefore),
       "paragraph text should survive Enter split",
     );
+    const beforeCaret = fullParagraphTextBefore.slice(0, 4);
+    const afterCaret = fullParagraphTextBefore.slice(4, 8);
+    const beforeIndex = allParagraphTexts.findIndex((text) => text.includes(beforeCaret));
+    const afterIndex = allParagraphTexts.findIndex((text) => text.includes(afterCaret));
+    assert.ok(beforeIndex >= 0 && afterIndex >= 0 && beforeIndex !== afterIndex, "Enter should split the paragraph across two flow blocks");
 
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
     assert.ok(content.tables.length >= 1);
