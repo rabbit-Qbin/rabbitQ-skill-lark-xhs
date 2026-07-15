@@ -1,6 +1,6 @@
 {
   "name": "rabbitQ-skill-lark-xhs",
-  "version": "0.8.43",
+  "version": "0.8.44",
   "private": true,
   "description": "小兔Q彬 · 飞书 Markdown + 附件转可编辑小红书 3:4 图文 Studio",
   "type": "commonjs",

@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.43";
+const VERSION = "0.8.44";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -34,9 +34,11 @@ const CARD_LABEL_TOKEN = `(?:${CARD_LABEL_WORDS})[!！]{0,2}`;
 const CARD_LABEL_EXACT = new RegExp(`^${CARD_LABEL_TOKEN}$`);
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
-const BODY_PAD_X = 90;
-const BODY_PAD_TOP = 91;
-const BODY_PAD_BOTTOM = 89;
+const BODY_PAD_X = 72;
+const BODY_PAD_TOP = 72;
+const BODY_PAD_BOTTOM = 72;
+const BODY_PARAGRAPH_GAP = 40;
+const BODY_LINE_GAP = 28;
 
 function printUsage() {
   console.log(`rabbitQ-skill-lark-xhs
@@ -854,8 +856,10 @@ function studioHtmlV2(payload, libs) {
   const coverSubtitleSize = Math.max(28, Math.round(width * 34 / DEFAULT_WIDTH));
   const imageFrameHeight = Math.round(height * 0.31);
   const calloutBorder = Math.max(5, Math.round(width * 0.006));
-  const supportBodySize = Math.max(28, Math.round(34 * width / DEFAULT_WIDTH));
+  const supportBodySize = Math.max(30, Math.round(36 * width / DEFAULT_WIDTH));
+  const quoteBodySize = Math.max(28, Math.round(34 * width / DEFAULT_WIDTH));
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
+  const bodyParagraphGap = Math.max(20, Math.round(BODY_PARAGRAPH_GAP * width / DEFAULT_WIDTH));
   const headingLevel2Size = headingLevel2FontSize(headingTitleSize);
   const imageGridGap = Math.round(width * 0.018);
   const songtiFont = `"Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif`;
@@ -878,6 +882,7 @@ function studioHtmlV2(payload, libs) {
       --body-font: ${bodyFontSize}px;
       --body-line: ${bodyLineHeight};
       --body-line-px: ${Math.round(bodyFontSize * bodyLineHeight * 100) / 100}px;
+      --body-paragraph-gap: ${bodyParagraphGap}px;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
@@ -932,8 +937,8 @@ function studioHtmlV2(payload, libs) {
     .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${coverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - coverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
     .xhs-block { width: 100%; }
-    .xhs-body-frame > div { min-height: 1.8em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
-    .xhs-p { margin: 0 0 0.88em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 720; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
+    .xhs-body-frame > div { min-height: 1.9em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
+    .xhs-p { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: 700; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
@@ -954,14 +959,14 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 ${HEADING_LEVEL2_MARGIN_BOTTOM_PX}px; padding: 0; border-bottom: 0; }
     .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${headingLevel2Size}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-    .xhs-callout { margin: 0 0 0.78em; padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-callout { margin: 0 0 var(--body-paragraph-gap); padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
-    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${supportBodySize}px; line-height: 1.76; font-weight: 760; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
+    .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${supportBodySize}px; line-height: var(--body-line); font-weight: 700; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-callout.xhs-card-frame { border-left: 0; border: 1.5px solid var(--xhs-underline); border-radius: 8px; background: var(--xhs-accent-pale); padding: 0.78em 0.9em; }
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
-    .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: 720; }
-    .xhs-quote { margin: 0 0 0.98em; max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: ${supportBodySize}px; line-height: var(--body-line); font-style: italic; font-weight: 650; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
-    .xhs-image-block { margin: 0 auto 1.1em; width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: 700; }
+    .xhs-quote { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: ${quoteBodySize}px; line-height: var(--body-line); font-style: italic; font-weight: 700; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-image-block { margin: 0 auto var(--body-paragraph-gap); width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
     .selected-image-frame .xhs-resize-handle { display: block; }
@@ -969,7 +974,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-resize-handle.handle-s { left: 50%; bottom: 4px; width: 58px; height: 14px; transform: translateX(-50%); border-radius: 999px; cursor: ns-resize; }
     .xhs-resize-handle.handle-se { right: 4px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; cursor: nwse-resize; }
     .resizing-image-frame { cursor: nwse-resize; }
-    .xhs-image-grid { display: grid; gap: ${imageGridGap}px; margin: 0 0 1.1em; align-items: start; justify-items: center; text-align: center; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-image-grid { display: grid; gap: ${imageGridGap}px; margin: 0 0 var(--body-paragraph-gap); align-items: start; justify-items: center; text-align: center; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
@@ -977,21 +982,22 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
-    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.18em; margin: 0 0 0.42em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; overflow: visible; }
+    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.25em; margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 700; overflow: visible; }
     .xhs-list-line .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: 0.8em !important; }
-    .xhs-list-line .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; height: var(--body-line-px); color: var(--xhs-accent-strong); font-weight: 900; text-align: right; white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; font-size: calc(0.8em + 2px) !important; line-height: 1 !important; }
+    .xhs-list-line .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; height: var(--body-line-px); align-self: flex-start; color: var(--xhs-accent-strong); font-weight: 720; text-align: center; white-space: nowrap; display: flex; align-items: center; justify-content: center; font-size: 1em !important; line-height: 1 !important; }
     .xhs-list-marker-dot::before { content: ''; display: inline-block; width: 0.42em; height: 0.42em; margin-top: 0.58em; border-radius: 50%; background: var(--xhs-accent); }
     .xhs-list-body { flex: 1 1 auto; min-width: 0; max-width: var(--body-text-width); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; }
     .xhs-list-body span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
-    .xhs-table-block { margin: 0 0 1.02em; width: 100%; max-width: var(--body-text-width); overflow: hidden; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
+    .xhs-table-block { margin: 0 0 var(--body-paragraph-gap); width: 100%; max-width: var(--body-text-width); overflow: hidden; font-family: var(--xhs-font); break-inside: avoid; page-break-inside: avoid; }
     .xhs-table { width: 100%; border-collapse: collapse; table-layout: fixed; background: #fff; color: #111; font-size: ${supportBodySize}px; line-height: 1.48; }
     .xhs-table th, .xhs-table td { padding: 0.58em 0.62em; text-align: left; vertical-align: top; word-break: normal; overflow-wrap: anywhere; letter-spacing: 0; }
     .xhs-table thead th { background: var(--xhs-accent-pale); color: var(--xhs-accent-strong); font-weight: 900; border-top: 1.5px solid var(--xhs-accent); border-bottom: 1.5px solid var(--xhs-accent); }
     .xhs-table tbody td { background: #fff; border-bottom: 1px dashed #d5ded3; font-weight: 700; }
     .xhs-table tbody tr:last-child td { border-bottom: 2px solid var(--xhs-underline); }
-    .xhs-table strong, .xhs-table b { font-weight: 900; }
+    .xhs-table strong, .xhs-table b { font-weight: 720; }
     .xhs-table em { font-style: italic; }
-    .xhs-rich { margin: 0 0 0.92em; max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 720; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
+    .xhs-rich { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: 700; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
+    .xhs-p strong, .xhs-p b, .xhs-rich strong, .xhs-rich b, .xhs-list-body strong, .xhs-list-body b, .xhs-callout-body strong, .xhs-callout-body b, .xhs-quote strong, .xhs-quote b { font-weight: 720 !important; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-split-head { margin-bottom: 0 !important; }
@@ -1104,7 +1110,7 @@ function studioHtmlV2(payload, libs) {
         </div>
         <label class="tool-label">封面标题字号 <input id="coverTitleRange" type="range" min="70" max="150" value="${coverTitleSize}" /></label>
         <label class="tool-label">正文字号 <input id="bodyFontRange" type="range" min="30" max="46" value="${bodyFontSize}" /></label>
-        <label class="tool-label">正文行距 <input id="bodyLineRange" type="range" min="145" max="210" value="${Math.round(bodyLineHeight * 100)}" /></label>
+        <label class="tool-label">正文行距 <input id="bodyLineRange" type="range" min="145" max="210" step="0.01" value="${bodyLineHeight * 100}" /></label>
         <label class="tool-label">左右边距 <input id="bodyPadXRange" type="range" min="48" max="120" value="${bodyPadX}" /></label>
         <label class="tool-label">上下边距 <input id="bodyPadYRange" type="range" min="48" max="130" value="${bodyPadTop}" /></label>
       </div>
@@ -4766,7 +4772,11 @@ function studioHtmlV2(payload, libs) {
       const padX = Number(bodyPadXRange.value);
       const padY = Number(bodyPadYRange.value);
       const fontSize = Number(bodyFontRange.value);
-      const lineHeight = Number(bodyLineRange.value) / 100;
+      const requestedLineHeight = Number(bodyLineRange.value) / 100;
+      const defaultLineHeight = (36 + ${BODY_LINE_GAP}) / 36;
+      const lineHeight = Math.abs(requestedLineHeight - defaultLineHeight) < 0.0002
+        ? defaultLineHeight
+        : requestedLineHeight;
       const bottomPad = schedule ? padY : Number(config.bodyPadBottom || padY);
       const contentWidth = Math.max(360, config.width - padX * 2);
       const contentHeight = Math.max(420, config.height - padY - bottomPad);
@@ -5923,7 +5933,7 @@ function studioHtmlV2(payload, libs) {
         coverImageEnabled = true;
         coverTitleRange.value = String(initialLayout.coverTitleSize);
         bodyFontRange.value = String(initialLayout.bodyFontSize);
-        bodyLineRange.value = String(Math.round(initialLayout.bodyLineHeight * 100));
+        bodyLineRange.value = String(initialLayout.bodyLineHeight * 100);
         bodyPadXRange.value = String(initialLayout.bodyPadX);
         bodyPadYRange.value = String(initialLayout.bodyPadTop);
         applyBackgroundTheme(DEFAULT_BG_THEME, false);
@@ -5966,8 +5976,10 @@ function studioHtmlV2(payload, libs) {
       return blocks.map((block) => {
         if (block.classList?.contains('xhs-manual-blank')) return '⟦BLANK⟧';
         if (block.dataset?.xhsPageBreak === '1' || block.classList?.contains('xhs-page-break')) return '⟦BREAK⟧';
-        const text = (block.textContent || '').replace(/\s+/g, '');
-        const images = Array.from(block.querySelectorAll?.('img') || []).map((img) => {
+        const signatureBlock = block.cloneNode(true);
+        signatureBlock.querySelectorAll?.('thead').forEach((head) => head.remove());
+        const text = (signatureBlock.textContent || '').replace(/\s+/g, '');
+        const images = Array.from(signatureBlock.querySelectorAll?.('img') || []).map((img) => {
           const src = img.getAttribute('src') || '';
           return '⟦IMG:' + src.slice(-160) + '⟧';
         }).join('');
@@ -6465,7 +6477,7 @@ function main() {
       bodyContentWidth: opts.width - bodyPadX * 2,
       bodyContentHeight: opts.height - bodyPadTop - bodyPadBottom,
       bodyFontSize: Math.round(36 * scaleX),
-      bodyLineHeight: 1.74,
+      bodyLineHeight: (36 + BODY_LINE_GAP) / 36,
       bodyCharsPerLine: 21,
       headingNumberSize: Math.round(87 * scaleX),
       headingTitleSize: Math.round(48 * scaleX),

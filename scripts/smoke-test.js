@@ -243,7 +243,12 @@ async function main() {
   assert.match(html, /border-top: 1\.5px solid var\(--xhs-accent\)/);
   assert.match(html, /border-bottom: 1\.5px solid var\(--xhs-accent\)/);
   assert.match(html, /tbody tr:last-child td \{ border-bottom: 2px solid var\(--xhs-underline\)/);
-  assert.match(html, /\.xhs-table \{[^}]*font-size: 34px;/);
+  assert.match(html, /\.xhs-table \{[^}]*font-size: 36px;/);
+  assert.match(html, /--body-pad-x: 72px;/);
+  assert.match(html, /--body-pad-top: 72px;/);
+  assert.match(html, /--body-pad-bottom: 72px;/);
+  assert.match(html, /--body-paragraph-gap: 40px;/);
+  assert.match(html, /--body-line-px: 64px;/);
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
   assert.match(html, /data-xhs-heading-level="2"/);
@@ -319,18 +324,34 @@ async function main() {
       const markerStyles = getComputedStyle(marker);
       return {
         gap: parseFloat(lineStyles.columnGap || lineStyles.gap),
+        lineWeight: lineStyles.fontWeight,
         markerWidth: parseFloat(markerStyles.width),
         markerFontSize: parseFloat(markerStyles.fontSize),
         markerHeight: parseFloat(markerStyles.height),
+        markerAlign: markerStyles.textAlign,
+        markerJustify: markerStyles.justifyContent,
         bodyFontSize: parseFloat(lineStyles.fontSize),
         bodyLineHeight: parseFloat(lineStyles.lineHeight),
       };
     });
-    assert.ok(orderedSpacing.gap <= 8, "sequence marker gap should stay visually close to its body");
+    assert.ok(Math.abs(orderedSpacing.gap - 9) < 0.2, "sequence marker gap should equal 9px");
+    assert.strictEqual(orderedSpacing.lineWeight, "700", "sequence body should use the regular 700 weight");
     assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
-    assert.ok(orderedSpacing.markerFontSize < orderedSpacing.bodyFontSize, "ordered sequence marker should be visibly smaller than its body text");
+    assert.strictEqual(orderedSpacing.markerFontSize, orderedSpacing.bodyFontSize, "ordered sequence marker should match its body text size");
     assert.ok(Math.abs(orderedSpacing.markerHeight - orderedSpacing.bodyLineHeight) < 0.2, "ordered marker should occupy the body line box for vertical centering");
-    assert.ok(Math.abs(orderedSpacing.markerFontSize - (orderedSpacing.bodyFontSize * 0.8 + 2)) < 0.2, "ordered marker should be two pixels larger than the 80% baseline");
+    assert.strictEqual(orderedSpacing.markerAlign, "center", "ordered marker text should be centered in its slot");
+    assert.strictEqual(orderedSpacing.markerJustify, "center", "ordered marker flex content should be centered in its slot");
+
+    const bodyWeights = await orderedPage.evaluate(() => {
+      const normal = document.querySelector('#stageScale .xhs-list-body');
+      const bold = document.querySelector('#stageScale .xhs-list-body strong');
+      return {
+        normal: normal ? getComputedStyle(normal).fontWeight : '',
+        bold: bold ? getComputedStyle(bold).fontWeight : '',
+      };
+    });
+    assert.strictEqual(bodyWeights.normal, "700", "regular body text should use weight 700");
+    assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
 
     // Regression: Chinese IME composition must not trigger save, normalization, or reflow
     // until the candidate text has been committed.
@@ -545,7 +566,7 @@ async function main() {
       'sequence conversion lost list text: ' + JSON.stringify({ before: orderedAfterEnter.text, after: sequenceCardState.text }),
     );
     assert.strictEqual(sequenceCardState.listCount, 0);
-    assert.strictEqual(sequenceCardState.fontSize, "34px");
+    assert.strictEqual(sequenceCardState.fontSize, "36px");
     const cardInlineState = await orderedPage.locator("#stageScale .xhs-callout-body").first().evaluate((body) => {
       const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
       let text = walker.nextNode();
