@@ -237,7 +237,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.47"/);
+  assert.match(html, /"version":"0\.8\.48"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);

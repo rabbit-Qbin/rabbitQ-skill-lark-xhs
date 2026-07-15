@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.47";
+const VERSION = "0.8.48";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2301,13 +2301,13 @@ function studioHtmlV2(payload, libs) {
       );
     }
     function hasEditableContent(node) {
-      if (node?.classList?.contains('xhs-manual-blank')) return true;
+      if (node?.classList?.contains('xhs-manual-blank') || node?.dataset?.xhsManualBlank === '1') return true;
       return Boolean(cleanText(node?.textContent || '') || node?.querySelector?.('img, .xhs-image-frame, .cover-image-frame'));
     }
     function isEmptyGeneratedFlowBlock(node) {
       if (!node?.classList) return false;
       if (node.classList.contains('xhs-caret-anchor')) return isEmptyCaretAnchor(node);
-      if (node.classList.contains('xhs-manual-blank')) return false;
+      if (node.classList.contains('xhs-manual-blank') || node.dataset?.xhsManualBlank === '1') return false;
       if (node.classList.contains('xhs-callout')) return !cleanText(node.querySelector('.xhs-callout-body')?.textContent || '');
       if (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) {
         if (node.classList.contains('xhs-manual-blank')) return false;
@@ -2571,7 +2571,7 @@ function studioHtmlV2(payload, libs) {
     }
     function sanitizeMergedFlowBlocks(blocks) {
       return blocks.filter((node) => {
-        if (node.classList?.contains('xhs-manual-blank') || node.dataset?.xhsPageBreak === '1') return true;
+        if (node.classList?.contains('xhs-manual-blank') || node.dataset?.xhsManualBlank === '1' || node.dataset?.xhsPageBreak === '1') return true;
         if (node.classList?.contains('xhs-caret-anchor')) return false;
         if (isEmptyGeneratedFlowBlock(node) && isPlainSplittable(node)) return false;
         return true;
@@ -3018,6 +3018,7 @@ function studioHtmlV2(payload, libs) {
     function makeManualBlank() {
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-manual-blank';
+      p.dataset.xhsManualBlank = '1';
       p.innerHTML = '<br>';
       return p;
     }
@@ -3352,6 +3353,7 @@ function studioHtmlV2(payload, libs) {
     function insertBlankParagraphNearHeading(heading, beforeHeading) {
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-manual-blank';
+      p.dataset.xhsManualBlank = '1';
       p.innerHTML = '<br>';
       normalizeHeadingBlock(heading);
       if (beforeHeading) heading.before(p);
@@ -3359,7 +3361,7 @@ function studioHtmlV2(payload, libs) {
       setCaretInside(p);
       markParagraphEnterHandled();
       saveCurrentPage();
-      scheduleOverflowReflow(true);
+      scheduleOverflowReflow(false);
       return true;
     }
     function handleHeadingEnter(event) {
@@ -3570,11 +3572,20 @@ function studioHtmlV2(payload, libs) {
       return true;
     }
     function performParagraphEnter(frame, range) {
-      if (paragraphEnterKeydownHandled) return false;
       const block = directFlowChild(frame, range.startContainer, range.startOffset);
-      if (!isEditableParagraphBlock(block)) return false;
+      const isManualBlank = Boolean(block?.classList?.contains('xhs-manual-blank') || block?.dataset?.xhsManualBlank === '1');
+      if (paragraphEnterKeydownHandled && !isManualBlank) return false;
+      if (!isManualBlank && !isEditableParagraphBlock(block)) return false;
       saveCurrentPage({ skipNormalize: true });
       persistDraftCheckpoint();
+      if (isManualBlank) {
+        markParagraphEnterHandled();
+        const nextP = makeEmptyParagraph();
+        block.after(nextP);
+        frame.focus({ preventScroll: true });
+        setCaretInside(nextP);
+        return true;
+      }
       if (isCaretAtFieldStart(range, block)) {
         markParagraphEnterHandled();
         const emptyP = makeEmptyParagraph();
@@ -3829,12 +3840,16 @@ function studioHtmlV2(payload, libs) {
     function makeEmptyParagraph() {
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-manual-blank';
+      p.dataset.xhsManualBlank = '1';
       p.innerHTML = '<br>';
       return p;
     }
     function normalizeFilledManualBlanks(root) {
       root?.querySelectorAll?.('.xhs-manual-blank').forEach((blank) => {
-        if (cleanText(blank.textContent || '')) blank.classList.remove('xhs-manual-blank');
+        if (cleanText(blank.textContent || '')) {
+          blank.classList.remove('xhs-manual-blank');
+          delete blank.dataset.xhsManualBlank;
+        }
       });
     }
     function splitParagraphHtml(block, range) {
@@ -3920,7 +3935,7 @@ function studioHtmlV2(payload, libs) {
       }, 320);
     }
     function scheduleParagraphOverflowCheck(frame) {
-      scheduleOverflowReflow(true);
+      scheduleOverflowReflow(false);
     }
     function scheduleReflowAfterBlankRemoval() {
       cancelPendingReflow();
@@ -4099,7 +4114,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(true);
+        scheduleOverflowReflow(false);
       });
       btnAfter.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -4110,7 +4125,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(true);
+        scheduleOverflowReflow(false);
       });
       function removeAdjacentBlank(e, direction) {
         e.preventDefault();
@@ -6035,7 +6050,7 @@ function studioHtmlV2(payload, libs) {
       });
       const blocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(merged.children)));
       return blocks.map((block) => {
-        if (block.classList?.contains('xhs-manual-blank')) return '⟦BLANK⟧';
+        if (block.classList?.contains('xhs-manual-blank') || block.dataset?.xhsManualBlank === '1') return '⟦BLANK⟧';
         if (block.dataset?.xhsPageBreak === '1' || block.classList?.contains('xhs-page-break')) return '⟦BREAK⟧';
         const signatureBlock = block.cloneNode(true);
         signatureBlock.querySelectorAll?.('thead').forEach((head) => head.remove());
