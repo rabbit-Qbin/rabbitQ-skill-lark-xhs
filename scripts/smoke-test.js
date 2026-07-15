@@ -243,6 +243,7 @@ async function main() {
   assert.match(html, /border-top: 1\.5px solid var\(--xhs-accent\)/);
   assert.match(html, /border-bottom: 1\.5px solid var\(--xhs-accent\)/);
   assert.match(html, /tbody tr:last-child td \{ border-bottom: 2px solid var\(--xhs-underline\)/);
+  assert.match(html, /\.xhs-table \{[^}]*font-size: 34px;/);
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
   assert.match(html, /data-xhs-heading-level="2"/);
