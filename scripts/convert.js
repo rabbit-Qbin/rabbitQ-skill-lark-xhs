@@ -19,13 +19,9 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.45";
-const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
-const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
-
-function headingLevel2FontSize(headingTitleSize) {
-  return Math.round(Number(headingTitleSize || 48) * 0.8) + HEADING_LEVEL2_SIZE_BONUS_PX;
-}
+const VERSION = "0.8.46";
+const HEADING_LEVEL2_MARGIN_PX = 40;
+const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
 const DEFAULT_ACCENT_THEME = "blue";
 const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点";
@@ -38,7 +34,7 @@ const BODY_PAD_X = 72;
 const BODY_PAD_TOP = 72;
 const BODY_PAD_BOTTOM = 72;
 const BODY_PARAGRAPH_GAP = 40;
-const BODY_LINE_GAP = 28;
+const BODY_LINE_GAP = 22;
 
 function printUsage() {
   console.log(`rabbitQ-skill-lark-xhs
@@ -860,7 +856,6 @@ function studioHtmlV2(payload, libs) {
   const quoteBodySize = Math.max(28, Math.round(34 * width / DEFAULT_WIDTH));
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
   const bodyParagraphGap = Math.max(20, Math.round(BODY_PARAGRAPH_GAP * width / DEFAULT_WIDTH));
-  const headingLevel2Size = headingLevel2FontSize(headingTitleSize);
   const imageGridGap = Math.round(width * 0.018);
   const songtiFont = `"Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif`;
   const wechatFont = songtiFont;
@@ -958,8 +953,9 @@ function studioHtmlV2(payload, libs) {
     .xhs-heading-number { flex: 0 0 ${Math.round(headingNumberSize * 1.16)}px; width: ${Math.round(headingNumberSize * 1.16)}px; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
     .xhs-heading-space { display: none; }
     .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
-    .xhs-heading[data-level="2"] { display: block; margin: 0.62em 0 ${HEADING_LEVEL2_MARGIN_BOTTOM_PX}px; padding: 0; border-bottom: 0; }
-    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline; flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: ${headingLevel2Size}px; line-height: 1.5; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-heading[data-level="2"] { display: block; min-height: var(--body-line-px) !important; height: var(--body-line-px); margin: ${HEADING_LEVEL2_MARGIN_PX}px 0; padding: 0; border-bottom: 0; }
+    .xhs-body-frame > .xhs-page-start.xhs-heading[data-level="2"] { margin-top: ${HEADING_LEVEL2_PAGE_START_MARGIN_PX}px; }
+    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline-flex; align-items: center; box-sizing: border-box; height: var(--body-line-px); flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: var(--body-font); line-height: 1; font-weight: 800; background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 var(--body-paragraph-gap); padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: 900; }
     .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${supportBodySize}px; line-height: var(--body-line); font-weight: 700; text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
@@ -1212,6 +1208,7 @@ function studioHtmlV2(payload, libs) {
     let splitFlowCounter = 0;
     let imageIdCounter = 0;
     let caretMarkerCounter = 0;
+    let reflowCaretFallback = null;
     let manualBlankDeleteKeydownHandled = false;
     let manualBlankDeleteKeydownTimer = null;
     let paragraphEnterKeydownHandled = false;
@@ -1305,6 +1302,7 @@ function studioHtmlV2(payload, libs) {
     let currentCardStyle = 'bar';
     function paperPatternSpec(key) {
       const line = Math.max(28, Math.round((config.bodyFontSize || 36) * (config.bodyLineHeight || 1.74)));
+      const headingUnderline = (config.bodyPadTop || 72) + (config.headingNumberSize || 87) + Math.round((config.width || 1080) * 0.014);
       switch (key) {
         case 'grid':
           return {
@@ -1324,7 +1322,7 @@ function studioHtmlV2(payload, libs) {
         case 'blueprint':
           return {
             pattern: 'linear-gradient(rgba(147,197,253,.42) 1px, transparent 1px), linear-gradient(90deg, rgba(147,197,253,.42) 1px, transparent 1px)',
-            size: '40px 40px',
+            size: (headingUnderline / 4) + 'px ' + (headingUnderline / 4) + 'px',
           };
         default:
           return { pattern: 'none', size: 'auto' };
@@ -2502,7 +2500,9 @@ function studioHtmlV2(payload, libs) {
     }
     function htmlFromNodes(nodes) {
       const clones = nodes.map((node) => node.cloneNode?.(true) || node);
-      clones.forEach((node) => node.classList?.remove('xhs-page-end'));
+      clones.forEach((node) => node.classList?.remove('xhs-page-end', 'xhs-page-start'));
+      const pageStart = clones.find((node) => node.nodeType === Node.ELEMENT_NODE && node.dataset?.xhsPageBreak !== '1');
+      pageStart?.classList?.add('xhs-page-start');
       const pageEnd = [...clones].reverse().find((node) => node.nodeType === Node.ELEMENT_NODE && node.dataset?.xhsPageBreak !== '1');
       pageEnd?.classList?.add('xhs-page-end');
       return clones.map((node) => node.outerHTML || esc(node.textContent)).join('');
@@ -3228,11 +3228,23 @@ function studioHtmlV2(payload, libs) {
       const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       const frame = element?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
       if (!frame || !stageScale.contains(frame)) return '';
+      const textBlock = element?.closest?.('.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body');
+      if (textBlock) {
+        const before = document.createRange();
+        before.selectNodeContents(textBlock);
+        try { before.setEnd(range.startContainer, range.startOffset); } catch (_) {}
+        reflowCaretFallback = {
+          tail: cleanText(before.toString()).slice(-24),
+          selector: textBlock.classList.contains('xhs-p') ? '.xhs-p' : '.xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body',
+        };
+      } else {
+        reflowCaretFallback = null;
+      }
       const id = 'caret-' + (++caretMarkerCounter);
       const marker = document.createElement('span');
       marker.className = 'xhs-caret-marker';
       marker.dataset.xhsCaretMarker = id;
-      marker.textContent = String.fromCharCode(8288);
+      marker.textContent = 'xhs-caret';
       range.insertNode(marker);
       range.setStartAfter(marker);
       range.collapse(true);
@@ -3258,7 +3270,16 @@ function studioHtmlV2(payload, libs) {
       const selection = window.getSelection();
       if (!selection || !parent) return false;
       const range = document.createRange();
-      if (next?.isConnected && next.nodeType === Node.TEXT_NODE) {
+      const emptyMarkerParagraph = parent.matches?.('.xhs-p, .xhs-rich') && !cleanText(parent.textContent);
+      const previousBlock = emptyMarkerParagraph ? parent.previousElementSibling : null;
+      if (previousBlock) {
+        const walker = document.createTreeWalker(previousBlock, NodeFilter.SHOW_TEXT);
+        let lastText = null;
+        while (walker.nextNode()) lastText = walker.currentNode;
+        if (lastText) range.setStart(lastText, (lastText.textContent || '').length);
+        else range.selectNodeContents(previousBlock), range.collapse(false);
+        parent.remove();
+      } else if (next?.isConnected && next.nodeType === Node.TEXT_NODE) {
         range.setStart(next, 0);
       } else if (next?.isConnected) {
         range.setStartBefore(next);
@@ -3271,6 +3292,25 @@ function studioHtmlV2(payload, libs) {
         range.collapse(false);
       }
       range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      saveCurrentPage();
+      return true;
+    }
+    function restoreReflowCaretFallback() {
+      const fallback = reflowCaretFallback;
+      reflowCaretFallback = null;
+      if (!fallback?.tail) return false;
+      const candidates = Array.from(stageScale.querySelectorAll(fallback.selector));
+      const target = [...candidates].reverse().find((node) => cleanText(node.textContent).endsWith(fallback.tail));
+      if (!target) return false;
+      const editable = target.closest('[contenteditable="true"]');
+      editable?.focus?.({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      const selection = window.getSelection();
+      if (!selection) return false;
       selection.removeAllRanges();
       selection.addRange(range);
       saveCurrentPage();
@@ -4389,7 +4429,7 @@ function studioHtmlV2(payload, libs) {
     }
     function fitHeadingTitles(root = stageScale) {
       const base = Number(config.headingTitleSize || 48);
-      const lv2Size = Math.round(base * 0.8) + ${HEADING_LEVEL2_SIZE_BONUS_PX};
+      const lv2Size = Number(config.bodyFontSize || 36);
       root.querySelectorAll('.xhs-heading-title').forEach((title) => {
         const heading = title.closest('.xhs-heading');
         const isLv2 = detectHeadingLevel(heading) === '2';
@@ -6283,7 +6323,7 @@ function studioHtmlV2(payload, libs) {
     function stripReflowArtifacts(holder, preserveCaretMarkerId = '') {
       removeAutoLineBreaks(holder);
       stripCaretAnchors(holder);
-      holder.querySelectorAll?.('.xhs-page-end').forEach((node) => node.classList.remove('xhs-page-end'));
+      holder.querySelectorAll?.('.xhs-page-end, .xhs-page-start').forEach((node) => node.classList.remove('xhs-page-end', 'xhs-page-start'));
       holder.querySelectorAll?.('.xhs-caret-marker').forEach((node) => {
         if (preserveCaretMarkerId && node.dataset?.xhsCaretMarker === preserveCaretMarkerId) return;
         node.remove();
@@ -6339,6 +6379,7 @@ function studioHtmlV2(payload, libs) {
       selectedFrame = null;
       renderAll();
       restoreReflowCaretMarker(caretMarkerId);
+      restoreReflowCaretFallback();
       const rememberedBlock = findImageBlockById(stageScale, rememberedImageId);
       const frame = rememberedBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);

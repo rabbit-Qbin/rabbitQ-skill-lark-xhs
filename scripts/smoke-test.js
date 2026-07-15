@@ -237,7 +237,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.45"/);
+  assert.match(html, /"version":"0\.8\.46"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -249,7 +249,9 @@ async function main() {
   assert.match(html, /--body-pad-top: 72px;/);
   assert.match(html, /--body-pad-bottom: 72px;/);
   assert.match(html, /--body-paragraph-gap: 40px;/);
-  assert.match(html, /--body-line-px: 64px;/);
+  assert.match(html, /--body-line-px: 58px;/);
+  assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
+  assert.match(html, /headingUnderline \/ 4/);
   assert.match(html, /\.xhs-body-frame > \.xhs-page-end \{ margin-bottom: 0 !important; \}/);
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
@@ -729,7 +731,7 @@ async function main() {
             }));
           }
           return [{
-            className: Array.from(node.classList).filter((name) => name !== "xhs-page-end").join(" "),
+            className: Array.from(node.classList).filter((name) => name !== "xhs-page-end" && name !== "xhs-page-start").join(" "),
             text: node.textContent.replace(/\s+/g, " ").trim(),
             imageCount: node.querySelectorAll("img").length,
           }];
@@ -1352,7 +1354,7 @@ async function main() {
         borderBottomColor: styles.borderBottomColor,
       };
     });
-    assert.strictEqual(level2Style.fontSize, "40px");
+    assert.strictEqual(level2Style.fontSize, "36px");
     assert.strictEqual(level2Style.borderBottomWidth, "2px");
     assert.notStrictEqual(level2Style.color, "rgb(17, 17, 17)");
     await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
