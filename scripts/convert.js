@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.44";
+const VERSION = "0.8.45";
 const HEADING_LEVEL2_SIZE_BONUS_PX = 2;
 const HEADING_LEVEL2_MARGIN_BOTTOM_PX = 20;
 
@@ -942,6 +942,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
+    .xhs-body-frame > .xhs-page-end { margin-bottom: 0 !important; }
     .xhs-caret-anchor:hover { opacity: 1; }
     .xhs-caret-anchor::before { content: ''; position: absolute; left: 10%; right: 10%; top: -8px; height: 16px; border-top: 1.5px dashed var(--xhs-accent, #5fa66a); opacity: 0.55; pointer-events: auto; }
     .xhs-block-halo { position: absolute; pointer-events: none; z-index: 200; }
@@ -2478,19 +2479,33 @@ function studioHtmlV2(payload, libs) {
       });
       return mergeAdjacentListParagraphs(blocks);
     }
-    function outerHeight(node) {
+    function blockHeightMetrics(node) {
       const rect = node.getBoundingClientRect();
       const style = getComputedStyle(node);
-      return rect.height + parseFloat(style.marginTop || 0) + parseFloat(style.marginBottom || 0);
+      const marginTop = parseFloat(style.marginTop || 0);
+      const marginBottom = parseFloat(style.marginBottom || 0);
+      return {
+        outer: rect.height + marginTop + marginBottom,
+        fit: rect.height + marginTop,
+      };
     }
-    function measureBlock(node) {
+    function measureBlockMetrics(node) {
       measure.innerHTML = '';
       const clone = node.cloneNode(true);
+      clone.classList.remove('xhs-page-end');
       measure.appendChild(clone);
-      return outerHeight(clone);
+      return blockHeightMetrics(clone);
+    }
+    function measureBlock(node, ignoreTrailingMargin = false) {
+      const metrics = measureBlockMetrics(node);
+      return ignoreTrailingMargin ? metrics.fit : metrics.outer;
     }
     function htmlFromNodes(nodes) {
-      return nodes.map((node) => node.outerHTML || esc(node.textContent)).join('');
+      const clones = nodes.map((node) => node.cloneNode?.(true) || node);
+      clones.forEach((node) => node.classList?.remove('xhs-page-end'));
+      const pageEnd = [...clones].reverse().find((node) => node.nodeType === Node.ELEMENT_NODE && node.dataset?.xhsPageBreak !== '1');
+      pageEnd?.classList?.add('xhs-page-end');
+      return clones.map((node) => node.outerHTML || esc(node.textContent)).join('');
     }
     function textLengthDeep(node) {
       if (!node) return 0;
@@ -2589,7 +2604,7 @@ function studioHtmlV2(payload, libs) {
           lo = mid + 1;
           continue;
         }
-        const h = measureBlock(head);
+        const h = measureBlock(head, true);
         if (h <= available) {
           best = mid;
           lo = mid + 1;
@@ -2602,7 +2617,7 @@ function studioHtmlV2(payload, libs) {
       const preferred = preferredTextSplitIndex(block.textContent || '', rawBest, total);
       if (preferred !== rawBest) {
         const preferredHead = markSplitPart(cloneTextRangeElement(block, 0, preferred), id, 'head');
-        const preferredHeight = measureBlock(preferredHead);
+        const preferredHeight = measureBlock(preferredHead, true);
         const leavesTinyGap = available - preferredHeight <= oneLine * 0.25;
         best = leavesTinyGap ? preferred : rawBest;
       }
@@ -2634,7 +2649,7 @@ function studioHtmlV2(payload, libs) {
           lo = mid + 1;
           continue;
         }
-        const h = measureBlock(head);
+        const h = measureBlock(head, true);
         if (h <= available) {
           best = mid;
           lo = mid + 1;
@@ -2670,7 +2685,7 @@ function studioHtmlV2(payload, libs) {
       while (lo <= hi) {
         const mid = Math.floor((lo + hi) / 2);
         const candidate = makePart(0, mid, 'head');
-        if (measureBlock(candidate) <= available) {
+        if (measureBlock(candidate, true) <= available) {
           best = mid;
           lo = mid + 1;
         } else {
@@ -2719,13 +2734,15 @@ function studioHtmlV2(payload, libs) {
         while (pending) {
           let block = pending;
           wrapBodyTextLines(block);
-          let h = measureBlock(block);
+          let metrics = measureBlockMetrics(block);
+          let h = metrics.outer;
+          let fitHeight = metrics.fit;
           let remaining = config.pageLimit - used;
           if (current.length && block.classList.contains('xhs-heading') && block.dataset.level !== '2' && remaining < 160) {
             pushPage();
             remaining = config.pageLimit;
           }
-          if (current.length && h > remaining) {
+          if (current.length && fitHeight > remaining) {
             if (isSplittableBlock(block)) {
               const split = splitBlockToFit(block, remaining);
               if (split) {
@@ -2738,7 +2755,7 @@ function studioHtmlV2(payload, libs) {
             pushPage();
             continue;
           }
-          if (!current.length && h > config.pageLimit && isSplittableBlock(block)) {
+          if (!current.length && fitHeight > config.pageLimit && isSplittableBlock(block)) {
             const split = splitBlockToFit(block, config.pageLimit);
             if (split) {
               current.push(split.head);
@@ -2747,13 +2764,15 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (!current.length && h > config.pageLimit && (block.classList.contains('xhs-image-block') || block.classList.contains('xhs-image-grid'))) {
+          if (!current.length && fitHeight > config.pageLimit && (block.classList.contains('xhs-image-block') || block.classList.contains('xhs-image-grid'))) {
             const frames = Array.from(block.querySelectorAll('.xhs-image-frame'));
             const nextHeight = Math.floor(config.pageLimit * (block.classList.contains('xhs-image-grid') ? 0.38 : 0.86));
             frames.forEach((frame) => {
               if (frame.dataset.userHeight !== '1') frame.style.height = nextHeight + 'px';
             });
-            h = measureBlock(block);
+            metrics = measureBlockMetrics(block);
+            h = metrics.outer;
+            fitHeight = metrics.fit;
           }
           current.push(block);
           used += h;
@@ -2784,9 +2803,11 @@ function studioHtmlV2(payload, libs) {
         while (pending) {
           let block = pending;
           wrapBodyTextLines(block);
-          let h = measureBlock(block);
+          const metrics = measureBlockMetrics(block);
+          const h = metrics.outer;
+          const fitHeight = metrics.fit;
           const remaining = tailLimit - used;
-          if (h > remaining && isSplittableBlock(block)) {
+          if (fitHeight > remaining && isSplittableBlock(block)) {
             const split = splitBlockToFit(block, Math.max(remaining, tailLimit));
             if (split) {
               tailNodes.push(split.head);
@@ -2798,7 +2819,7 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (!tailNodes.length && h > tailLimit && isSplittableBlock(block)) {
+          if (!tailNodes.length && fitHeight > tailLimit && isSplittableBlock(block)) {
             const split = splitBlockToFit(block, tailLimit);
             if (split) {
               tailNodes.push(split.head);
@@ -2810,7 +2831,7 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (h <= remaining || (!tailNodes.length && h <= tailLimit + 40)) {
+          if (fitHeight <= remaining || (!tailNodes.length && fitHeight <= tailLimit + 40)) {
             tailNodes.push(block);
             used += h;
             pending = null;
@@ -6259,10 +6280,14 @@ function studioHtmlV2(payload, libs) {
         button.textContent = '批量导出 PNG ZIP';
       }
     }
-    function stripReflowArtifacts(holder) {
+    function stripReflowArtifacts(holder, preserveCaretMarkerId = '') {
       removeAutoLineBreaks(holder);
       stripCaretAnchors(holder);
-      holder.querySelectorAll?.('.xhs-caret-marker').forEach((node) => node.remove());
+      holder.querySelectorAll?.('.xhs-page-end').forEach((node) => node.classList.remove('xhs-page-end'));
+      holder.querySelectorAll?.('.xhs-caret-marker').forEach((node) => {
+        if (preserveCaretMarkerId && node.dataset?.xhsCaretMarker === preserveCaretMarkerId) return;
+        node.remove();
+      });
     }
     function reflow(preferredImageId = '') {
       const caretMarkerId = insertReflowCaretMarker();
@@ -6278,13 +6303,13 @@ function studioHtmlV2(payload, libs) {
       if (cover.tailHtml) {
         const tailHolder = document.createElement('div');
         tailHolder.innerHTML = '<div class="xhs-body-frame">' + cover.tailHtml + '</div>';
-        stripReflowArtifacts(tailHolder);
+        stripReflowArtifacts(tailHolder, caretMarkerId);
         Array.from(tailHolder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
       }
       pages.filter((page) => page.type === 'body').forEach((page) => {
         const holder = document.createElement('div');
         holder.innerHTML = '<div class="xhs-body-frame">' + page.html + '</div>';
-        stripReflowArtifacts(holder);
+        stripReflowArtifacts(holder, caretMarkerId);
         const frame = holder.querySelector('.xhs-body-frame');
         Array.from(frame?.children || []).forEach((node) => merged.appendChild(node));
       });

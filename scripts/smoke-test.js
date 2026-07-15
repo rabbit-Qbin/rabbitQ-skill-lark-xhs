@@ -237,6 +237,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
+  assert.match(html, /"version":"0\.8\.45"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -249,6 +250,7 @@ async function main() {
   assert.match(html, /--body-pad-bottom: 72px;/);
   assert.match(html, /--body-paragraph-gap: 40px;/);
   assert.match(html, /--body-line-px: 64px;/);
+  assert.match(html, /\.xhs-body-frame > \.xhs-page-end \{ margin-bottom: 0 !important; \}/);
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
   assert.match(html, /data-xhs-heading-level="2"/);
@@ -690,6 +692,28 @@ async function main() {
     assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
     assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
 
+    const pageEndSpacingProbe = await page.evaluate(() => {
+      const image = document.createElement('section');
+      image.className = 'xhs-image-block xhs-block';
+      image.innerHTML = '<div class="xhs-image-frame" style="height:180px"></div>';
+      const imageMetrics = measureBlockMetrics(image);
+      const leadMargin = 40;
+      const spare = 10;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - imageMetrics.fit - leadMargin - spare) + 'px';
+      lead.style.margin = '0 0 ' + leadMargin + 'px';
+      const result = paginateBlocks([lead, image]);
+      const holder = document.createElement('div');
+      holder.innerHTML = result[0]?.html || '';
+      return {
+        pageCount: result.length,
+        imageIsPageEnd: holder.lastElementChild?.classList.contains('xhs-page-end') || false,
+      };
+    });
+    assert.strictEqual(pageEndSpacingProbe.pageCount, 1, 'a final image should fit when only its trailing inter-block gap crosses the page limit');
+    assert.strictEqual(pageEndSpacingProbe.imageIsPageEnd, true, 'the final block should suppress its unused trailing gap');
+
     async function collectFlowOrder() {
       const count = await page.locator("#pageTabs button").count();
       const order = [];
@@ -705,7 +729,7 @@ async function main() {
             }));
           }
           return [{
-            className: node.className,
+            className: Array.from(node.classList).filter((name) => name !== "xhs-page-end").join(" "),
             text: node.textContent.replace(/\s+/g, " ").trim(),
             imageCount: node.querySelectorAll("img").length,
           }];
@@ -969,6 +993,7 @@ async function main() {
     assert.strictEqual(listEnterState.lineCount, listLineCountBeforeEnter + 1);
     assert.ok(listEnterState.currentBody.includes("重新分页"));
     assert.strictEqual(listEnterState.previousBody, "");
+    await page.waitForTimeout(200);
 
     const paragraphHaloState = await page.locator("#stageScale .xhs-p").first().evaluate((paragraph) => {
       paragraph.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
@@ -1029,7 +1054,10 @@ async function main() {
     const afterCaret = fullParagraphTextBefore.slice(4, 8);
     const beforeIndex = allParagraphTexts.findIndex((text) => text.includes(beforeCaret));
     const afterIndex = allParagraphTexts.findIndex((text) => text.includes(afterCaret));
-    assert.ok(beforeIndex >= 0 && afterIndex >= 0 && beforeIndex !== afterIndex, "Enter should split the paragraph across two flow blocks");
+    assert.ok(
+      beforeIndex >= 0 && afterIndex >= 0 && beforeIndex !== afterIndex,
+      `Enter should split the paragraph across two flow blocks: ${JSON.stringify({ beforeCaret, afterCaret, beforeIndex, afterIndex, allParagraphTexts })}`,
+    );
 
     assert.ok(!content.callouts.some((text) => text.includes("rabbitQ-skill-lark-xhs（GitHub）")));
     assert.ok(content.tables.length >= 1);
@@ -1251,9 +1279,28 @@ async function main() {
     });
     const caretText = "连续输入".repeat(180) + "光标终点";
     await page.evaluate((text) => document.execCommand("insertText", false, text), caretText);
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(2200);
     assert.ok(await page.locator("#stageScale .xhs-p").filter({ hasText: "光标终点" }).count() >= 1, "typed paragraph should survive reflow");
     assert.strictEqual(await page.locator('[data-xhs-caret-marker]').count(), 0);
+    const restoredCaret = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchorElement = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      const paragraph = anchorElement?.closest?.('.xhs-p');
+      return {
+        focused: document.activeElement?.matches?.('.xhs-body-frame, .xhs-cover-tail-frame') || false,
+        collapsed: Boolean(selection?.isCollapsed),
+        insideStage: Boolean(selection?.anchorNode && stageScale.contains(selection.anchorNode)),
+        atTypedEnd: Boolean(paragraph?.textContent?.endsWith('光标终点')),
+      };
+    });
+    assert.deepStrictEqual(restoredCaret, {
+      focused: true,
+      collapsed: true,
+      insideStage: true,
+      atTypedEnd: true,
+    }, 'reflow should keep focus and restore the caret to the end of the typed text');
     const anchorHeights = await page.locator("#stageScale .xhs-caret-anchor").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
     assert.ok(anchorHeights.every((height) => height <= 1.1));
 
