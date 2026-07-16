@@ -237,7 +237,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.48"/);
+  assert.match(html, /"version":"0\.8\.49"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -250,6 +250,12 @@ async function main() {
   assert.match(html, /--body-pad-bottom: 72px;/);
   assert.match(html, /--body-paragraph-gap: 40px;/);
   assert.match(html, /--body-line-px: 58px;/);
+  assert.match(html, /--body-regular-weight: 700;/);
+  assert.match(html, /--body-bold-weight: 720;/);
+  assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
+  assert.match(html, /\.xhs-table thead th \{[^}]*font-weight: var\(--body-bold-weight\)/);
+  assert.match(html, /\.xhs-heading\[data-level="2"\] \.xhs-heading-title \{[^}]*font-weight: var\(--body-bold-weight\)/);
+  assert.match(html, /\.xhs-p \{[^}]*font-weight: var\(--body-regular-weight\)/);
   assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
   assert.match(html, /headingUnderline \/ 4/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \{[\s\S]*?margin: 0 0 40px;/, "二级标题只保留下间距，避免与前一结构块叠加");
