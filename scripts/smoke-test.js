@@ -169,9 +169,12 @@ async function main() {
   const blankMarkdown = [
     "# 空行回归",
     "",
-    "**金句：卡片和正文之间要留一空行。**",
+    "**金句：卡片和正文之间的单个空行只负责分段。**",
     "",
     "这是下一段正文。",
+    "",
+    "",
+    "这是明确多留一行后的正文。",
   ].join("\n");
   fs.writeFileSync(path.join(blankSourceDir, "article.md"), blankMarkdown, "utf8");
   const blankConvert = childProcess.spawnSync(
@@ -181,8 +184,11 @@ async function main() {
   );
   assert.strictEqual(blankConvert.status, 0, blankConvert.stderr || blankConvert.stdout);
   const blankHtml = fs.readFileSync(path.join(blankOutputDir, "xhs-studio.html"), "utf8");
-  assert.match(blankHtml, /data-xhs-flow-blank="1"/);
-  assert.match(blankHtml, /<p><strong>金句：卡片和正文之间要留一空行。<\/strong><\/p>\s*<p data-xhs-flow-blank="1"[\s\S]*?<p>这是下一段正文/);
+  const blankTemplate = blankHtml.match(/<template id="wechatTemplate">([\s\S]*?)<\/template>/)?.[1] || "";
+  assert.match(blankTemplate, /卡片和正文之间的单个空行只负责分段。[\s\S]*?<p>这是下一段正文。<\/p>/);
+  assert.doesNotMatch(blankTemplate, /卡片和正文之间的单个空行只负责分段。[\s\S]*?data-xhs-flow-blank="1"[\s\S]*?<p>这是下一段正文。<\/p>/);
+  assert.match(blankTemplate, /<p>这是下一段正文。<\/p>\s*<p data-xhs-flow-blank="1"><br\s*\/?><\/p>\s*<p>这是明确多留一行后的正文。<\/p>/);
+  assert.strictEqual((blankTemplate.match(/data-xhs-flow-blank="1"/g) || []).length, 1);
 
   const tightSourceDir = path.join(root, "tight-spacing-source");
   const tightOutputDir = path.join(root, "tight-spacing-output");
@@ -237,7 +243,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.49"/);
+  assert.match(html, /"version":"0\.8\.50"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -249,6 +255,8 @@ async function main() {
   assert.match(html, /--body-pad-top: 72px;/);
   assert.match(html, /--body-pad-bottom: 72px;/);
   assert.match(html, /--body-paragraph-gap: 40px;/);
+  assert.match(html, /--body-list-item-gap: 20px;/);
+  assert.match(html, /\.xhs-list-line:not\(:has\(\+ \.xhs-list-line\)\) \{ margin-bottom: var\(--body-paragraph-gap\); \}/);
   assert.match(html, /--body-line-px: 58px;/);
   assert.match(html, /--body-regular-weight: 700;/);
   assert.match(html, /--body-bold-weight: 720;/);
@@ -353,6 +361,10 @@ async function main() {
     assert.ok(Math.abs(orderedSpacing.markerHeight - orderedSpacing.bodyLineHeight) < 0.2, "ordered marker should occupy the body line box for vertical centering");
     assert.strictEqual(orderedSpacing.markerAlign, "center", "ordered marker text should be centered in its slot");
     assert.strictEqual(orderedSpacing.markerJustify, "center", "ordered marker flex content should be centered in its slot");
+    assert.ok(
+      Math.abs(parseFloat(await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"]').first().evaluate((line) => getComputedStyle(line).marginBottom)) - 20) < 0.2,
+      "items inside one sequence should use the compact 20px gap",
+    );
 
     const bodyWeights = await orderedPage.evaluate(() => {
       const normal = document.querySelector('#stageScale .xhs-list-body');

@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.49";
+const VERSION = "0.8.50";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -35,6 +35,7 @@ const BODY_PAD_TOP = 72;
 const BODY_PAD_BOTTOM = 72;
 const BODY_PARAGRAPH_GAP = 40;
 const BODY_LINE_GAP = 22;
+const BODY_LIST_ITEM_GAP = 20;
 
 function printUsage() {
   console.log(`rabbitQ-skill-lark-xhs
@@ -618,10 +619,10 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (last === "callout" && next === "prose") return true;
     return false;
   }
-  function pushFlowBlank() {
-    const last = blocks[blocks.length - 1] || "";
-    if (String(last).includes("data-xhs-flow-blank")) return;
-    blocks.push('<p data-xhs-flow-blank="1"><br /></p>');
+  function pushFlowBlanks(count = 1) {
+    for (let index = 0; index < count; index += 1) {
+      blocks.push('<p data-xhs-flow-blank="1"><br /></p>');
+    }
   }
   function pushImage(alt, src) {
     const cleanSrc = unescapeMarkdownUrl(src);
@@ -682,6 +683,12 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
       continue;
     }
     if (!line) {
+      let blankRunEnd = lineIndex;
+      while (blankRunEnd + 1 < lines.length && !String(lines[blankRunEnd + 1] || "").trim()) {
+        blankRunEnd += 1;
+      }
+      const blankRunLength = blankRunEnd - lineIndex + 1;
+      lineIndex = blankRunEnd;
       let upcomingListType = "";
       for (let j = lineIndex + 1; j < lines.length; j += 1) {
         const upcoming = lines[j].trim();
@@ -695,7 +702,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
       const hadPending = paragraph.length > 0 || list.length > 0 || quote.length > 0 || code.length > 0;
       flushAll();
       if (!upcoming || !shouldInsertMarkdownFlowBlank(upcoming)) continue;
-      if (hadBlocks || hadPending) pushFlowBlank();
+      // A single Markdown blank line is only the paragraph separator. Extra
+      // consecutive blank lines are an intentional request for visible space.
+      // This keeps paragraph spacing and manual blank rows from stacking.
+      const manualBlankCount = Math.max(0, blankRunLength - 1);
+      if ((hadBlocks || hadPending) && manualBlankCount) pushFlowBlanks(manualBlankCount);
       continue;
     }
     const imgOnly = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
@@ -878,6 +889,7 @@ function studioHtmlV2(payload, libs) {
       --body-line: ${bodyLineHeight};
       --body-line-px: ${Math.round(bodyFontSize * bodyLineHeight * 100) / 100}px;
       --body-paragraph-gap: ${bodyParagraphGap}px;
+      --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
       --body-regular-weight: 700;
       --body-bold-weight: 720;
       --body-text-width: 100%;
@@ -981,7 +993,8 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
-    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.25em; margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); overflow: visible; }
+    .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.25em; margin: 0 0 var(--body-list-item-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); overflow: visible; }
+    .xhs-list-line:not(:has(+ .xhs-list-line)) { margin-bottom: var(--body-paragraph-gap); }
     .xhs-list-line .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: 0.8em !important; }
     .xhs-list-line .xhs-list-marker-ordered { flex-basis: 1.16em; width: 1.16em; height: var(--body-line-px); align-self: flex-start; color: var(--xhs-accent-strong); font-weight: var(--body-bold-weight); text-align: center; white-space: nowrap; display: flex; align-items: center; justify-content: center; font-size: 1em !important; line-height: 1 !important; }
     .xhs-list-marker-dot::before { content: ''; display: inline-block; width: 0.42em; height: 0.42em; margin-top: 0.58em; border-radius: 50%; background: var(--xhs-accent); }
@@ -1109,7 +1122,7 @@ function studioHtmlV2(payload, libs) {
         </div>
         <label class="tool-label">封面标题字号 <input id="coverTitleRange" type="range" min="70" max="150" value="${coverTitleSize}" /></label>
         <label class="tool-label">正文字号 <input id="bodyFontRange" type="range" min="30" max="46" value="${bodyFontSize}" /></label>
-        <label class="tool-label">正文行距 <input id="bodyLineRange" type="range" min="145" max="210" step="0.01" value="${bodyLineHeight * 100}" /></label>
+        <label class="tool-label">正文行高 <input id="bodyLineRange" type="range" min="145" max="210" step="0.01" value="${bodyLineHeight * 100}" /></label>
         <label class="tool-label">左右边距 <input id="bodyPadXRange" type="range" min="48" max="120" value="${bodyPadX}" /></label>
         <label class="tool-label">上下边距 <input id="bodyPadYRange" type="range" min="48" max="130" value="${bodyPadTop}" /></label>
       </div>
