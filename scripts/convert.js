@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.55";
+const VERSION = "0.8.56";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2533,11 +2533,16 @@ function studioHtmlV2(payload, libs) {
         fit: rect.height + marginTop,
       };
     }
-    function measureBlockMetrics(node) {
+    function measureBlockMetrics(node, nextNode = null) {
       measure.innerHTML = '';
       const clone = node.cloneNode(true);
       clone.classList.remove('xhs-page-end');
       measure.appendChild(clone);
+      if (clone.classList.contains('xhs-list-line') && nextNode?.classList?.contains('xhs-list-line')) {
+        const nextClone = nextNode.cloneNode(false);
+        nextClone.classList.remove('xhs-page-start', 'xhs-page-end');
+        measure.appendChild(nextClone);
+      }
       return blockHeightMetrics(clone);
     }
     function measureBlock(node, ignoreTrailingMargin = false) {
@@ -2771,7 +2776,9 @@ function studioHtmlV2(payload, libs) {
         current = [];
         used = 0;
       }
-      for (const sourceBlock of blocks) {
+      for (let sourceIndex = 0; sourceIndex < blocks.length; sourceIndex += 1) {
+        const sourceBlock = blocks[sourceIndex];
+        const nextSourceBlock = blocks[sourceIndex + 1] || null;
         if (sourceBlock.dataset?.xhsPageBreak === '1') {
           pushPage();
           continue;
@@ -2780,7 +2787,7 @@ function studioHtmlV2(payload, libs) {
         while (pending) {
           let block = pending;
           wrapBodyTextLines(block);
-          let metrics = measureBlockMetrics(block);
+          let metrics = measureBlockMetrics(block, nextSourceBlock);
           let h = metrics.outer;
           let fitHeight = metrics.fit;
           let remaining = config.pageLimit - used;
@@ -2816,7 +2823,7 @@ function studioHtmlV2(payload, libs) {
             frames.forEach((frame) => {
               if (frame.dataset.userHeight !== '1') frame.style.height = nextHeight + 'px';
             });
-            metrics = measureBlockMetrics(block);
+            metrics = measureBlockMetrics(block, nextSourceBlock);
             h = metrics.outer;
             fitHeight = metrics.fit;
           }
@@ -2834,7 +2841,9 @@ function studioHtmlV2(payload, libs) {
       let used = 0;
       let tailClosed = false;
       const rest = [];
-      for (const sourceBlock of blocks) {
+      for (let sourceIndex = 0; sourceIndex < blocks.length; sourceIndex += 1) {
+        const sourceBlock = blocks[sourceIndex];
+        const nextSourceBlock = blocks[sourceIndex + 1] || null;
         if (sourceBlock.dataset?.xhsPageBreak === '1') {
           if (!tailClosed) tailClosed = true;
           else rest.push(sourceBlock);
@@ -2849,7 +2858,7 @@ function studioHtmlV2(payload, libs) {
         while (pending) {
           let block = pending;
           wrapBodyTextLines(block);
-          const metrics = measureBlockMetrics(block);
+          const metrics = measureBlockMetrics(block, nextSourceBlock);
           const h = metrics.outer;
           const fitHeight = metrics.fit;
           const remaining = tailLimit - used;

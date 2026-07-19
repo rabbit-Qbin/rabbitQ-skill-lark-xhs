@@ -243,7 +243,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.55"/);
+  assert.match(html, /"version":"0\.8\.56"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -774,6 +774,34 @@ async function main() {
     });
     assert.strictEqual(pageEndSpacingProbe.pageCount, 1, 'a final image should fit when only its trailing inter-block gap crosses the page limit');
     assert.strictEqual(pageEndSpacingProbe.imageIsPageEnd, true, 'the final block should suppress its unused trailing gap');
+
+    const listImageFitProbe = await page.evaluate(() => {
+      const lines = Array.from({ length: 4 }, (_, index) => {
+        const line = document.createElement('p');
+        line.className = 'xhs-p xhs-block xhs-list-line';
+        line.innerHTML = '<span class="xhs-list-marker xhs-list-marker-dot"></span><span class="xhs-list-body">列表项目 ' + (index + 1) + '</span>';
+        return line;
+      });
+      const image = document.createElement('section');
+      image.className = 'xhs-image-block xhs-block';
+      image.innerHTML = '<div class="xhs-image-frame" style="height:360px"></div>';
+      const correctListHeight = lines.reduce((total, line, index) => {
+        return total + measureBlockMetrics(line, lines[index + 1] || image).outer;
+      }, 0);
+      const imageMetrics = measureBlockMetrics(image);
+      const spare = 10;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - correctListHeight - imageMetrics.fit - spare) + 'px';
+      const result = paginateBlocks([lead, ...lines, image]);
+      return {
+        pageCount: result.length,
+        continuedMargin: measureBlockMetrics(lines[0], lines[1]).outer,
+        terminalMargin: measureBlockMetrics(lines[0], image).outer,
+      };
+    });
+    assert.ok(listImageFitProbe.continuedMargin < listImageFitProbe.terminalMargin, 'continued list items should keep their compact item gap while measuring pagination');
+    assert.strictEqual(listImageFitProbe.pageCount, 1, 'list item gaps must not be over-counted and push a fitting image to the next page');
 
     async function collectFlowOrder() {
       const count = await page.locator("#pageTabs button").count();

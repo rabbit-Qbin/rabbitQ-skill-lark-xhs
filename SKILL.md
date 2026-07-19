@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持手动分页（---）、连续分页、封面开关、主题组合、引用/卡片/序列/表格、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.8.55
+version: 0.8.56
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -203,6 +203,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 - 正文组成连续流后按 3:4 画布高度分页；**手动分页**用单独一行 `---`（细则见 `references/markdown-patterns.md`）。
 - 一级/二级标题、引用、卡片、序列、短表格、图片块默认完整保留；长表格按完整数据行跨页并重复表头。
 - 块间距只存在于相邻块之间；页面最后一个块不保留无意义的底部段间距，图片、卡片等只要块本体能放下就应留在当前页。
+- 连续序列在分页测量时保留相邻列表项上下文，不能把每一项都误算成序列末项；避免虚增项目间距后把本可放下的图片提前推到下一页（v0.8.56）。
 - 封面关闭时正文按源顺序填入下半页，不跳过放不下的块。
 - 编辑后 Studio 自动重排，无单独「重新分页」按钮。布局与导出约束见 `references/layout-spec.md`。
 
