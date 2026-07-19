@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.50";
+const VERSION = "0.8.55";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -868,8 +868,7 @@ function studioHtmlV2(payload, libs) {
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
   const bodyParagraphGap = Math.max(20, Math.round(BODY_PARAGRAPH_GAP * width / DEFAULT_WIDTH));
   const imageGridGap = Math.round(width * 0.018);
-  const songtiFont = `"Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif`;
-  const wechatFont = songtiFont;
+  const songtiFont = `"Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif`;
 
   return `<!DOCTYPE html>
 <html>
@@ -913,16 +912,27 @@ function studioHtmlV2(payload, libs) {
     button { padding: 9px 12px; font-weight: 760; cursor: pointer; }
     button.primary { background: var(--xhs-accent-strong); color: #fff; border-color: var(--xhs-accent-strong); }
     button.dark, button.active { background: #17202a; color: #fff; border-color: #17202a; }
+    button.mixed { background: linear-gradient(135deg, #17202a 0 50%, #fff 50% 100%); color: var(--xhs-accent-strong); border-color: #17202a; }
     input[type="range"] { width: 100%; accent-color: var(--xhs-accent-strong); }
     .app { display: grid; grid-template-columns: 1fr 320px; min-height: 100vh; }
     .main { padding: 20px; overflow: auto; }
     .toolbar { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 0 0 14px; }
+    .toolbar .icon-button { width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; }
+    .toolbar-icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .notice { max-width: 760px; margin: 0 auto 14px; padding: 11px 14px; border: 1px solid #f4c78b; border-radius: 10px; background: #fff7e8; color: #7a4a12; font-size: 13px; line-height: 1.55; font-weight: 700; }
     .notice.runtime-notice { border-color: #9ec5fe; background: #eef6ff; color: #174a7a; }
     .page-tabs { display: flex; gap: 7px; justify-content: center; flex-wrap: wrap; margin: 0 0 16px; }
     .page-tabs button { min-width: 42px; padding: 8px 10px; }
     .stage-wrap { width: min(70vw, 620px); aspect-ratio: ${width} / ${height}; position: relative; margin: 0 auto 24px; }
     .stage-scale { position: absolute; left: 0; top: 0; transform-origin: top left; width: ${width}px; height: ${height}px; }
+    .view-switch { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
+    .overview-rail { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 32px) / 3); gap: 16px; width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-gutter: stable; padding: 2px 4px 18px; margin: 0 auto 20px; }
+    .overview-item { min-width: 0; scroll-snap-align: start; cursor: pointer; }
+    .overview-page-label { margin: 0 0 7px; color: #667085; font-family: var(--xhs-font); font-size: 13px; font-weight: 700; text-align: center; }
+    .overview-card-frame { position: relative; width: 100%; aspect-ratio: ${width} / ${height}; overflow: hidden; border: 2px solid transparent; background: #fff; box-shadow: 0 12px 34px rgba(20, 24, 30, .12); }
+    .overview-item.active .overview-card-frame { border-color: #17202a; }
+    .overview-card-scale { position: absolute; left: 0; top: 0; width: ${width}px; height: ${height}px; transform-origin: top left; pointer-events: none; }
+    .overview-rail[hidden], .stage-wrap[hidden], .page-tabs[hidden] { display: none; }
     .xhs-card { position: relative; width: ${width}px; height: ${height}px; overflow: hidden; background-color: var(--xhs-card-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); color: #111; letter-spacing: 0; box-shadow: 0 26px 90px rgba(20, 24, 30, .18); }
     .cover-media { position: absolute; left: 0; top: 0; width: 100%; height: ${coverSplitY}px; background-color: var(--xhs-cover-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); }
     .cover-image-frame { position: relative; width: 100%; height: 100%; overflow: hidden; background-color: var(--xhs-cover-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); cursor: grab; touch-action: none; }
@@ -962,11 +972,11 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
     .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
     .xhs-card code { font-family: inherit !important; font-size: inherit !important; font-weight: inherit; font-style: inherit; line-height: inherit !important; letter-spacing: inherit !important; color: inherit; background: none; }
-    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: flex; column-gap: 0; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: ${Math.round(width * 0.013)}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
-    .xhs-heading-number { flex: 0 0 ${Math.round(headingNumberSize * 1.16)}px; width: ${Math.round(headingNumberSize * 1.16)}px; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
+    .xhs-heading-number { width: auto; min-width: 0; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
     .xhs-heading-space { display: none; }
-    .xhs-heading-title { flex: 1 1 auto; min-width: 0; margin-left: 7px; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
+    .xhs-heading-title { min-width: 0; margin-left: 0; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; min-height: var(--body-line-px) !important; height: var(--body-line-px); margin: 0 0 ${HEADING_LEVEL2_MARGIN_PX}px; padding: 0; border-bottom: 0; }
     .xhs-body-frame > .xhs-page-start.xhs-heading[data-level="2"] { margin-top: ${HEADING_LEVEL2_PAGE_START_MARGIN_PX}px; }
     .xhs-heading[data-level="2"] .xhs-heading-title { display: inline-flex; align-items: center; box-sizing: border-box; height: var(--body-line-px); flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: var(--body-font); line-height: 1; font-weight: var(--body-bold-weight); background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
@@ -976,7 +986,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-callout.xhs-card-frame { border-left: 0; border: 1.5px solid var(--xhs-underline); border-radius: 8px; background: var(--xhs-accent-pale); padding: 0.78em 0.9em; }
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
     .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: var(--body-regular-weight); }
-    .xhs-quote { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); padding: 0.62em 0.68em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #d5ded3; background: #fbfbfb; color: #303832; font-size: ${quoteBodySize}px; line-height: var(--body-line); font-style: italic; font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-quote { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); padding: 0.16em 0 0.16em 0.72em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #9a9a9a; background: transparent; color: #777; font-size: ${quoteBodySize}px; line-height: var(--body-line); font-style: normal; font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-block { margin: 0 auto var(--body-paragraph-gap); width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
@@ -1036,6 +1046,7 @@ function studioHtmlV2(payload, libs) {
       .app { grid-template-columns: 1fr; }
       .panel { max-height: none; border-left: 0; border-top: 1px solid #d8e0e8; position: relative; }
       .stage-wrap { width: min(92vw, 620px); }
+      .overview-rail { grid-auto-columns: min(82vw, 430px); }
     }
   </style>
 </head>
@@ -1045,20 +1056,26 @@ function studioHtmlV2(payload, libs) {
       ${warnings.length ? `<div class="notice">原稿里有 ${warnings.length} 个视频链接。小红书图文卡片这里只放图片，视频已跳过；需要视频请在小红书发布页单独上传，或先截帧/转图片再放入卡片。</div>` : ""}
       <div id="runtimeNotice" class="notice runtime-notice" hidden></div>
       <div class="toolbar">
-        <button id="boldBtn" class="dark">B 加粗</button>
-        <button id="headingBtn1">一级标题</button>
-        <button id="headingBtn2">二级标题</button>
-        <button id="italicBtn">引用块</button>
-        <button id="greenTextBtn">有色字</button>
-        <button id="greenUnderlineBtn">下划线</button>
-        <button id="keypointBtn">卡片</button>
-        <button id="listBtn">序列</button>
+        <button id="boldBtn" title="加粗" aria-label="加粗">B</button>
+        <button id="headingBtn1" title="一级标题" aria-label="一级标题">H1</button>
+        <button id="headingBtn2" title="二级标题" aria-label="二级标题">H2</button>
+        <button id="italicBtn" title="引用" aria-label="引用">❝</button>
+        <button id="greenTextBtn" title="有色字" aria-label="有色字">A</button>
+        <button id="greenUnderlineBtn" title="下划线" aria-label="下划线"><u>U</u></button>
+        <button id="keypointBtn" title="卡片" aria-label="卡片">▣</button>
+        <button id="listUnorderedBtn" class="icon-button" title="无序列表" aria-label="无序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
+        <button id="listOrderedBtn" class="icon-button" title="有序列表" aria-label="有序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
         <button id="saveHtmlBtn">保存编辑 HTML</button>
         <button id="exportBtn" class="primary">批量导出 PNG ZIP</button>
         <button id="resetBtn" title="清除当前编辑，恢复生成时的初始内容">一键复原</button>
       </div>
+      <div class="view-switch" role="group" aria-label="预览模式">
+        <button id="overviewModeBtn" class="active">总览编辑</button>
+        <button id="editModeBtn">单页编辑</button>
+      </div>
+      <div id="overviewRail" class="overview-rail"></div>
       <div id="pageTabs" class="page-tabs"></div>
-      <div id="stageWrap" class="stage-wrap"><div id="stageScale" class="stage-scale"></div></div>
+      <div id="stageWrap" class="stage-wrap" hidden><div id="stageScale" class="stage-scale"></div></div>
     </main>
     <aside class="panel">
       <h2>小兔Q彬 · 飞书转小红书</h2>
@@ -1087,6 +1104,7 @@ function studioHtmlV2(payload, libs) {
           <button data-paper-pattern="dot">点阵纸</button>
           <button data-paper-pattern="ruled">横线纸</button>
           <button data-paper-pattern="blueprint">蓝图格</button>
+          <button data-paper-pattern="linen">细麻纸</button>
         </div>
         <p class="tool-title">背景主题</p>
         <div class="theme-grid">
@@ -1096,6 +1114,9 @@ function studioHtmlV2(payload, libs) {
           <button data-bg-theme="gray">浅灰</button>
           <button data-bg-theme="sand">煎黄</button>
           <button data-bg-theme="blue">浅蓝</button>
+          <button data-bg-theme="yellow">浅黄</button>
+          <button data-bg-theme="pink">浅粉</button>
+          <button data-bg-theme="purple">浅紫</button>
         </div>
         <p class="tool-title">强调色</p>
         <div class="theme-grid">
@@ -1115,11 +1136,7 @@ function studioHtmlV2(payload, libs) {
           </div>
         </div>
       </div>
-      <div id="layoutTools" class="tool-group" hidden>
-        <div class="tool-row">
-          <button id="fontWechatBtn">宋体固定</button>
-          <button id="fontSongtiBtn" class="active">宋体固定</button>
-        </div>
+      <div id="layoutTools" class="tool-group">
         <label class="tool-label">封面标题字号 <input id="coverTitleRange" type="range" min="70" max="150" value="${coverTitleSize}" /></label>
         <label class="tool-label">正文字号 <input id="bodyFontRange" type="range" min="30" max="46" value="${bodyFontSize}" /></label>
         <label class="tool-label">正文行高 <input id="bodyLineRange" type="range" min="145" max="210" step="0.01" value="${bodyLineHeight * 100}" /></label>
@@ -1184,7 +1201,6 @@ function studioHtmlV2(payload, libs) {
       coverTitleSize,
       coverSubtitleSize,
       headingTitleSize,
-      wechatFont,
       songtiFont,
       warnings,
       sourceFingerprint: payload.sourceFingerprint || "",
@@ -1200,6 +1216,7 @@ function studioHtmlV2(payload, libs) {
     const embeddedState = /* XHS_EMBEDDED_STATE */ null;
     let pages = [];
     let pageIndex = 0;
+    let viewMode = 'overview';
     let selectedFrame = null;
     let selectedFlowBlock = null;
     let coverImageEnabled = true;
@@ -1247,6 +1264,9 @@ function studioHtmlV2(payload, libs) {
     const measure = document.getElementById('measure');
     const stageWrap = document.getElementById('stageWrap');
     const stageScale = document.getElementById('stageScale');
+    const overviewRail = document.getElementById('overviewRail');
+    const overviewModeBtn = document.getElementById('overviewModeBtn');
+    const editModeBtn = document.getElementById('editModeBtn');
     const pageTabs = document.getElementById('pageTabs');
     const pageInfo = document.getElementById('pageInfo');
     const runtimeNotice = document.getElementById('runtimeNotice');
@@ -1262,7 +1282,8 @@ function studioHtmlV2(payload, libs) {
     const greenTextBtn = document.getElementById('greenTextBtn');
     const greenUnderlineBtn = document.getElementById('greenUnderlineBtn');
     const keypointBtn = document.getElementById('keypointBtn');
-    const listBtn = document.getElementById('listBtn');
+    const listUnorderedBtn = document.getElementById('listUnorderedBtn');
+    const listOrderedBtn = document.getElementById('listOrderedBtn');
     const coverTools = document.getElementById('coverTools');
     const coverThemeTools = document.getElementById('coverThemeTools');
     const cardStyleTools = document.getElementById('cardStyleTools');
@@ -1273,8 +1294,6 @@ function studioHtmlV2(payload, libs) {
     const coverThemeButtons = Array.from(document.querySelectorAll('[data-cover-theme]'));
     const paperPatternButtons = Array.from(document.querySelectorAll('[data-paper-pattern]'));
     const cardStyleButtons = Array.from(document.querySelectorAll('[data-card-style]'));
-    const fontWechatBtn = document.getElementById('fontWechatBtn');
-    const fontSongtiBtn = document.getElementById('fontSongtiBtn');
     const coverTitleRange = document.getElementById('coverTitleRange');
     const bodyFontRange = document.getElementById('bodyFontRange');
     const bodyLineRange = document.getElementById('bodyLineRange');
@@ -1299,6 +1318,9 @@ function studioHtmlV2(payload, libs) {
       gray: { shell: '#eff1ef', card: '#fbfbfa' },
       sand: { shell: '#f5f1e8', card: '#fffaf0' },
       blue: { shell: '#eef3f6', card: '#fbfdff' },
+      yellow: { shell: '#f8f4e8', card: '#fffdf2' },
+      pink: { shell: '#f7eff2', card: '#fff9fb' },
+      purple: { shell: '#f3eff8', card: '#fcf9ff' },
     };
     const ACCENT_THEMES = {
       green: { accent: '#5fa66a', strong: '#2f7d3b', soft: 'rgba(95,166,106,.18)', pale: '#f4faf3', underline: '#b8ddb4' },
@@ -1339,6 +1361,11 @@ function studioHtmlV2(payload, libs) {
             pattern: 'linear-gradient(rgba(147,197,253,.42) 1px, transparent 1px), linear-gradient(90deg, rgba(147,197,253,.42) 1px, transparent 1px)',
             size: (headingUnderline / 4) + 'px ' + (headingUnderline / 4) + 'px',
           };
+        case 'linen':
+          return {
+            pattern: 'linear-gradient(88deg, rgba(80,92,101,.035) 1px, transparent 1px), linear-gradient(2deg, rgba(80,92,101,.03) 1px, transparent 1px)',
+            size: '5px 6px',
+          };
         default:
           return { pattern: 'none', size: 'auto' };
       }
@@ -1348,7 +1375,10 @@ function studioHtmlV2(payload, libs) {
       syncCardStyleUi();
     }
     function syncCardStyleUi() {
-      const selectedCard = selectedFlowBlock?.classList?.contains('xhs-callout') ? selectedFlowBlock : null;
+      const selectionInfo = activeFlowBlockAt(window.getSelection()?.anchorNode);
+      const selectedCard = selectionInfo?.type === 'card'
+        ? selectionInfo.el
+        : (selectedFlowBlock?.classList?.contains('xhs-callout') ? selectedFlowBlock : null);
       const style = selectedCard
         ? (selectedCard.classList.contains('xhs-card-frame') ? 'frame' : 'bar')
         : currentCardStyle;
@@ -1356,15 +1386,16 @@ function studioHtmlV2(payload, libs) {
     }
     function applyCardStyle(key, shouldSave = true) {
       currentCardStyle = key === 'frame' ? 'frame' : 'bar';
-      const selectedCard = selectedFlowBlock?.classList?.contains('xhs-callout') && stageScale.contains(selectedFlowBlock)
-        ? selectedFlowBlock
-        : null;
+      const selectionInfo = activeFlowBlockAt(window.getSelection()?.anchorNode);
+      const selectedCard = selectionInfo?.type === 'card'
+        ? selectionInfo.el
+        : (selectedFlowBlock?.classList?.contains('xhs-callout') && stageScale.contains(selectedFlowBlock) ? selectedFlowBlock : null);
       if (selectedCard) selectedCard.classList.toggle('xhs-card-frame', currentCardStyle === 'frame');
       syncCardStyleUi();
       if (shouldSave) saveCurrentPage();
     }
     function applyPaperPattern(key, shouldSave = true) {
-      if (!['none', 'grid', 'dot', 'ruled', 'blueprint'].includes(key)) key = 'none';
+      if (!['none', 'grid', 'dot', 'ruled', 'blueprint', 'linen'].includes(key)) key = 'none';
       currentPaperPattern = key;
       const spec = paperPatternSpec(key);
       const root = document.documentElement.style;
@@ -2891,9 +2922,81 @@ function studioHtmlV2(payload, libs) {
       return '<div class="xhs-card xhs-body-card"><div class="xhs-body-frame" contenteditable="true" spellcheck="false">' + page.html + '</div></div>';
     }
     function fitStage() {
+      if (stageWrap.hidden) return;
       const box = stageWrap.getBoundingClientRect();
       const scale = box.width / config.width;
       stageScale.style.transform = 'scale(' + scale + ')';
+    }
+    function fitOverviewCards() {
+      overviewRail.querySelectorAll('.overview-card-frame').forEach((frame) => {
+        const scale = frame.clientWidth / config.width;
+        const preview = frame.querySelector('.overview-card-scale, .stage-scale');
+        if (preview) preview.style.transform = 'scale(' + scale + ')';
+      });
+    }
+    function renderOverview() {
+      if (stageScale.parentElement !== stageWrap) stageWrap.appendChild(stageScale);
+      overviewRail.innerHTML = pages.map((page, i) =>
+        '<article class="overview-item' + (i === pageIndex ? ' active' : '') + '" data-index="' + i + '" tabindex="0" aria-label="第 ' + (i + 1) + ' 页，共 ' + pages.length + ' 页">' +
+          '<div class="overview-page-label">' + (i + 1) + '/' + pages.length + '</div>' +
+          '<div class="overview-card-frame">' + (i === pageIndex ? '' : '<div class="overview-card-scale">' + cardHtml(page) + '</div>') + '</div>' +
+        '</article>'
+      ).join('');
+      overviewRail.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
+      overviewRail.querySelectorAll('.xhs-caret-marker, .xhs-caret-anchor, .xhs-block-halo').forEach((node) => node.remove());
+      const openPage = (item, edit = false) => {
+        saveCurrentPage({ skipNormalize: true });
+        persistDraftCheckpoint();
+        pageIndex = Number(item.dataset.index);
+        selectedFrame = null;
+        if (edit) viewMode = 'edit';
+        renderAll();
+      };
+      let overviewSelectTimer = null;
+      overviewRail.querySelectorAll('.overview-item').forEach((item) => {
+        item.addEventListener('click', () => {
+          if (Number(item.dataset.index) === pageIndex) return;
+          window.clearTimeout(overviewSelectTimer);
+          overviewSelectTimer = window.setTimeout(() => openPage(item, false), 220);
+        });
+        item.addEventListener('dblclick', (event) => {
+          window.clearTimeout(overviewSelectTimer);
+          event.preventDefault();
+          openPage(item, true);
+        });
+        item.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          openPage(item, true);
+        });
+      });
+      requestAnimationFrame(() => {
+        fitOverviewCards();
+        overviewRail.querySelector('.overview-item.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    }
+    function syncViewMode() {
+      const overview = viewMode === 'overview';
+      overviewRail.hidden = !overview;
+      stageWrap.hidden = overview;
+      pageTabs.hidden = overview;
+      overviewModeBtn.classList.toggle('active', overview);
+      editModeBtn.classList.toggle('active', !overview);
+      if (overview) {
+        const activeFrame = overviewRail.querySelector('.overview-item.active .overview-card-frame');
+        if (activeFrame && stageScale.parentElement !== activeFrame) activeFrame.appendChild(stageScale);
+        requestAnimationFrame(fitOverviewCards);
+      } else {
+        if (stageScale.parentElement !== stageWrap) stageWrap.appendChild(stageScale);
+        requestAnimationFrame(fitStage);
+      }
+    }
+    function setViewMode(mode) {
+      const next = mode === 'edit' ? 'edit' : 'overview';
+      if (viewMode === next) return;
+      saveCurrentPage({ skipNormalize: true });
+      viewMode = next;
+      renderAll();
     }
     function renderTabs() {
       pageTabs.innerHTML = pages.map((_, i) => '<button class="' + (i === pageIndex ? 'active' : '') + '" data-index="' + i + '">' + String(i + 1).padStart(2, '0') + '</button>').join('');
@@ -3260,7 +3363,7 @@ function studioHtmlV2(payload, libs) {
       const marker = document.createElement('span');
       marker.className = 'xhs-caret-marker';
       marker.dataset.xhsCaretMarker = id;
-      marker.textContent = 'xhs-caret';
+      marker.textContent = '\u200B';
       range.insertNode(marker);
       range.setStartAfter(marker);
       range.collapse(true);
@@ -4036,7 +4139,8 @@ function studioHtmlV2(payload, libs) {
       halo.id = 'blockHalo';
       halo.className = 'xhs-block-halo';
       halo.style.display = 'none';
-      stageWrap.appendChild(halo);
+      const stageHost = viewMode === 'overview' ? stageScale.parentElement : stageWrap;
+      stageHost.appendChild(halo);
       const btnBefore = document.createElement('button');
       btnBefore.className = 'xhs-block-halo-btn halo-before halo-add';
       btnBefore.title = '在上方插入空行';
@@ -4083,7 +4187,7 @@ function studioHtmlV2(payload, libs) {
         if (!block || !stageScale.contains(block)) return;
         targetBlock = block;
         clearTimeout(haloHideTimer);
-        const wrapRect = stageWrap.getBoundingClientRect();
+        const wrapRect = stageHost.getBoundingClientRect();
         const blockRect = block.getBoundingClientRect();
         const scale = stageScale.getBoundingClientRect().width / config.width;
         const left = (blockRect.left - wrapRect.left);
@@ -4561,12 +4665,61 @@ function studioHtmlV2(payload, libs) {
       if (editable?.classList?.contains('cover-subtitle')) balanceCoverSubtitle();
       saveCurrentPage();
     }
+    function inlineStyleState(className, bold = false) {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return 'off';
+      const range = selection.getRangeAt(0);
+      const start = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+      if (!start || !stageScale.contains(start)) return 'off';
+      const styled = (node) => {
+        const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        if (!el) return false;
+        if (!bold) return Boolean(el.closest('.' + className));
+        if (el.closest('strong, b, .xhs-cover-bold')) return true;
+        const weight = getComputedStyle(el).fontWeight;
+        return weight === 'bold' || (Number.parseInt(weight, 10) || 0) >= 700;
+      };
+      if (range.collapsed) return styled(range.startContainer) ? 'on' : 'off';
+      const textNodes = [];
+      const walker = document.createTreeWalker(stageScale, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        if ((node.nodeValue || '').trim()) {
+          try { if (range.intersectsNode(node)) textNodes.push(node); } catch (_) {}
+        }
+        node = walker.nextNode();
+      }
+      if (!textNodes.length) return styled(range.startContainer) ? 'on' : 'off';
+      const count = textNodes.filter(styled).length;
+      return count === textNodes.length ? 'on' : (count ? 'mixed' : 'off');
+    }
+    function setToolbarButtonState(button, state) {
+      if (!button) return;
+      button.classList.toggle('active', state === 'on');
+      button.classList.toggle('mixed', state === 'mixed');
+      button.setAttribute('aria-pressed', state === 'on' ? 'true' : (state === 'mixed' ? 'mixed' : 'false'));
+    }
+    function syncToolbarState() {
+      const selection = window.getSelection();
+      const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
+      setToolbarButtonState(document.getElementById('boldBtn'), inlineStyleState('', true));
+      setToolbarButtonState(greenTextBtn, inlineStyleState('xhs-green-text'));
+      setToolbarButtonState(greenUnderlineBtn, inlineStyleState('xhs-green-underline'));
+      setToolbarButtonState(headingBtn1, info?.type === 'heading' && info.level === '1' ? 'on' : 'off');
+      setToolbarButtonState(headingBtn2, info?.type === 'heading' && info.level === '2' ? 'on' : 'off');
+      setToolbarButtonState(italicBtn, info?.type === 'quote' ? 'on' : 'off');
+      setToolbarButtonState(keypointBtn, info?.type === 'card' ? 'on' : 'off');
+      setToolbarButtonState(listUnorderedBtn, info?.type === 'list' && info.listType !== 'ordered' ? 'on' : 'off');
+      setToolbarButtonState(listOrderedBtn, info?.type === 'list' && info.listType === 'ordered' ? 'on' : 'off');
+    }
     function syncPanelTools() {
       const isCover = pages[pageIndex]?.type === 'cover';
+      const selectionInfo = activeFlowBlockAt(window.getSelection()?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (coverTools) coverTools.hidden = !isCover;
       if (coverThemeTools) coverThemeTools.hidden = !isCover || !coverImageEnabled;
-      if (cardStyleTools) cardStyleTools.hidden = !(selectedFlowBlock?.classList?.contains('xhs-callout'));
+      if (cardStyleTools) cardStyleTools.hidden = selectionInfo?.type !== 'card';
       syncCardStyleUi();
+      syncToolbarState();
       if (coverImageOnBtn && coverImageOffBtn) {
         coverImageOnBtn.classList.toggle('active', coverImageEnabled);
         coverImageOffBtn.classList.toggle('active', !coverImageEnabled);
@@ -4853,8 +5006,10 @@ function studioHtmlV2(payload, libs) {
     }
     function renderAll() {
       renderTabs();
-      fitStage();
+      renderOverview();
+      syncViewMode();
       renderStage();
+      fitStage();
       renderImageList();
       syncImageTools();
       syncPanelTools();
@@ -4890,15 +5045,6 @@ function studioHtmlV2(payload, libs) {
       root.setProperty('--body-line-px', (fontSize * lineHeight) + 'px');
       root.setProperty('--cover-title-size', coverTitleRange.value + 'px');
       if (!schedule) return;
-      saveCurrentPage();
-      window.clearTimeout(layoutReflowTimer);
-      layoutReflowTimer = window.setTimeout(reflow, 280);
-    }
-    function setFontMode(mode) {
-      const isSongti = mode === 'songti';
-      document.documentElement.style.setProperty('--xhs-font', isSongti ? config.songtiFont : config.wechatFont);
-      fontWechatBtn.classList.toggle('active', !isSongti);
-      fontSongtiBtn.classList.toggle('active', isSongti);
       saveCurrentPage();
       window.clearTimeout(layoutReflowTimer);
       layoutReflowTimer = window.setTimeout(reflow, 280);
@@ -5448,9 +5594,16 @@ function studioHtmlV2(payload, libs) {
         return [block];
       }
       if (targetType === 'list') {
+        const listType = targetLevel === 'ordered' ? 'ordered' : 'unordered';
+        if (info.type === 'list') {
+          return flowBlockListBodies(info).map((body, index) => buildListLine({
+            html: normalizeInlineHtml(body.innerHTML),
+            plain: cleanText(body.textContent),
+          }, listType, index + 1, { preserveBodyHtml: true }));
+        }
         const html = stripListMarkerFromHtml(normalizeInlineHtml(flowBlockContentHtml(info)));
         const plain = stripLeadingListMarkerText(cleanText(flowBlockPlainText(info)));
-        return [buildListLine({ html, plain })];
+        return [buildListLine({ html, plain }, listType, 1)];
       }
       return [];
     }
@@ -5486,7 +5639,9 @@ function studioHtmlV2(payload, libs) {
       const selection = window.getSelection();
       const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
-      const sameType = info.type === targetType && (targetType !== 'heading' || info.level === targetLevel);
+      const sameType = info.type === targetType &&
+        (targetType === 'heading' ? info.level === targetLevel :
+          (targetType === 'list' ? info.listType === targetLevel : true));
       let replacements = [];
       if (sameType) {
         if (info.type === 'list') {
@@ -5711,8 +5866,9 @@ function studioHtmlV2(payload, libs) {
       item.range.deleteContents();
       item.range.insertNode(frag);
     }
-    function makeListBlock() {
-      if (tryToggleOrSwitchFlowBlock('list')) return;
+    function makeListBlock(listType = 'unordered') {
+      const normalizedType = listType === 'ordered' ? 'ordered' : 'unordered';
+      if (tryToggleOrSwitchFlowBlock('list', normalizedType)) return;
       const item = getStageSelection();
       if (!item) {
         alert('请先选中要变成序列的文字。');
@@ -5726,7 +5882,7 @@ function studioHtmlV2(payload, libs) {
         alert('请先选中至少一行文字。多段/多行会拆成多条序列。');
         return;
       }
-      const lines = buildListLines(collected.items);
+      const lines = buildListLines(collected.items, normalizedType);
       insertListLines(lines, collected, parent);
       item.selection.removeAllRanges();
       saveCurrentPage();
@@ -6410,6 +6566,11 @@ function studioHtmlV2(payload, libs) {
       renderAll();
       restoreReflowCaretMarker(caretMarkerId);
       restoreReflowCaretFallback();
+      const leakedCaretMarkers = Array.from(stageScale.querySelectorAll('.xhs-caret-marker'));
+      if (leakedCaretMarkers.length) {
+        leakedCaretMarkers.forEach((marker) => marker.remove());
+        saveCurrentPage({ skipNormalize: true });
+      }
       const rememberedBlock = findImageBlockById(stageScale, rememberedImageId);
       const frame = rememberedBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);
@@ -6423,7 +6584,7 @@ function studioHtmlV2(payload, libs) {
         recordEditorHistory();
       }, true);
     });
-    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listBtn].forEach((button) => {
+    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listUnorderedBtn, listOrderedBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
       button?.addEventListener('click', () => recordEditorHistory(), true);
     });
@@ -6434,11 +6595,12 @@ function studioHtmlV2(payload, libs) {
     greenTextBtn.addEventListener('click', applyGreenText);
     greenUnderlineBtn.addEventListener('click', applyGreenUnderline);
     keypointBtn.addEventListener('click', makeKeypointBlock);
-    listBtn?.addEventListener('click', makeListBlock);
+    listUnorderedBtn?.addEventListener('click', () => makeListBlock('unordered'));
+    listOrderedBtn?.addEventListener('click', () => makeListBlock('ordered'));
+    overviewModeBtn?.addEventListener('click', () => setViewMode('overview'));
+    editModeBtn?.addEventListener('click', () => setViewMode('edit'));
     coverImageOnBtn?.addEventListener('click', () => applyCoverImageMode(true));
     coverImageOffBtn?.addEventListener('click', () => applyCoverImageMode(false));
-    fontWechatBtn.addEventListener('click', () => setFontMode('wechat'));
-    fontSongtiBtn.addEventListener('click', () => setFontMode('songti'));
     bgThemeButtons.forEach((button) => button.addEventListener('click', () => applyBackgroundTheme(button.dataset.bgTheme)));
     accentThemeButtons.forEach((button) => button.addEventListener('click', () => applyAccentTheme(button.dataset.accentTheme)));
     coverThemeButtons.forEach((button) => button.addEventListener('click', () => applyCoverTheme(button.dataset.coverTheme)));
@@ -6468,6 +6630,10 @@ function studioHtmlV2(payload, libs) {
     document.addEventListener('selectionchange', () => {
       if (!stageScale?.isConnected) return;
       syncPanelTools();
+    });
+    window.addEventListener('resize', () => {
+      fitStage();
+      fitOverviewCards();
     });
     document.addEventListener('keydown', (event) => {
       if (isHistoryShortcut(event) || isComposingText) return;

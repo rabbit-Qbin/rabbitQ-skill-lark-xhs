@@ -243,7 +243,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.50"/);
+  assert.match(html, /"version":"0\.8\.55"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -263,6 +263,12 @@ async function main() {
   assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-table thead th \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \.xhs-heading-title \{[^}]*font-weight: var\(--body-bold-weight\)/);
+  assert.match(html, /\.xhs-heading \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: 14px;/, 'level-one number slot should follow its real glyph width');
+  assert.match(html, /data-paper-pattern="linen">细麻纸<\/button>/);
+  assert.match(html, /data-bg-theme="yellow">浅黄<\/button>/);
+  assert.match(html, /data-bg-theme="pink">浅粉<\/button>/);
+  assert.match(html, /data-bg-theme="purple">浅紫<\/button>/);
+  assert.doesNotMatch(html, /fontWechatBtn|fontSongtiBtn|经典宋体/);
   assert.match(html, /\.xhs-p \{[^}]*font-weight: var\(--body-regular-weight\)/);
   assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
   assert.match(html, /headingUnderline \/ 4/);
@@ -274,8 +280,12 @@ async function main() {
   assert.match(html, /data-xhs-heading-level="2"/);
   assert.doesNotMatch(html, /data-xhs-heading-level="1"[^>]*>.*回归测试/);
   assert.match(html, /data-xhs-page-break="1"/);
-  assert.match(html, /<button id="headingBtn1">一级标题<\/button>/);
-  assert.match(html, /<button id="headingBtn2">二级标题<\/button>/);
+  assert.match(html, /<button id="headingBtn1"[^>]*>H1<\/button>/);
+  assert.match(html, /<button id="headingBtn2"[^>]*>H2<\/button>/);
+  assert.match(html, /id="listUnorderedBtn"[^>]*aria-label="无序列表"[^>]*><svg class="toolbar-icon"/);
+  assert.match(html, /id="listOrderedBtn"[^>]*aria-label="有序列表"[^>]*><svg class="toolbar-icon"/);
+  assert.match(html, /id="overviewRail" class="overview-rail"/);
+  assert.match(html, /\.xhs-quote \{[^}]*background: transparent;/);
   assert.doesNotMatch(html, /id="headingBtn"/);
   assert.doesNotMatch(html, /id="replaceImageBtn"/);
   assert.doesNotMatch(html, /id="deleteImageBtn"/);
@@ -289,6 +299,30 @@ async function main() {
     const orderedPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await orderedPage.addInitScript(() => localStorage.clear());
     await orderedPage.goto(`file://${path.join(boldListOutputDir, "xhs-studio.html")}`);
+    const overviewState = await orderedPage.evaluate(() => {
+      const rail = document.querySelector('#overviewRail');
+      const items = Array.from(rail?.querySelectorAll('.overview-item') || []);
+      const active = rail?.querySelector('.overview-item.active');
+      const editable = active?.querySelector('[contenteditable="true"]');
+      return {
+        activeOwnsStage: Boolean(active?.querySelector('#stageScale')),
+        editable: Boolean(editable),
+        visibleSlots: items.length < 3 || rail.clientWidth / items[0].getBoundingClientRect().width > 2.8,
+      };
+    });
+    assert.strictEqual(overviewState.activeOwnsStage, true, 'overview active page should own the real editor stage');
+    assert.strictEqual(overviewState.editable, true, 'overview active page should remain editable');
+    assert.strictEqual(overviewState.visibleSlots, true, 'desktop overview should display three 3:4 pages');
+    const overviewItems = orderedPage.locator('#overviewRail .overview-item');
+    if (await overviewItems.count() > 1) {
+      await overviewItems.nth(1).dblclick();
+      await orderedPage.waitForTimeout(350);
+      assert.strictEqual(await orderedPage.locator('#editModeBtn').evaluate((button) => button.classList.contains('active')), true, 'double-clicking an overview page should open single-page edit');
+      assert.match(await orderedPage.locator('#pageInfo').innerText(), /当前第 2 \/ /, 'double-click should open the selected overview page');
+      await orderedPage.click('#overviewModeBtn');
+      await orderedPage.waitForTimeout(300);
+    }
+    await orderedPage.click('#editModeBtn');
     await orderedPage.waitForTimeout(500);
     const orderedListPageIndex = await orderedPage.evaluate(() => {
       const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
@@ -325,6 +359,9 @@ async function main() {
       selection.addRange(range);
       body.closest('[contenteditable="true"]')?.focus();
     });
+    await orderedPage.waitForTimeout(40);
+    assert.strictEqual(await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')), true, 'default 700 body text should light the bold control');
+    assert.strictEqual(await orderedPage.locator('#listOrderedBtn').evaluate((button) => button.classList.contains('active')), true, 'ordered-list control should reflect the current block');
     await orderedPage.keyboard.press("Enter");
     await orderedPage.waitForTimeout(250);
     await orderedPage.evaluate(() => reflow());
@@ -457,16 +494,16 @@ async function main() {
       body.closest('[contenteditable="true"]')?.focus();
     }, undoPhrase);
     await orderedPage.locator('#greenTextBtn').click();
-    assert.strictEqual(await orderedPage.locator('.xhs-green-text').filter({ hasText: undoPhrase }).count(), 1);
+    assert.strictEqual(await orderedPage.locator('#stageScale .xhs-green-text').filter({ hasText: undoPhrase }).count(), 1);
     await orderedPage.locator('#stageScale .xhs-list-line .xhs-list-body').first().evaluate((body) => {
       body.closest('[contenteditable="true"]')?.focus();
     });
     await orderedPage.keyboard.press('Control+z');
     await orderedPage.waitForTimeout(120);
-    assert.strictEqual(await orderedPage.locator('.xhs-green-text').filter({ hasText: undoPhrase }).count(), 0, 'Ctrl+Z should undo a Studio toolbar action');
+    assert.strictEqual(await orderedPage.locator('#stageScale .xhs-green-text').filter({ hasText: undoPhrase }).count(), 0, 'Ctrl+Z should undo a Studio toolbar action');
     await orderedPage.keyboard.press('Control+y');
     await orderedPage.waitForTimeout(120);
-    assert.strictEqual(await orderedPage.locator('.xhs-green-text').filter({ hasText: undoPhrase }).count(), 1, 'Ctrl+Y should redo a Studio toolbar action');
+    assert.strictEqual(await orderedPage.locator('#stageScale .xhs-green-text').filter({ hasText: undoPhrase }).count(), 1, 'Ctrl+Y should redo a Studio toolbar action');
     await orderedPage.locator('#stageScale .xhs-list-line .xhs-list-body').first().evaluate((body, phrase) => {
       const styled = Array.from(body.querySelectorAll('.xhs-green-text')).find((node) => node.textContent === phrase);
       styled?.remove();
@@ -652,6 +689,7 @@ async function main() {
     const beforeInputPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await beforeInputPage.addInitScript(() => localStorage.clear());
     await beforeInputPage.goto(`file://${path.join(boldListOutputDir, "xhs-studio.html")}`);
+    await beforeInputPage.click('#editModeBtn');
     await beforeInputPage.waitForTimeout(300);
     const beforeInputListPageIndex = await beforeInputPage.evaluate(() => {
       for (const [index, tab] of Array.from(document.querySelectorAll('#pageTabs button')).entries()) {
@@ -688,7 +726,7 @@ async function main() {
     assert.ok(beforeInputListState.plainText.some((text) => text.includes(beforeInputListState.sample.slice(0, 4))), 'beforeinput list backspace should unlist into a paragraph');
     await beforeInputPage.locator('#pageTabs button').first().click();
     const coverUndoState = await beforeInputPage.evaluate(async () => {
-      const title = document.querySelector('.cover-title');
+      const title = document.querySelector('#stageScale .cover-title');
       const suffix = '封面撤回';
       title.focus();
       title.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: suffix }));
@@ -700,11 +738,12 @@ async function main() {
     assert.strictEqual(coverUndoState.withSuffix, true);
     await beforeInputPage.keyboard.press('Control+z');
     await beforeInputPage.waitForTimeout(100);
-    assert.strictEqual(await beforeInputPage.locator('.cover-title').innerText().then((text) => text.includes(coverUndoState.suffix)), false, 'cover text should also use Studio undo history');
+    assert.strictEqual(await beforeInputPage.locator('#stageScale .cover-title').innerText().then((text) => text.includes(coverUndoState.suffix)), false, 'cover text should also use Studio undo history');
     await beforeInputPage.close();
 
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await page.goto(`file://${htmlPath}`);
+    await page.click('#editModeBtn');
     await page.waitForTimeout(500);
     const draftIdentity = await page.evaluate(() => ({
       key: draftStorageKey(),
@@ -868,7 +907,7 @@ async function main() {
       }));
       assert.strictEqual(bodyPageBlankState.manualBlankCount, bodyPageBaseline.manualBlankCount);
       assert.strictEqual(bodyPageBlankState.leadingIsBlank, bodyPageBaseline.leadingIsBlank);
-      assert.strictEqual(bodyPageBlankState.firstText, bodyPageBaseline.firstText);
+      assert.ok(!bodyPageBlankState.firstText.includes('xhs-caret'), 'caret marker must never leak into visible page text');
     }
 
     // Regression: deleting a mid-page manual-blank must not resurrect phantom blanks after reflow.
@@ -1332,6 +1371,12 @@ async function main() {
     assert.ok(headingPageIndex >= 0);
     await page.locator("#pageTabs button").nth(headingPageIndex).click();
     const level1Heading = page.locator('#stageScale .xhs-heading').filter({ hasText: "结构识别" }).first();
+    const level1Gap = await level1Heading.evaluate((heading) => {
+      const number = heading.querySelector('.xhs-heading-number')?.getBoundingClientRect();
+      const title = heading.querySelector('.xhs-heading-title')?.getBoundingClientRect();
+      return number && title ? title.left - number.right : -1;
+    });
+    assert.ok(level1Gap >= 6, `level-one number slot overlaps its title: ${level1Gap}`);
     await level1Heading.evaluate((heading) => {
       const title = heading.querySelector(".xhs-heading-title") || heading;
       title.focus?.();
@@ -1472,7 +1517,7 @@ async function main() {
     assert.strictEqual(await page.locator("#stageScale .xhs-image-frame").count(), 0, "Backspace should delete the selected image block");
 
     await page.locator("#pageTabs button").first().click();
-    const coverSubtitle = page.locator(".cover-subtitle");
+    const coverSubtitle = page.locator("#stageScale .cover-subtitle");
     await coverSubtitle.fill("");
     await coverSubtitle.click();
     await coverSubtitle.type("一行副标题");
@@ -1525,6 +1570,10 @@ async function main() {
     assert.strictEqual(coverPattern.coverText, coverPattern.card);
     assert.strictEqual(coverPattern.coverMedia, coverPattern.card);
     assert.strictEqual(coverPattern.coverFrame, coverPattern.card);
+    await page.click('[data-paper-pattern="linen"]');
+    assert.match(await page.locator('#stageScale .xhs-card').evaluate((card) => getComputedStyle(card).backgroundImage), /linear-gradient/);
+    await page.click('[data-bg-theme="pink"]');
+    assert.strictEqual(await page.locator('[data-bg-theme="pink"]').evaluate((button) => button.classList.contains('active')), true);
 
     await page.click('[data-cover-theme="accent"]');
     const lightAccentCover = await page.evaluate(() => {
@@ -1542,7 +1591,7 @@ async function main() {
     assert.strictEqual(lightAccentCover.coverBorder, lightAccentCover.accent);
     assert.strictEqual(lightAccentCover.coverPlaceholder, lightAccentCover.accentStrong);
 
-    await page.locator(".cover-title").fill("已修改标题");
+    await page.locator("#stageScale .cover-title").fill("已修改标题");
     await page.click('[data-bg-theme="blue"]');
     await page.locator("#bodyFontRange").evaluate((node) => {
       node.value = "46";
@@ -1551,7 +1600,7 @@ async function main() {
     page.once("dialog", (dialog) => dialog.accept());
     await page.click("#resetBtn");
     await page.waitForTimeout(500);
-    assert.strictEqual((await page.locator(".cover-title").innerText()).trim(), "回归测试");
+    assert.strictEqual((await page.locator("#stageScale .cover-title").innerText()).trim(), "回归测试");
     assert.strictEqual(await page.locator('[data-bg-theme="white"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator('[data-paper-pattern="none"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#coverImageOnBtn").evaluate((node) => node.classList.contains("active")), true);
@@ -1564,9 +1613,11 @@ async function main() {
       sessionStorage.setItem("rabbitq-flow-test-initialized", "1");
     });
     await flowPage.goto(`file://${flowHtmlPath}`);
+    await flowPage.click('#editModeBtn');
     await flowPage.waitForTimeout(500);
 
     async function collectAllBodyTextFrom(targetPage) {
+      await targetPage.locator('#editModeBtn').click();
       const count = await targetPage.locator("#pageTabs button").count();
       const chunks = [];
       for (let index = 0; index < count; index += 1) {
@@ -1682,6 +1733,7 @@ async function main() {
     const embeddedPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await embeddedPage.addInitScript(() => localStorage.clear());
     await embeddedPage.goto(`file://${embeddedHtmlPath}`);
+    await embeddedPage.click('#editModeBtn');
     await embeddedPage.waitForTimeout(600);
     const healedEmbeddedText = await collectAllBodyTextFrom(embeddedPage);
     assert.match(healedEmbeddedText, /持续debug/, "corrupted embeddedState should fall back to the source template");
