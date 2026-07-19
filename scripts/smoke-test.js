@@ -243,7 +243,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.56"/);
+  assert.match(html, /"version":"0\.8\.57"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -313,6 +313,25 @@ async function main() {
     assert.strictEqual(overviewState.activeOwnsStage, true, 'overview active page should own the real editor stage');
     assert.strictEqual(overviewState.editable, true, 'overview active page should remain editable');
     assert.strictEqual(overviewState.visibleSlots, true, 'desktop overview should display three 3:4 pages');
+    const overviewSubtitle = orderedPage.locator('#overviewRail .overview-item.active .cover-subtitle');
+    if (await overviewSubtitle.count()) {
+      await overviewSubtitle.fill('第一行');
+      await overviewSubtitle.click();
+      await orderedPage.keyboard.press('Shift+Enter');
+      await orderedPage.keyboard.type('第二行');
+      assert.strictEqual(
+        await orderedPage.locator('#overviewModeBtn').evaluate((button) => button.classList.contains('active')),
+        true,
+        'typing a subtitle line break in overview should not open single-page edit',
+      );
+      assert.match(await overviewSubtitle.innerText(), /第一行\r?\n+第二行/, 'overview subtitle should keep the inserted line break');
+      await overviewSubtitle.dblclick();
+      assert.strictEqual(
+        await orderedPage.locator('#overviewModeBtn').evaluate((button) => button.classList.contains('active')),
+        true,
+        'double-clicking editable overview text should select text without opening single-page edit',
+      );
+    }
     const overviewItems = orderedPage.locator('#overviewRail .overview-item');
     if (await overviewItems.count() > 1) {
       await overviewItems.nth(1).dblclick();

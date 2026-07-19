@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.56";
+const VERSION = "0.8.57";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2961,6 +2961,13 @@ function studioHtmlV2(payload, libs) {
         if (edit) viewMode = 'edit';
         renderAll();
       };
+      const targetsOverviewEditor = (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return false;
+        return Boolean(target.closest(
+          '[contenteditable="true"], input, textarea, select, button, a, .xhs-image-frame, .cover-image-frame, .xhs-resize-handle'
+        ));
+      };
       let overviewSelectTimer = null;
       overviewRail.querySelectorAll('.overview-item').forEach((item) => {
         item.addEventListener('click', () => {
@@ -2969,12 +2976,13 @@ function studioHtmlV2(payload, libs) {
           overviewSelectTimer = window.setTimeout(() => openPage(item, false), 220);
         });
         item.addEventListener('dblclick', (event) => {
+          if (targetsOverviewEditor(event)) return;
           window.clearTimeout(overviewSelectTimer);
           event.preventDefault();
           openPage(item, true);
         });
         item.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter') return;
+          if (event.key !== 'Enter' || targetsOverviewEditor(event)) return;
           event.preventDefault();
           openPage(item, true);
         });
