@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.58";
+const VERSION = "0.8.59";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2549,6 +2549,25 @@ function studioHtmlV2(payload, libs) {
       const metrics = measureBlockMetrics(node);
       return ignoreTrailingMargin ? metrics.fit : metrics.outer;
     }
+    function minimumFollowingHeightForHeading(node) {
+      if (!node || node.dataset?.xhsPageBreak === '1') return 0;
+      const probe = node.cloneNode(true);
+      wrapBodyTextLines(probe);
+      const metrics = measureBlockMetrics(probe);
+      const lineHeight = config.bodyFontSize * config.bodyLineHeight;
+      if (isSplittableTextBlock(probe)) return Math.min(metrics.fit, lineHeight);
+      if (probe.classList.contains('xhs-callout') || probe.classList.contains('xhs-table-block')) {
+        return Math.min(metrics.fit, lineHeight * 2);
+      }
+      return metrics.fit;
+    }
+    function headingShouldMoveWithNext(block, nextNode, remaining, limit = config.pageLimit) {
+      if (!block?.classList?.contains('xhs-heading') || !nextNode) return false;
+      const followingHeight = minimumFollowingHeightForHeading(nextNode);
+      if (!followingHeight) return false;
+      const combinedHeight = measureBlockMetrics(block, nextNode).outer + followingHeight;
+      return combinedHeight <= limit && combinedHeight > remaining;
+    }
     function htmlFromNodes(nodes) {
       const clones = nodes.map((node) => node.cloneNode?.(true) || node);
       clones.forEach((node) => node.classList?.remove('xhs-page-end', 'xhs-page-start'));
@@ -2791,7 +2810,7 @@ function studioHtmlV2(payload, libs) {
           let h = metrics.outer;
           let fitHeight = metrics.fit;
           let remaining = config.pageLimit - used;
-          if (current.length && block.classList.contains('xhs-heading') && block.dataset.level !== '2' && remaining < 160) {
+          if (current.length && headingShouldMoveWithNext(block, nextSourceBlock, remaining)) {
             pushPage();
             remaining = config.pageLimit;
           }
@@ -2862,6 +2881,10 @@ function studioHtmlV2(payload, libs) {
           const h = metrics.outer;
           const fitHeight = metrics.fit;
           const remaining = tailLimit - used;
+          if (tailNodes.length && headingShouldMoveWithNext(block, nextSourceBlock, remaining, tailLimit)) {
+            pending = null;
+            continue;
+          }
           if (fitHeight > remaining && isSplittableBlock(block)) {
             const split = splitBlockToFit(block, Math.max(remaining, tailLimit));
             if (split) {
@@ -6594,6 +6617,18 @@ function studioHtmlV2(payload, libs) {
       if (frame) selectFrame(frame);
       return true;
     }
+    function savedPagesContainOrphanHeading() {
+      return pages.slice(0, -1).some((page) => {
+        const html = page?.type === 'cover' ? (page.tailHtml || '') : (page?.html || '');
+        if (!html) return false;
+        const holder = document.createElement('div');
+        holder.innerHTML = html;
+        const blocks = Array.from(holder.children).filter((node) =>
+          !node.classList?.contains('xhs-caret-anchor') && node.dataset?.xhsPageBreak !== '1'
+        );
+        return Boolean(blocks[blocks.length - 1]?.classList?.contains('xhs-heading'));
+      });
+    }
     document.querySelectorAll('.toolbar button, .panel button, .panel input[type="range"]').forEach((control) => {
       control.addEventListener('pointerdown', () => {
         historyTypingActive = false;
@@ -6695,13 +6730,16 @@ function studioHtmlV2(payload, libs) {
       }
     });
     window.addEventListener('resize', fitStage);
-    if (!restoreSavedStudioState()) {
+    const restoredSavedState = restoreSavedStudioState();
+    if (!restoredSavedState) {
       applyBackgroundTheme(DEFAULT_BG_THEME, false);
       applyAccentTheme(DEFAULT_ACCENT_THEME, false);
       applyPaperPattern('none', false);
       applyCardStyle('bar', false);
       applyLayout(false);
       paginate();
+    } else if (savedPagesContainOrphanHeading()) {
+      window.setTimeout(() => reflow(), 0);
     }
   </script>
 </body>

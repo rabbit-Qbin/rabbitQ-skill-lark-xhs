@@ -243,7 +243,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.58"/);
+  assert.match(html, /"version":"0\.8\.59"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -821,6 +821,53 @@ async function main() {
     });
     assert.ok(listImageFitProbe.continuedMargin < listImageFitProbe.terminalMargin, 'continued list items should keep their compact item gap while measuring pagination');
     assert.strictEqual(listImageFitProbe.pageCount, 1, 'list item gaps must not be over-counted and push a fitting image to the next page');
+
+    const headingKeepWithNextProbe = await page.evaluate(() => {
+      const sourceBlocks = extractBlocksFromTemplate();
+      const sourceHeading = sourceBlocks.find((node) => node.classList?.contains('xhs-heading'));
+      const sourceQuote = sourceBlocks.find((node) => node.classList?.contains('xhs-quote'));
+      if (!sourceHeading || !sourceQuote) return { supported: false };
+      const heading = sourceHeading.cloneNode(true);
+      heading.dataset.level = '2';
+      const quote = sourceQuote.cloneNode(true);
+      const headingOuter = measureBlockMetrics(heading, quote).outer;
+      const quoteFit = measureBlockMetrics(quote).fit;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - headingOuter - quoteFit + 8) + 'px';
+      const result = paginateBlocks([lead, heading, quote]);
+      const first = document.createElement('div');
+      first.innerHTML = result[0]?.html || '';
+      const second = document.createElement('div');
+      second.innerHTML = result[1]?.html || '';
+      return {
+        supported: true,
+        pageCount: result.length,
+        firstHasHeading: Boolean(first.querySelector('.xhs-heading')),
+        secondStartsWithHeading: Boolean(second.firstElementChild?.classList.contains('xhs-heading')),
+        secondHasQuote: Boolean(second.querySelector('.xhs-quote')),
+      };
+    });
+    assert.strictEqual(headingKeepWithNextProbe.supported, true);
+    assert.strictEqual(headingKeepWithNextProbe.pageCount, 2);
+    assert.strictEqual(headingKeepWithNextProbe.firstHasHeading, false, 'a heading must not be stranded at the bottom of the previous page');
+    assert.strictEqual(headingKeepWithNextProbe.secondStartsWithHeading, true, 'a heading should move to the next page with its following block');
+    assert.strictEqual(headingKeepWithNextProbe.secondHasQuote, true, 'the following structural block should remain with its heading');
+
+    const savedOrphanHeadingProbe = await page.evaluate(() => {
+      const previousPages = pages;
+      try {
+        pages = [
+          { type: 'cover', html: '', tailHtml: '' },
+          { type: 'body', html: '<section class="xhs-heading xhs-block" data-level="2">引用</section>' },
+          { type: 'body', html: '<section class="xhs-quote xhs-block">我是引用</section>' },
+        ];
+        return savedPagesContainOrphanHeading();
+      } finally {
+        pages = previousPages;
+      }
+    });
+    assert.strictEqual(savedOrphanHeadingProbe, true, 'saved drafts with a heading at the page end should trigger one corrective reflow on load');
 
     const emptyParagraphPaginationProbe = await page.evaluate(() => {
       const lead = document.createElement('section');
