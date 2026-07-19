@@ -243,7 +243,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.57"/);
+  assert.match(html, /"version":"0\.8\.58"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -821,6 +821,133 @@ async function main() {
     });
     assert.ok(listImageFitProbe.continuedMargin < listImageFitProbe.terminalMargin, 'continued list items should keep their compact item gap while measuring pagination');
     assert.strictEqual(listImageFitProbe.pageCount, 1, 'list item gaps must not be over-counted and push a fitting image to the next page');
+
+    const emptyParagraphPaginationProbe = await page.evaluate(() => {
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - 10) + 'px';
+      const blank = makeEmptyParagraph();
+      const following = document.createElement('p');
+      following.className = 'xhs-p xhs-block';
+      following.textContent = '空行后的正文';
+      const result = paginateBlocks([lead, blank, following]);
+      const first = document.createElement('div');
+      first.innerHTML = result[0]?.html || '';
+      const second = document.createElement('div');
+      second.innerHTML = result[1]?.html || '';
+      return {
+        pageCount: result.length,
+        firstHasBlank: Boolean(first.querySelector('.xhs-manual-blank')),
+        secondStartsWithBlank: Boolean(second.firstElementChild?.classList.contains('xhs-manual-blank')),
+        secondText: second.textContent?.trim() || '',
+        secondHasLeadingBlank: Boolean(second.firstElementChild?.classList.contains('xhs-manual-blank')),
+      };
+    });
+    assert.strictEqual(emptyParagraphPaginationProbe.pageCount, 2, 'an empty paragraph near a page edge should continue in normal document flow');
+    assert.strictEqual(emptyParagraphPaginationProbe.firstHasBlank, false, 'an empty paragraph that does not fit must move forward instead of being hidden on the previous page');
+    assert.strictEqual(emptyParagraphPaginationProbe.secondStartsWithBlank, true, 'the empty paragraph must remain immediately before its following paragraph');
+    assert.strictEqual(emptyParagraphPaginationProbe.secondText, '空行后的正文');
+    assert.strictEqual(emptyParagraphPaginationProbe.secondHasLeadingBlank, true, 'page boundaries must not delete an intentional empty paragraph');
+
+    const paragraphInteractionProbe = await page.evaluate(() => {
+      const frame = document.createElement('div');
+      frame.contentEditable = 'true';
+      frame.style.position = 'fixed';
+      frame.style.left = '-10000px';
+      document.body.appendChild(frame);
+      const setCaret = (node, offset) => {
+        frame.focus();
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return range;
+      };
+      const reset = (text) => {
+        frame.innerHTML = '';
+        const paragraph = document.createElement('p');
+        paragraph.className = 'xhs-p xhs-block';
+        paragraph.textContent = text;
+        frame.appendChild(paragraph);
+        return paragraph;
+      };
+
+      const middle = reset('甲乙');
+      performParagraphEnter(frame, setCaret(middle.firstChild, 1));
+      const middleState = Array.from(frame.children).map((node) => ({
+        text: node.textContent || '',
+        blank: node.classList.contains('xhs-manual-blank'),
+      }));
+
+      const end = reset('正文');
+      performParagraphEnter(frame, setCaret(end.firstChild, end.firstChild.textContent.length));
+      const firstEmptyParagraph = frame.lastElementChild;
+      performParagraphEnter(frame, setCaret(firstEmptyParagraph, 0));
+      const activeParagraph = frame.lastElementChild;
+      activeParagraph.textContent = '下一段';
+      normalizeFilledManualBlanks(frame);
+      const doubleEnterState = Array.from(frame.children).map((node) => ({
+        text: node.textContent || '',
+        blank: node.classList.contains('xhs-manual-blank'),
+      }));
+
+      const soft = reset('甲乙');
+      const softRange = setCaret(soft.firstChild, 1);
+      const lineBreak = document.createElement('br');
+      softRange.insertNode(lineBreak);
+      softRange.setStartAfter(lineBreak);
+      softRange.collapse(true);
+      const softState = {
+        blockCount: frame.children.length,
+        lineBreakCount: soft.querySelectorAll('br').length,
+        text: soft.textContent || '',
+      };
+      frame.remove();
+      return { middleState, doubleEnterState, softState };
+    });
+    assert.deepStrictEqual(paragraphInteractionProbe.middleState, [
+      { text: '甲', blank: false },
+      { text: '乙', blank: false },
+    ], 'Enter in the middle of body text should split one paragraph into two paragraphs');
+    assert.deepStrictEqual(paragraphInteractionProbe.doubleEnterState, [
+      { text: '正文', blank: false },
+      { text: '', blank: true },
+      { text: '下一段', blank: false },
+    ], 'two Enter presses followed by typing should leave exactly one editable empty paragraph');
+    assert.deepStrictEqual(paragraphInteractionProbe.softState, {
+      blockCount: 1,
+      lineBreakCount: 1,
+      text: '甲乙',
+    }, 'Shift+Enter semantics should keep a soft line break inside the same paragraph block');
+
+    await page.locator('#pageTabs button').nth(1).click();
+    await page.waitForTimeout(100);
+    const plainParagraphBlankDeleteProbe = await page.evaluate(() => {
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      if (!frame) return { supported: false };
+      const blank = makeEmptyParagraph();
+      const paragraph = document.createElement('p');
+      paragraph.className = 'xhs-p xhs-block';
+      paragraph.textContent = '普通正文空行删除回归';
+      frame.prepend(paragraph);
+      frame.prepend(blank);
+      frame.focus();
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      frame.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+      const blankRemoved = !blank.isConnected;
+      paragraph.remove();
+      cancelPendingReflow();
+      return { supported: true, blankRemoved };
+    });
+    assert.strictEqual(plainParagraphBlankDeleteProbe.supported, true);
+    assert.strictEqual(plainParagraphBlankDeleteProbe.blankRemoved, true, 'Backspace at the start of plain body text should remove a leading manual blank');
 
     async function collectFlowOrder() {
       const count = await page.locator("#pageTabs button").count();

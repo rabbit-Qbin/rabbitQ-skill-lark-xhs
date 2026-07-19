@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.57";
+const VERSION = "0.8.58";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -3709,7 +3709,6 @@ function studioHtmlV2(payload, libs) {
     function performParagraphEnter(frame, range) {
       const block = directFlowChild(frame, range.startContainer, range.startOffset);
       const isManualBlank = Boolean(block?.classList?.contains('xhs-manual-blank') || block?.dataset?.xhsManualBlank === '1');
-      if (paragraphEnterKeydownHandled && !isManualBlank) return false;
       if (!isManualBlank && !isEditableParagraphBlock(block)) return false;
       saveCurrentPage({ skipNormalize: true });
       persistDraftCheckpoint();
@@ -4067,7 +4066,7 @@ function studioHtmlV2(payload, libs) {
       window.clearTimeout(paragraphEnterKeydownTimer);
       paragraphEnterKeydownTimer = window.setTimeout(() => {
         paragraphEnterKeydownHandled = false;
-      }, 320);
+      }, 0);
     }
     function scheduleParagraphOverflowCheck(frame) {
       scheduleOverflowReflow(false);
@@ -4116,7 +4115,9 @@ function studioHtmlV2(payload, libs) {
         if (event.type === 'keydown' || event.type === 'beforeinput') markManualBlankDeleteHandled();
         return true;
       }
-      if (!isStructuralHaloBlock(block)) return false;
+      const supportsAdjacentBlankDelete = isStructuralHaloBlock(block) ||
+        isEditableParagraphBlock(block) || block.classList.contains('xhs-list-line');
+      if (!supportsAdjacentBlankDelete) return false;
       const field = caretFieldForBlock(block, range.startContainer);
       const atBlockStart = isCaretAtFlowBlockStart(range, block);
       const headingNumber = block.classList.contains('xhs-heading')
