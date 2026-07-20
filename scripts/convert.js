@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.69";
+const VERSION = "0.8.70";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -3453,7 +3453,10 @@ function studioHtmlV2(payload, libs) {
       range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
-      saveCurrentPage();
+      // The page was normalized during pagination already. Running the full
+      // normalizer here can replace the paragraph node that now owns the
+      // restored Range, which leaves Chromium with no live caret.
+      saveCurrentPage({ skipNormalize: true });
       return true;
     }
     function restoreReflowCaretFallback() {
@@ -3472,7 +3475,7 @@ function studioHtmlV2(payload, libs) {
       if (!selection) return false;
       selection.removeAllRanges();
       selection.addRange(range);
-      saveCurrentPage();
+      saveCurrentPage({ skipNormalize: true });
       return true;
     }
     function setCaretInside(node) {
@@ -3822,7 +3825,17 @@ function studioHtmlV2(payload, libs) {
         }
       }
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(true);
+      // Unlisting changes an atomic list row into splittable prose. Reflow it
+      // before the next physical key event so a second Backspace sees the
+      // paragraph in its real continuous-flow position (including across a
+      // page boundary). The zero-delay task is intentional: rebuilding the
+      // contenteditable inside its own keydown dispatch makes Chromium discard
+      // the selection after this handler returns.
+      cancelPendingReflow();
+      reflowTimer = window.setTimeout(() => {
+        reflow();
+        reflowForcePending = false;
+      }, 0);
       return true;
     }
     function handleListEnter(event) {

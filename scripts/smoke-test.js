@@ -35,6 +35,8 @@ async function main() {
     "",
     "## 01 结构识别",
     "",
+    "序列前的普通正文。",
+    "",
     "- Alt + 拖动：卡片和图片整块移动",
     "- 重新分页：改完内容一键重排",
     "",
@@ -274,7 +276,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.69"/);
+  assert.match(html, /"version":"0\.8\.70"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -1688,18 +1690,62 @@ async function main() {
       return { sample, lineClass: line?.className || "" };
     });
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(500);
-    const afterUnlist = await page.locator("#stageScale .xhs-body-card .xhs-body-frame").first().evaluate((frame, sample) => ({
-      listLineCount: frame.querySelectorAll(".xhs-list-line").length,
-      plainCount: Array.from(frame.querySelectorAll(".xhs-p")).filter((node) => (
-        !node.classList.contains("xhs-manual-blank") &&
-        !node.classList.contains("xhs-caret-anchor") &&
-        (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
-      )).length,
-    }), unlistState.sample);
+    await page.waitForTimeout(120);
+    const afterUnlist = await page.evaluate((sample) => {
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const startElement = range?.startContainer?.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range?.startContainer?.parentElement;
+      const paragraph = startElement?.closest?.(".xhs-p");
+      const before = document.createRange();
+      if (paragraph && range) {
+        before.selectNodeContents(paragraph);
+        before.setEnd(range.startContainer, range.startOffset);
+      }
+      return {
+        listLineCount: document.querySelectorAll("#stageScale .xhs-list-line").length,
+        plainCount: Array.from(document.querySelectorAll("#stageScale .xhs-p")).filter((node) => (
+          !node.classList.contains("xhs-manual-blank") &&
+          !node.classList.contains("xhs-caret-anchor") &&
+          (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
+        )).length,
+        caretParagraphText: paragraph?.textContent || "",
+        caretPrefix: paragraph && range ? before.toString() : "missing",
+      };
+    }, unlistState.sample);
     assert.ok(afterUnlist.plainCount >= 1, "list line should become plain paragraph after backspace at line start");
+    assert.ok(afterUnlist.caretParagraphText.includes(unlistState.sample.slice(0, 6)), "caret should stay in the unlisted paragraph after immediate reflow: " + JSON.stringify(afterUnlist));
+    assert.strictEqual(afterUnlist.caretPrefix, "", "caret should remain at the start of the unlisted paragraph");
 
-    await page.locator("#pageTabs button").nth(listPageIndex).click();
+    // Regression: a second Backspace must use normal prose flow instead of
+    // leaving an invisible list boundary behind.
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(700);
+    const afterSecondBackspace = await page.evaluate((sample) => {
+      const paragraphs = Array.from(document.querySelectorAll("#stageScale .xhs-p"));
+      const merged = paragraphs.find((node) => (
+        (node.textContent || "").includes("序列前的普通正文。") &&
+        (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
+      ));
+      return {
+        mergedText: merged?.textContent || "",
+        plainSampleCount: paragraphs.filter((node) => (node.textContent || "").includes(sample.slice(0, 6))).length,
+      };
+    }, unlistState.sample);
+    assert.ok(afterSecondBackspace.mergedText.includes("序列前的普通正文。" + unlistState.sample), "second Backspace should merge the unlisted paragraph into preceding prose");
+    assert.strictEqual(afterSecondBackspace.plainSampleCount, 1, "unlisted prose should not retain a duplicate or hidden list boundary");
+
+    const remainingListPageIndex = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (Array.from(document.querySelectorAll("#stageScale .xhs-list-body")).some((node) => (node.textContent || "").includes("重新分页"))) return index;
+      }
+      return -1;
+    });
+    assert.ok(remainingListPageIndex >= 0, "expected remaining list item after unlisting the first item");
+    await page.locator("#pageTabs button").nth(remainingListPageIndex).click();
     await page.waitForTimeout(100);
     const listBodyWithContent = page.locator("#stageScale .xhs-list-line .xhs-list-body").filter({ hasText: "重新分页" });
     await listBodyWithContent.first().evaluate((body) => {
