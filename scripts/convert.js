@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.68";
+const VERSION = "0.8.69";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2791,27 +2791,6 @@ function studioHtmlV2(payload, libs) {
       if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
       return null;
     }
-    function matchingListType(first, second) {
-      return Boolean(first?.classList?.contains('xhs-list-line') &&
-        second?.classList?.contains('xhs-list-line') &&
-        (first.dataset.listType || 'unordered') === (second.dataset.listType || 'unordered'));
-    }
-    function listRunMetricsAt(blocks, startIndex) {
-      const first = blocks[startIndex];
-      if (!first?.classList?.contains('xhs-list-line')) return null;
-      if (startIndex > 0 && matchingListType(blocks[startIndex - 1], first)) return null;
-      let fit = 0;
-      let endIndex = startIndex;
-      while (endIndex < blocks.length && matchingListType(first, blocks[endIndex])) {
-        const node = blocks[endIndex].cloneNode(true);
-        wrapBodyTextLines(node);
-        const next = matchingListType(first, blocks[endIndex + 1]) ? blocks[endIndex + 1] : null;
-        const metrics = measureBlockMetrics(node, next);
-        fit += next ? metrics.outer : metrics.fit;
-        endIndex += 1;
-      }
-      return { fit, endIndex };
-    }
     function paginateBlocks(blocks) {
       const nextPages = [];
       let current = [];
@@ -2827,18 +2806,6 @@ function studioHtmlV2(payload, libs) {
         if (sourceBlock.dataset?.xhsPageBreak === '1') {
           pushPage();
           continue;
-        }
-        const followingListRun = sourceBlock.classList?.contains('xhs-heading')
-          ? listRunMetricsAt(blocks, sourceIndex + 1)
-          : null;
-        if (followingListRun && current.length) {
-          const headingHeight = measureBlockMetrics(sourceBlock, nextSourceBlock).outer;
-          const combinedHeight = headingHeight + followingListRun.fit;
-          if (combinedHeight <= config.pageLimit && combinedHeight > config.pageLimit - used) pushPage();
-        }
-        const listRun = listRunMetricsAt(blocks, sourceIndex);
-        if (listRun && current.length && listRun.fit <= config.pageLimit && listRun.fit > config.pageLimit - used) {
-          pushPage();
         }
         let pending = sourceBlock.cloneNode(true);
         while (pending) {
@@ -2909,23 +2876,6 @@ function studioHtmlV2(payload, libs) {
         }
         if (tailClosed) {
           rest.push(sourceBlock);
-          continue;
-        }
-        const followingListRun = sourceBlock.classList?.contains('xhs-heading')
-          ? listRunMetricsAt(blocks, sourceIndex + 1)
-          : null;
-        if (followingListRun) {
-          const headingHeight = measureBlockMetrics(sourceBlock, nextSourceBlock).outer;
-          if (headingHeight + followingListRun.fit > tailLimit - used) {
-            rest.push(sourceBlock);
-            tailClosed = true;
-            continue;
-          }
-        }
-        const listRun = listRunMetricsAt(blocks, sourceIndex);
-        if (listRun && (listRun.fit > tailLimit || (tailNodes.length && listRun.fit > tailLimit - used))) {
-          rest.push(sourceBlock);
-          tailClosed = true;
           continue;
         }
         let pending = sourceBlock.cloneNode(true);

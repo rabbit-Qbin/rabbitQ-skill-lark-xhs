@@ -274,7 +274,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.68"/);
+  assert.match(html, /"version":"0\.8\.69"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -1179,7 +1179,7 @@ async function main() {
     assert.ok(listImageFitProbe.continuedMargin < listImageFitProbe.terminalMargin, 'continued list items should keep their compact item gap while measuring pagination');
     assert.strictEqual(listImageFitProbe.pageCount, 1, 'list item gaps must not be over-counted and push a fitting image to the next page');
 
-    const atomicListProbe = await page.evaluate(() => {
+    const flowingListProbe = await page.evaluate(() => {
       const lines = Array.from({ length: 4 }, (_, index) => {
         const line = document.createElement('p');
         line.className = 'xhs-p xhs-block xhs-list-line';
@@ -1187,14 +1187,11 @@ async function main() {
         line.innerHTML = '<span class="xhs-list-marker xhs-list-marker-ordered">' + (index + 1) + '.</span><span class="xhs-list-body">整组换页测试 ' + (index + 1) + '</span>';
         return line;
       });
-      const runFit = lines.reduce((total, line, index) => {
-        const next = lines[index + 1] || null;
-        const metrics = measureBlockMetrics(line, next);
-        return total + (next ? metrics.outer : metrics.fit);
-      }, 0);
+      const firstHeight = measureBlockMetrics(lines[0], lines[1]).outer;
+      const secondHeight = measureBlockMetrics(lines[1], lines[2]).outer;
       const lead = document.createElement('section');
       lead.className = 'xhs-block';
-      lead.style.height = Math.max(1, config.pageLimit - runFit + 20) + 'px';
+      lead.style.height = Math.max(1, config.pageLimit - firstHeight - secondHeight - 10) + 'px';
       const result = paginateBlocks([lead, ...lines]);
       return result.map((item) => {
         const holder = document.createElement('div');
@@ -1202,7 +1199,7 @@ async function main() {
         return holder.querySelectorAll('.xhs-list-line').length;
       });
     });
-    assert.deepStrictEqual(atomicListProbe, [0, 4], 'a list that fits on one page must move as one structural block');
+    assert.deepStrictEqual(flowingListProbe, [2, 2], 'a sequence should flow across pages between complete list items');
 
     const atomicCalloutProbe = await page.evaluate(() => {
       const callout = document.createElement('section');
