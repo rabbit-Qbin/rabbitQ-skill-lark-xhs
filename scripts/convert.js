@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.63";
+const VERSION = "0.8.65";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -869,7 +869,7 @@ function studioHtmlV2(payload, libs) {
   const bodyParagraphGap = Math.max(20, Math.round(BODY_PARAGRAPH_GAP * width / DEFAULT_WIDTH));
   const headingNumberSlotWidth = Math.round(headingNumberSize * 1.48);
   const headingNumberTitleGap = Math.max(16, Math.round(width * 0.017));
-  const codeBodySize = Math.max(24, Math.round(28 * width / DEFAULT_WIDTH));
+  const codeBodySize = Math.max(28, Math.round(32 * width / DEFAULT_WIDTH));
   const imageGridGap = Math.round(width * 0.018);
   const songtiFont = `"Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif`;
 
@@ -999,7 +999,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-code-dot.yellow { background: #febc2e; }
     .xhs-code-dot.green { background: #28c840; }
     .xhs-code-language { margin-left: auto; color: #aeb4c2; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: ${Math.max(16, Math.round(width * 0.018))}px; line-height: 1; font-weight: 650; }
-    .xhs-code-content { margin: 0; padding: ${Math.round(width * 0.019)}px ${Math.round(width * 0.023)}px ${Math.round(width * 0.022)}px; min-height: 1.6em; outline: none; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; tab-size: 2; color: #f4f6fb; font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace !important; font-size: ${codeBodySize}px !important; line-height: 1.58 !important; font-weight: 650; letter-spacing: 0 !important; }
+    .xhs-code-content { margin: 0; padding: ${Math.round(width * 0.021)}px ${Math.round(width * 0.023)}px ${Math.round(width * 0.024)}px; min-height: 1.6em; outline: none; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; tab-size: 2; color: #f4f6fb; font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace !important; font-size: ${codeBodySize}px !important; line-height: 1.55 !important; font-weight: 650; letter-spacing: 0 !important; }
     .xhs-code-content code { color: inherit; font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit; white-space: inherit; }
     .xhs-image-block { margin: 0 auto var(--body-paragraph-gap); width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
@@ -5211,6 +5211,17 @@ function studioHtmlV2(payload, libs) {
       if (!parent || !stageScale.contains(parent)) return null;
       return { selection, range };
     }
+    function proseBlockForRange(range) {
+      if (!range) return null;
+      const closestProse = (node) => {
+        const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        return element?.closest?.('.xhs-p, .xhs-rich') || null;
+      };
+      const startBlock = closestProse(range.startContainer);
+      const endBlock = closestProse(range.endContainer);
+      if (!startBlock || startBlock !== endBlock || !stageScale.contains(startBlock)) return null;
+      return startBlock;
+    }
     function unwrapElement(el) {
       const parent = el.parentNode;
       if (!parent) return;
@@ -5618,8 +5629,8 @@ function studioHtmlV2(payload, libs) {
       const existingLevel1 = stageScale.querySelectorAll('.xhs-heading[data-level="1"], .xhs-heading:not([data-level])');
       return String(existingLevel1.length + 1).padStart(2, '0');
     }
-    // Shared cross-switch model for the four flow-block style buttons
-    // (一级标题 / 二级标题 / 引用块 / 卡片 / 序列): placing the caret inside
+    // Shared cross-switch model for the flow-block style buttons
+    // (一级标题 / 二级标题 / 引用块 / 卡片 / 代码块 / 序列): placing the caret inside
     // any one of them and clicking a different button's style converts the
     // block in place; clicking the same style again converts it back to
     // plain paragraph(s).
@@ -5751,6 +5762,12 @@ function studioHtmlV2(payload, libs) {
     }
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
       const selection = window.getSelection();
+      if (selection?.rangeCount && !selection.isCollapsed) {
+        const range = selection.getRangeAt(0);
+        const startInfo = activeFlowBlockAt(range.startContainer);
+        const endInfo = activeFlowBlockAt(range.endContainer);
+        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) return false;
+      }
       const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
       const sameType = info.type === targetType &&
@@ -5853,36 +5870,37 @@ function studioHtmlV2(payload, libs) {
     }
     function makeCodeBlock() {
       if (tryToggleOrSwitchFlowBlock('code')) return;
-      const editable = stageScale.querySelector('.xhs-body-card .xhs-body-frame') ||
-        stageScale.querySelector('.xhs-cover-tail-frame');
-      if (!editable) return;
       const item = getStageSelection();
-      let block = makeNewCodeBlock('', 'Code');
-      if (item) {
-        const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-          ? item.range.commonAncestorContainer
-          : item.range.commonAncestorContainer.parentElement;
-        const sourceBlock = parent?.closest?.('.xhs-p, .xhs-rich');
-        if (item.range.collapsed && sourceBlock && stageScale.contains(sourceBlock)) {
-          block = makeNewCodeBlock(textWithBreaks(sourceBlock), 'Code');
-          sourceBlock.replaceWith(block);
-        } else if (!item.range.collapsed) {
-          const fragment = item.range.extractContents();
-          const holder = document.createElement('div');
-          holder.appendChild(fragment);
-          block = makeNewCodeBlock(textWithBreaks(holder), 'Code');
-          if (sourceBlock && stageScale.contains(sourceBlock) && rangeCoversEntireBlock(item.range, sourceBlock)) {
-            sourceBlock.replaceWith(block);
-          } else {
-            item.range.insertNode(block);
-          }
-        } else {
-          item.range.insertNode(block);
-        }
-        item.selection.removeAllRanges();
-      } else {
-        insertNodesAtSelection([block], editable);
+      if (!item) {
+        alert('请先选中要放进代码块的文字。');
+        return;
       }
+      const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? item.range.commonAncestorContainer
+        : item.range.commonAncestorContainer.parentElement;
+      if (blockNestHost(parent)) {
+        alert('这里已经是卡片/引用/序列/代码块内容，请用块样式按钮直接互切，不要再嵌套代码块。');
+        return;
+      }
+      const sourceBlock = proseBlockForRange(item.range);
+      if (!sourceBlock) {
+        alert('代码块一次只转换一个正文段落，请不要跨段或整页选择。');
+        return;
+      }
+      const preview = document.createElement('div');
+      preview.appendChild(item.range.cloneContents());
+      if (!cleanText(preview.textContent)) {
+        alert('请先选中有效文字。');
+        return;
+      }
+      const coversEntireBlock = rangeCoversEntireBlock(item.range, sourceBlock);
+      const fragment = item.range.extractContents();
+      const holder = document.createElement('div');
+      holder.appendChild(fragment);
+      const block = makeNewCodeBlock(textWithBreaks(holder), 'Code');
+      if (coversEntireBlock) sourceBlock.replaceWith(block);
+      else item.range.insertNode(block);
+      item.selection.removeAllRanges();
       focusFlowBlock(block);
       selectFlowBlock(block);
       normalizeNestedFlowBlocks(stageScale);

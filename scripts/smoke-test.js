@@ -250,7 +250,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.63"/);
+  assert.match(html, /"version":"0\.8\.65"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -792,21 +792,110 @@ async function main() {
     assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
     assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
 
-    const sourceCodeProbe = await page.evaluate(() => {
-      const code = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-code-block'));
-      return code ? {
-        language: code.querySelector('.xhs-code-language')?.textContent || '',
-        text: code.querySelector('.xhs-code-content')?.textContent || '',
-        editable: code.querySelector('.xhs-code-content')?.getAttribute('contenteditable') || '',
-        dots: code.querySelectorAll('.xhs-code-dot').length,
-      } : null;
+  const sourceCodeProbe = await page.evaluate(() => {
+    const code = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-code-block'));
+    if (!code) return null;
+    const rendered = code.cloneNode(true);
+    rendered.style.position = 'fixed';
+    rendered.style.left = '0';
+    rendered.style.top = '0';
+    rendered.style.width = '936px';
+    rendered.style.zIndex = '-1';
+    document.body.appendChild(rendered);
+    const renderedDots = Array.from(rendered.querySelectorAll('.xhs-code-dot'));
+    const dotCenters = renderedDots.map((dot) => {
+      const rect = dot.getBoundingClientRect();
+      return rect.top + rect.height / 2;
     });
-    assert.deepStrictEqual(sourceCodeProbe, {
-      language: 'JavaScript',
-      text: "const studio = 'rabbitQ';\nconsole.log(studio);",
-      editable: 'true',
-      dots: 3,
-    }, 'fenced code should become an editable macOS-style code window');
+    const dotSizes = renderedDots.map((dot) => getComputedStyle(dot).width);
+    const toolbarStyle = getComputedStyle(rendered.querySelector('.xhs-code-toolbar'));
+    const codeStyle = getComputedStyle(rendered.querySelector('.xhs-code-content'));
+    const languageStyle = getComputedStyle(rendered.querySelector('.xhs-code-language'));
+    const toolbarBorder = toolbarStyle.borderBottomWidth;
+    const toolbarHeight = toolbarStyle.height;
+    const codeFontSize = codeStyle.fontSize;
+    const codeLineHeight = codeStyle.lineHeight;
+    const languageFontSize = languageStyle.fontSize;
+    rendered.remove();
+    return code ? {
+      language: code.querySelector('.xhs-code-language')?.textContent || '',
+      text: code.querySelector('.xhs-code-content')?.textContent || '',
+      editable: code.querySelector('.xhs-code-content')?.getAttribute('contenteditable') || '',
+      dots: code.querySelectorAll('.xhs-code-dot').length,
+      dotCenters,
+      dotSizes,
+      toolbarBorder,
+      toolbarHeight,
+      codeFontSize,
+      codeLineHeight,
+      languageFontSize,
+    } : null;
+  });
+  assert.strictEqual(sourceCodeProbe?.language, 'JavaScript');
+  assert.strictEqual(sourceCodeProbe?.text, "const studio = 'rabbitQ';\nconsole.log(studio);");
+  assert.strictEqual(sourceCodeProbe?.editable, 'true');
+  assert.strictEqual(sourceCodeProbe?.dots, 3, 'fenced code should render three macOS dots');
+  assert.ok(Math.max(...sourceCodeProbe.dotCenters) - Math.min(...sourceCodeProbe.dotCenters) < 0.1, 'macOS dots should share one horizontal center line');
+  assert.deepStrictEqual(sourceCodeProbe.dotSizes, ['12px', '12px', '12px'], 'macOS dots should retain the original 12px size');
+  assert.strictEqual(sourceCodeProbe?.toolbarBorder, '1px', 'code toolbar should keep its horizontal divider');
+  assert.strictEqual(sourceCodeProbe?.toolbarHeight, '46px', 'code toolbar should retain its original height');
+  assert.strictEqual(sourceCodeProbe?.codeFontSize, '32px', 'code content should use 32px text');
+  assert.ok(Math.abs(parseFloat(sourceCodeProbe?.codeLineHeight) - 49.6) < 0.2, '32px code text should use a 1.55 line height');
+  assert.strictEqual(sourceCodeProbe?.languageFontSize, '19px', 'code language label should retain its original size');
+
+  const codeSelectionGuard = await page.evaluate(() => {
+    const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+    let frame = null;
+    let paragraphs = [];
+    for (const tab of tabs) {
+      tab.click();
+      const candidate = document.querySelector('#stageScale .xhs-body-frame');
+      const prose = Array.from(candidate?.querySelectorAll(':scope > .xhs-p:not(.xhs-caret-anchor), :scope > .xhs-rich') || [])
+        .filter((node) => cleanText(node.textContent));
+      if (candidate && prose.length >= 2) {
+        frame = candidate;
+        paragraphs = prose;
+        break;
+      }
+    }
+    if (!frame || paragraphs.length < 2) throw new Error('missing two prose blocks for code selection guard');
+    clearSelectedFlowBlock();
+    const beforeText = frame.textContent;
+    const beforeCodeCount = frame.querySelectorAll('.xhs-code-block').length;
+    const firstText = paragraphs[0].firstChild || paragraphs[0];
+    const secondText = paragraphs[1].lastChild || paragraphs[1];
+    const range = document.createRange();
+    range.setStart(firstText, 0);
+    range.setEnd(secondText, secondText.nodeType === Node.TEXT_NODE ? secondText.textContent.length : secondText.childNodes.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+    const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer.parentElement;
+    const startProse = startElement?.closest?.('.xhs-p, .xhs-rich') || null;
+    const endProse = endElement?.closest?.('.xhs-p, .xhs-rich') || null;
+    const selectionProbe = {
+      collapsed: range.collapsed,
+      sameProse: startProse === endProse,
+      helperFoundProse: Boolean(proseBlockForRange(range)),
+      startText: cleanText(startProse?.textContent || ''),
+      endText: cleanText(endProse?.textContent || ''),
+    };
+    let alertText = '';
+    const originalAlert = window.alert;
+    window.alert = (message) => { alertText = String(message || ''); };
+    document.getElementById('codeBtn').click();
+    window.alert = originalAlert;
+    return {
+      alertText,
+      textUnchanged: frame.textContent === beforeText,
+      codeCountUnchanged: frame.querySelectorAll('.xhs-code-block').length === beforeCodeCount,
+      selectionProbe,
+    };
+  });
+  assert.match(codeSelectionGuard.alertText, /跨段或整页/, `multi-block code conversion should explain why it was rejected: ${JSON.stringify(codeSelectionGuard)}`);
+  assert.strictEqual(codeSelectionGuard.textUnchanged, true, 'multi-block code conversion must preserve the whole page text');
+  assert.strictEqual(codeSelectionGuard.codeCountUnchanged, true, 'multi-block code conversion must not create a page-sized code block');
 
     const pageEndSpacingProbe = await page.evaluate(() => {
       const image = document.createElement('section');
