@@ -59,6 +59,11 @@ async function main() {
     "| 半页封面 | 标题 + 首段同页 | 5 |",
     ...Array.from({ length: 18 }, (_, index) => `| 长表第 ${index + 1} 行 | 跨页时保持完整数据行 | ${index + 9} |`),
     "",
+    "```JavaScript",
+    "const studio = 'rabbitQ';",
+    "console.log(studio);",
+    "```",
+    "",
     "![回归测试图片](fixture.png)",
     "",
     "---",
@@ -66,6 +71,8 @@ async function main() {
     "### 二级小标题回归",
     "",
     "**项目**：rabbitQ-skill-lark-xhs（GitHub）",
+    "",
+    "> （注：部分内容可能由 AI 生成）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
   const fixturePng = Buffer.from(
@@ -243,7 +250,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.59"/);
+  assert.match(html, /"version":"0\.8\.63"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -258,18 +265,31 @@ async function main() {
   assert.match(html, /--body-list-item-gap: 20px;/);
   assert.match(html, /\.xhs-list-line:not\(:has\(\+ \.xhs-list-line\)\) \{ margin-bottom: var\(--body-paragraph-gap\); \}/);
   assert.match(html, /--body-line-px: 58px;/);
-  assert.match(html, /--body-regular-weight: 700;/);
+  assert.match(html, /--body-regular-weight: 720;/);
   assert.match(html, /--body-bold-weight: 720;/);
+  assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
+  assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-table thead th \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \.xhs-heading-title \{[^}]*font-weight: var\(--body-bold-weight\)/);
-  assert.match(html, /\.xhs-heading \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: 14px;/, 'level-one number slot should follow its real glyph width');
+  assert.match(html, /\.xhs-heading \{[^}]*grid-template-columns: 129px minmax\(0, 1fr\);[^}]*column-gap: 18px;/, 'level-one headings should reserve one consistent two-digit number slot');
+  assert.match(html, /\.xhs-heading-number \{[^}]*justify-content: center;[^}]*font-variant-numeric: tabular-nums;/);
+  assert.match(html, /data-xhs-block-type="code" data-code-language="JavaScript"/);
+  assert.match(html, /\.xhs-code-block \{[^}]*background: #17191f;/);
+  assert.match(html, /id="codeBtn"[^>]*aria-label="代码块"/);
+  assert.doesNotMatch(html, /部分内容可能由 AI 生成/);
+  const mainTemplate = html.match(/<template id="wechatTemplate">([\s\S]*?)<\/template>/)?.[1] || '';
+  assert.doesNotMatch(mainTemplate, /data-xhs-auto-underline/, 'Markdown bold must not silently receive an underline style');
+  assert.match(html, /const EXPORT_RENDER_SCALE = 2;/);
+  assert.match(html, /scale: EXPORT_RENDER_SCALE/);
+  assert.match(html, /imageSmoothingQuality = 'high'/);
   assert.match(html, /data-paper-pattern="linen">细麻纸<\/button>/);
   assert.match(html, /data-bg-theme="yellow">浅黄<\/button>/);
   assert.match(html, /data-bg-theme="pink">浅粉<\/button>/);
   assert.match(html, /data-bg-theme="purple">浅紫<\/button>/);
   assert.doesNotMatch(html, /fontWechatBtn|fontSongtiBtn|经典宋体/);
   assert.match(html, /\.xhs-p \{[^}]*font-weight: var\(--body-regular-weight\)/);
+  assert.match(html, /\.xhs-p span,[^}]*\.xhs-table span \{[^}]*font-weight: inherit !important;/);
   assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
   assert.match(html, /headingUnderline \/ 4/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \{[\s\S]*?margin: 0 0 40px;/, "二级标题只保留下间距，避免与前一结构块叠加");
@@ -379,7 +399,7 @@ async function main() {
       body.closest('[contenteditable="true"]')?.focus();
     });
     await orderedPage.waitForTimeout(40);
-    assert.strictEqual(await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')), true, 'default 700 body text should light the bold control');
+    assert.strictEqual(await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')), true, 'default 720 body text should light the bold control');
     assert.strictEqual(await orderedPage.locator('#listOrderedBtn').evaluate((button) => button.classList.contains('active')), true, 'ordered-list control should reflect the current block');
     await orderedPage.keyboard.press("Enter");
     await orderedPage.waitForTimeout(250);
@@ -411,7 +431,7 @@ async function main() {
       };
     });
     assert.ok(Math.abs(orderedSpacing.gap - 9) < 0.2, "sequence marker gap should equal 9px");
-    assert.strictEqual(orderedSpacing.lineWeight, "700", "sequence body should use the regular 700 weight");
+    assert.strictEqual(orderedSpacing.lineWeight, "720", "sequence body should use the unified 720 weight");
     assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
     assert.strictEqual(orderedSpacing.markerFontSize, orderedSpacing.bodyFontSize, "ordered sequence marker should match its body text size");
     assert.ok(Math.abs(orderedSpacing.markerHeight - orderedSpacing.bodyLineHeight) < 0.2, "ordered marker should occupy the body line box for vertical centering");
@@ -430,7 +450,7 @@ async function main() {
         bold: bold ? getComputedStyle(bold).fontWeight : '',
       };
     });
-    assert.strictEqual(bodyWeights.normal, "700", "regular body text should use weight 700");
+    assert.strictEqual(bodyWeights.normal, "720", "body text should use the unified default weight 720");
     assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
 
     // Regression: Chinese IME composition must not trigger save, normalization, or reflow
@@ -772,6 +792,22 @@ async function main() {
     assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
     assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
 
+    const sourceCodeProbe = await page.evaluate(() => {
+      const code = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-code-block'));
+      return code ? {
+        language: code.querySelector('.xhs-code-language')?.textContent || '',
+        text: code.querySelector('.xhs-code-content')?.textContent || '',
+        editable: code.querySelector('.xhs-code-content')?.getAttribute('contenteditable') || '',
+        dots: code.querySelectorAll('.xhs-code-dot').length,
+      } : null;
+    });
+    assert.deepStrictEqual(sourceCodeProbe, {
+      language: 'JavaScript',
+      text: "const studio = 'rabbitQ';\nconsole.log(studio);",
+      editable: 'true',
+      dots: 3,
+    }, 'fenced code should become an editable macOS-style code window');
+
     const pageEndSpacingProbe = await page.evaluate(() => {
       const image = document.createElement('section');
       image.className = 'xhs-image-block xhs-block';
@@ -870,31 +906,54 @@ async function main() {
     assert.strictEqual(savedOrphanHeadingProbe, true, 'saved drafts with a heading at the page end should trigger one corrective reflow on load');
 
     const emptyParagraphPaginationProbe = await page.evaluate(() => {
-      const lead = document.createElement('section');
-      lead.className = 'xhs-block';
-      lead.style.height = Math.max(1, config.pageLimit - 10) + 'px';
       const blank = makeEmptyParagraph();
       const following = document.createElement('p');
       following.className = 'xhs-p xhs-block';
       following.textContent = '空行后的正文';
-      const result = paginateBlocks([lead, blank, following]);
+      const boundaryLead = document.createElement('section');
+      boundaryLead.className = 'xhs-block';
+      boundaryLead.style.height = Math.max(1, config.pageLimit - 10) + 'px';
+      const result = paginateBlocks([boundaryLead, blank, following]);
+      const refillLead = document.createElement('section');
+      refillLead.className = 'xhs-block';
+      refillLead.style.height = Math.max(1, config.pageLimit - measureBlockMetrics(following).fit - 8) + 'px';
+      const refillWithBlank = paginateBlocks([refillLead, blank, following]);
+      const afterDelete = paginateBlocks([refillLead, following]);
       const first = document.createElement('div');
       first.innerHTML = result[0]?.html || '';
       const second = document.createElement('div');
+      second.className = 'xhs-body-frame';
+      second.style.position = 'fixed';
+      second.style.left = '-10000px';
+      second.style.top = '0';
       second.innerHTML = result[1]?.html || '';
+      document.body.appendChild(second);
+      const leadingBlank = second.firstElementChild;
+      const followingNode = leadingBlank?.nextElementSibling;
+      const leadingBlankHeight = leadingBlank?.getBoundingClientRect().height ?? -1;
+      const followingOffset = followingNode ? followingNode.getBoundingClientRect().top - second.getBoundingClientRect().top : -1;
+      second.remove();
       return {
         pageCount: result.length,
         firstHasBlank: Boolean(first.querySelector('.xhs-manual-blank')),
-        secondStartsWithBlank: Boolean(second.firstElementChild?.classList.contains('xhs-manual-blank')),
+        secondStartsWithBlank: Boolean(leadingBlank?.classList.contains('xhs-manual-blank')),
         secondText: second.textContent?.trim() || '',
-        secondHasLeadingBlank: Boolean(second.firstElementChild?.classList.contains('xhs-manual-blank')),
+        leadingBlankHeight,
+        followingOffset,
+        refillPageCountWithBlank: refillWithBlank.length,
+        pageCountAfterDelete: afterDelete.length,
+        firstPageTextAfterDelete: afterDelete[0]?.html || '',
       };
     });
     assert.strictEqual(emptyParagraphPaginationProbe.pageCount, 2, 'an empty paragraph near a page edge should continue in normal document flow');
     assert.strictEqual(emptyParagraphPaginationProbe.firstHasBlank, false, 'an empty paragraph that does not fit must move forward instead of being hidden on the previous page');
     assert.strictEqual(emptyParagraphPaginationProbe.secondStartsWithBlank, true, 'the empty paragraph must remain immediately before its following paragraph');
     assert.strictEqual(emptyParagraphPaginationProbe.secondText, '空行后的正文');
-    assert.strictEqual(emptyParagraphPaginationProbe.secondHasLeadingBlank, true, 'page boundaries must not delete an intentional empty paragraph');
+    assert.ok(emptyParagraphPaginationProbe.leadingBlankHeight <= 0.1, 'a preserved blank at the start of a page must not create a visible empty first line');
+    assert.ok(emptyParagraphPaginationProbe.followingOffset <= 0.1, 'text after a boundary blank should start at the first visible line');
+    assert.strictEqual(emptyParagraphPaginationProbe.refillPageCountWithBlank, 2, 'an intentional blank may push the following paragraph to a new page');
+    assert.strictEqual(emptyParagraphPaginationProbe.pageCountAfterDelete, 1, 'deleting the boundary blank should let the following paragraph flow back to the previous page');
+    assert.match(emptyParagraphPaginationProbe.firstPageTextAfterDelete, /空行后的正文/);
 
     const paragraphInteractionProbe = await page.evaluate(() => {
       const frame = document.createElement('div');

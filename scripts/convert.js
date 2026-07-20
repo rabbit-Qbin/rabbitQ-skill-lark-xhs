@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.59";
+const VERSION = "0.8.63";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -385,31 +385,8 @@ function autoDecorateInlineHtml(html) {
     .join("");
 }
 
-function plainEscapedHtmlText(html) {
-  return String(html || "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-}
-
-function shouldAutoUnderlineBold(content) {
-  const compact = plainEscapedHtmlText(content).replace(/\s+/g, "");
-  if (!compact) return false;
-  if (compact.length > 18) return false;
-  if (/[。！？!?；;：:]/.test(compact)) return false;
-  return true;
-}
-
 function boldMarkdownHtml(content) {
-  const tag = shouldAutoUnderlineBold(content)
-    ? '<strong class="xhs-green-underline" data-xhs-auto-underline="1">'
-    : "<strong>";
-  return `${tag}${content}</strong>`;
+  return `<strong>${content}</strong>`;
 }
 
 function inlineMarkdownToHtml(text, markdownFile) {
@@ -505,17 +482,36 @@ function renderMarkdownTable(header, rows, markdownFile) {
   return `<section data-xhs-block-type="table"><table>${head}<tbody>${body}</tbody></table></section>`;
 }
 
+function stripTrailingAiGeneratedDisclaimer(markdownBody) {
+  const lines = String(markdownBody || "").replace(/\r\n/g, "\n").split("\n");
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length || !/^>\s?/.test(lines[lines.length - 1].trim())) return lines.join("\n");
+  let start = lines.length - 1;
+  while (start > 0 && /^>\s?/.test(lines[start - 1].trim())) start -= 1;
+  const quoteText = lines.slice(start)
+    .map((line) => line.trim().replace(/^>\s?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const isAiDisclaimer = /(?:部分|本文|本内容).{0,12}(?:AI|人工智能).{0,12}(?:生成|辅助)/i.test(quoteText) ||
+    /(?:AI|人工智能).{0,12}(?:生成|辅助).{0,12}(?:内容|文本)/i.test(quoteText);
+  if (!isAiDisclaimer) return lines.join("\n");
+  return lines.slice(0, start).join("\n").replace(/\s+$/, "");
+}
+
 function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) {
   const { body } = prepareMarkdownBody(markdown);
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  const cleanedBody = stripTrailingAiGeneratedDisclaimer(body);
+  const lines = cleanedBody.replace(/\r\n/g, "\n").split("\n");
   const blocks = [];
   let paragraph = [];
   let list = [];
   let quote = [];
   let code = [];
+  let codeLanguage = "";
   let inCode = false;
   let headingIndex = 0;
-  const headingRanks = resolveHeadingRanks(body, title, options);
+  const headingRanks = resolveHeadingRanks(cleanedBody, title, options);
 
   function pushParagraph() {
     if (!paragraph.length) return;
@@ -562,9 +558,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     quote = [];
   }
   function pushCode() {
-    if (!code.length) return;
-    blocks.push(`<blockquote data-xhs-block-type="quote" style="border-left:4px solid #d5ded3;"><em>${escapeHtml(code.join("\n"))}</em></blockquote>`);
+    if (!code.length && !codeLanguage) return;
+    const language = codeLanguage || "Code";
+    blocks.push(`<section data-xhs-block-type="code" data-code-language="${escapeHtml(language)}"><pre><code>${escapeHtml(code.join("\n"))}</code></pre></section>`);
     code = [];
+    codeLanguage = "";
   }
   function flushAll() {
     pushParagraph();
@@ -590,6 +588,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (last.includes("<img")) return "image";
     if (last.includes("data-xhs-block-type=\"callout\"")) return "callout";
     if (last.includes("data-xhs-block-type=\"quote\"")) return "quote";
+    if (last.includes("data-xhs-block-type=\"code\"")) return "code";
     if (last.startsWith("<p>")) return "prose";
     if (/<section[^>]*><strong>/.test(last)) return "prose";
     return "other";
@@ -640,6 +639,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
       } else {
         flushAll();
         inCode = true;
+        codeLanguage = line.replace(/^```+\s*/, "").trim();
       }
       continue;
     }
@@ -867,6 +867,9 @@ function studioHtmlV2(payload, libs) {
   const quoteBodySize = Math.max(28, Math.round(34 * width / DEFAULT_WIDTH));
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
   const bodyParagraphGap = Math.max(20, Math.round(BODY_PARAGRAPH_GAP * width / DEFAULT_WIDTH));
+  const headingNumberSlotWidth = Math.round(headingNumberSize * 1.48);
+  const headingNumberTitleGap = Math.max(16, Math.round(width * 0.017));
+  const codeBodySize = Math.max(24, Math.round(28 * width / DEFAULT_WIDTH));
   const imageGridGap = Math.round(width * 0.018);
   const songtiFont = `"Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif`;
 
@@ -889,7 +892,7 @@ function studioHtmlV2(payload, libs) {
       --body-line-px: ${Math.round(bodyFontSize * bodyLineHeight * 100) / 100}px;
       --body-paragraph-gap: ${bodyParagraphGap}px;
       --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
-      --body-regular-weight: 700;
+      --body-regular-weight: 720;
       --body-bold-weight: 720;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
@@ -959,6 +962,8 @@ function studioHtmlV2(payload, libs) {
     .xhs-body-frame > div { min-height: 1.9em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
     .xhs-p { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
+    .xhs-body-frame > .xhs-page-start.xhs-manual-blank,
+    .xhs-body-frame > .xhs-page-end.xhs-manual-blank { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
     .xhs-body-frame > .xhs-page-end { margin-bottom: 0 !important; }
@@ -970,11 +975,11 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-before { top: -11px; }
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
-    .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span, .xhs-table span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit !important; letter-spacing: 0 !important; }
     .xhs-card code { font-family: inherit !important; font-size: inherit !important; font-weight: inherit; font-style: inherit; line-height: inherit !important; letter-spacing: inherit !important; color: inherit; background: none; }
-    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: ${Math.round(width * 0.013)}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: ${headingNumberSlotWidth}px minmax(0, 1fr); column-gap: ${headingNumberTitleGap}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
-    .xhs-heading-number { width: auto; min-width: 0; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
+    .xhs-heading-number { width: 100%; min-width: 100%; display: flex; align-items: center; justify-content: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
     .xhs-heading-space { display: none; }
     .xhs-heading-title { min-width: 0; margin-left: 0; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; min-height: var(--body-line-px) !important; height: var(--body-line-px); margin: 0 0 ${HEADING_LEVEL2_MARGIN_PX}px; padding: 0; border-bottom: 0; }
@@ -987,6 +992,15 @@ function studioHtmlV2(payload, libs) {
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
     .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: var(--body-regular-weight); }
     .xhs-quote { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); padding: 0.16em 0 0.16em 0.72em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #9a9a9a; background: transparent; color: #777; font-size: ${quoteBodySize}px; line-height: var(--body-line); font-style: normal; font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-code-block { margin: 0 0 var(--body-paragraph-gap); width: 100%; max-width: var(--body-text-width); overflow: hidden; border: 1px solid #343842; border-radius: 14px; background: #17191f; color: #f4f6fb; box-shadow: 0 10px 26px rgba(16, 20, 28, .16); break-inside: avoid; page-break-inside: avoid; }
+    .xhs-code-toolbar { height: ${Math.max(42, Math.round(width * 0.043))}px; padding: 0 ${Math.round(width * 0.017)}px; display: flex; align-items: center; gap: ${Math.max(8, Math.round(width * 0.009))}px; background: #262934; border-bottom: 1px solid rgba(255,255,255,.08); user-select: none; }
+    .xhs-code-dot { width: ${Math.max(10, Math.round(width * 0.011))}px; height: ${Math.max(10, Math.round(width * 0.011))}px; border-radius: 50%; flex: 0 0 auto; }
+    .xhs-code-dot.red { background: #ff5f57; }
+    .xhs-code-dot.yellow { background: #febc2e; }
+    .xhs-code-dot.green { background: #28c840; }
+    .xhs-code-language { margin-left: auto; color: #aeb4c2; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: ${Math.max(16, Math.round(width * 0.018))}px; line-height: 1; font-weight: 650; }
+    .xhs-code-content { margin: 0; padding: ${Math.round(width * 0.019)}px ${Math.round(width * 0.023)}px ${Math.round(width * 0.022)}px; min-height: 1.6em; outline: none; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; tab-size: 2; color: #f4f6fb; font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace !important; font-size: ${codeBodySize}px !important; line-height: 1.58 !important; font-weight: 650; letter-spacing: 0 !important; }
+    .xhs-code-content code { color: inherit; font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit; white-space: inherit; }
     .xhs-image-block { margin: 0 auto var(--body-paragraph-gap); width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
@@ -1000,7 +1014,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
     .selectable-image.dragging { cursor: grabbing; }
-    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
+    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging, .xhs-code-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
     .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
     .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.25em; margin: 0 0 var(--body-list-item-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); overflow: visible; }
@@ -1063,6 +1077,7 @@ function studioHtmlV2(payload, libs) {
         <button id="greenTextBtn" title="有色字" aria-label="有色字">A</button>
         <button id="greenUnderlineBtn" title="下划线" aria-label="下划线"><u>U</u></button>
         <button id="keypointBtn" title="卡片" aria-label="卡片">▣</button>
+        <button id="codeBtn" title="macOS 代码块" aria-label="代码块">&lt;/&gt;</button>
         <button id="listUnorderedBtn" class="icon-button" title="无序列表" aria-label="无序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
         <button id="listOrderedBtn" class="icon-button" title="有序列表" aria-label="有序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
         <button id="saveHtmlBtn">保存编辑 HTML</button>
@@ -1206,6 +1221,7 @@ function studioHtmlV2(payload, libs) {
       sourceFingerprint: payload.sourceFingerprint || "",
       sourcePath: payload.sourcePath || "",
     })};
+    const EXPORT_RENDER_SCALE = 2;
     const initialLayout = Object.freeze({
       coverTitleSize: config.coverTitleSize,
       bodyFontSize: config.bodyFontSize,
@@ -1282,6 +1298,7 @@ function studioHtmlV2(payload, libs) {
     const greenTextBtn = document.getElementById('greenTextBtn');
     const greenUnderlineBtn = document.getElementById('greenUnderlineBtn');
     const keypointBtn = document.getElementById('keypointBtn');
+    const codeBtn = document.getElementById('codeBtn');
     const listUnorderedBtn = document.getElementById('listUnorderedBtn');
     const listOrderedBtn = document.getElementById('listOrderedBtn');
     const coverTools = document.getElementById('coverTools');
@@ -1478,13 +1495,6 @@ function studioHtmlV2(payload, libs) {
       node.style.boxDecorationBreak = '';
       node.style.webkitBoxDecorationBreak = '';
     }
-    function shouldKeepAutoUnderlineText(text) {
-      const compact = cleanText(text || '').replace(/\\s+/g, '');
-      if (!compact) return false;
-      if (compact.length > 18) return false;
-      if (/[。！？!?；;：:]/.test(compact)) return false;
-      return true;
-    }
     function isBlockUnderlineNode(node) {
       const tag = (node?.tagName || '').toLowerCase();
       return node?.classList?.contains('xhs-block') ||
@@ -1496,16 +1506,11 @@ function studioHtmlV2(payload, libs) {
     function normalizeUnderlineDecorations(root = stageScale) {
       root?.querySelectorAll?.('.xhs-green-underline').forEach((node) => {
         const tag = (node.tagName || '').toLowerCase();
-        if (isBlockUnderlineNode(node)) {
+        if (node.dataset?.xhsAutoUnderline === '1' || isBlockUnderlineNode(node)) {
           node.classList.remove('xhs-green-underline');
           delete node.dataset.xhsAutoUnderline;
           clearUnderlineInlineStyles(node);
           return;
-        }
-        if ((tag === 'strong' || tag === 'b') && !shouldKeepAutoUnderlineText(node.textContent || '')) {
-          node.classList.remove('xhs-green-underline');
-          delete node.dataset.xhsAutoUnderline;
-          clearUnderlineInlineStyles(node);
         }
       });
     }
@@ -2087,6 +2092,42 @@ function studioHtmlV2(payload, libs) {
       block.appendChild(table);
       return block;
     }
+    function codeBlockFromElement(el) {
+      const source = el.matches?.('pre') ? el : (el.querySelector?.('pre > code') || el.querySelector?.('pre') || el);
+      const language = cleanText(el.dataset?.codeLanguage || el.dataset?.language || 'Code') || 'Code';
+      const block = document.createElement('section');
+      block.className = 'xhs-code-block xhs-block';
+      block.dataset.codeLanguage = language;
+      block.setAttribute('contenteditable', 'false');
+      const toolbar = document.createElement('div');
+      toolbar.className = 'xhs-code-toolbar';
+      ['red', 'yellow', 'green'].forEach((color) => {
+        const dot = document.createElement('span');
+        dot.className = 'xhs-code-dot ' + color;
+        toolbar.appendChild(dot);
+      });
+      const label = document.createElement('span');
+      label.className = 'xhs-code-language';
+      label.textContent = language;
+      toolbar.appendChild(label);
+      const pre = document.createElement('pre');
+      pre.className = 'xhs-code-content';
+      pre.contentEditable = 'true';
+      pre.spellcheck = false;
+      const codeNode = document.createElement('code');
+      codeNode.textContent = source.textContent || '';
+      pre.appendChild(codeNode);
+      block.append(toolbar, pre);
+      return block;
+    }
+    function makeNewCodeBlock(text = '', language = 'Code') {
+      const source = document.createElement('section');
+      source.dataset.codeLanguage = cleanText(language) || 'Code';
+      const pre = document.createElement('pre');
+      pre.textContent = String(text || '');
+      source.appendChild(pre);
+      return codeBlockFromElement(source);
+    }
     function isQuoteBlock(el) {
       if (el.querySelector('img')) return false;
       const explicitType = el.dataset?.xhsBlockType || '';
@@ -2340,6 +2381,7 @@ function studioHtmlV2(payload, libs) {
         node.classList.contains('xhs-quote') ||
         node.classList.contains('xhs-list-line') ||
         node.classList.contains('xhs-table-block') ||
+        node.classList.contains('xhs-code-block') ||
         node.classList.contains('xhs-image-block') ||
         node.classList.contains('xhs-image-grid') ||
         node.classList.contains('xhs-page-break') ||
@@ -2495,6 +2537,9 @@ function studioHtmlV2(payload, libs) {
         return [makeManualBlank()];
       }
       if (isHeroBlock(el, index)) return [];
+      if (el.dataset?.xhsBlockType === 'code' || el.matches?.('pre') || el.querySelector?.('pre > code')) {
+        return [codeBlockFromElement(el)];
+      }
       const text = cleanText(el.textContent);
       const imgs = Array.from(el.querySelectorAll('img')).filter((img) => img.getAttribute('src'));
       if (!text && !imgs.length) return [];
@@ -2634,6 +2679,7 @@ function studioHtmlV2(payload, libs) {
         block.classList.contains('xhs-image-block') ||
         block.classList.contains('xhs-image-grid') ||
         block.classList.contains('xhs-table-block') ||
+        block.classList.contains('xhs-code-block') ||
         block.classList.contains('xhs-manual-blank');
     }
     function isSplittableTextBlock(block) {
@@ -2846,8 +2892,9 @@ function studioHtmlV2(payload, libs) {
             h = metrics.outer;
             fitHeight = metrics.fit;
           }
+          const collapsesAtPageStart = !current.length && block.classList.contains('xhs-manual-blank');
           current.push(block);
-          used += h;
+          used += collapsesAtPageStart ? 0 : h;
           pending = null;
         }
       }
@@ -2880,12 +2927,15 @@ function studioHtmlV2(payload, libs) {
           const metrics = measureBlockMetrics(block, nextSourceBlock);
           const h = metrics.outer;
           const fitHeight = metrics.fit;
+          const collapsesAtPageStart = !tailNodes.length && block.classList.contains('xhs-manual-blank');
+          const effectiveHeight = collapsesAtPageStart ? 0 : h;
+          const effectiveFitHeight = collapsesAtPageStart ? 0 : fitHeight;
           const remaining = tailLimit - used;
           if (tailNodes.length && headingShouldMoveWithNext(block, nextSourceBlock, remaining, tailLimit)) {
             pending = null;
             continue;
           }
-          if (fitHeight > remaining && isSplittableBlock(block)) {
+          if (effectiveFitHeight > remaining && isSplittableBlock(block)) {
             const split = splitBlockToFit(block, Math.max(remaining, tailLimit));
             if (split) {
               tailNodes.push(split.head);
@@ -2897,7 +2947,7 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (!tailNodes.length && fitHeight > tailLimit && isSplittableBlock(block)) {
+          if (!tailNodes.length && effectiveFitHeight > tailLimit && isSplittableBlock(block)) {
             const split = splitBlockToFit(block, tailLimit);
             if (split) {
               tailNodes.push(split.head);
@@ -2909,9 +2959,9 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (fitHeight <= remaining || (!tailNodes.length && fitHeight <= tailLimit + 40)) {
+          if (effectiveFitHeight <= remaining || (!tailNodes.length && effectiveFitHeight <= tailLimit + 40)) {
             tailNodes.push(block);
-            used += h;
+            used += effectiveHeight;
             pending = null;
             placed = true;
           } else {
@@ -3165,7 +3215,8 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-image-grid') ||
         node?.classList?.contains('xhs-callout') ||
         node?.classList?.contains('xhs-quote') ||
-        node?.classList?.contains('xhs-table-block');
+        node?.classList?.contains('xhs-table-block') ||
+        node?.classList?.contains('xhs-code-block');
     }
     function makeCaretAnchor() {
       const p = document.createElement('p');
@@ -3901,7 +3952,7 @@ function studioHtmlV2(payload, libs) {
     function caretFieldForBlock(block, node) {
       const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       return element?.closest?.('.xhs-heading-title, .xhs-heading-number') ||
-        block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body') ||
+        block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content') ||
         block;
     }
     function isCaretAtFieldStart(range, field) {
@@ -3981,6 +4032,7 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-callout') ||
         node?.classList?.contains('xhs-quote') ||
         node?.classList?.contains('xhs-table-block') ||
+        node?.classList?.contains('xhs-code-block') ||
         node?.classList?.contains('xhs-image-block') ||
         node?.classList?.contains('xhs-image-grid');
     }
@@ -4075,7 +4127,7 @@ function studioHtmlV2(payload, libs) {
       return { blanks, firstContent };
     }
     function nearestCaretTarget(block) {
-      return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body') || block;
+      return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content') || block;
     }
     function markManualBlankDeleteHandled() {
       manualBlankDeleteKeydownHandled = true;
@@ -4316,7 +4368,7 @@ function studioHtmlV2(payload, libs) {
         }
       });
       frame.addEventListener('mouseover', (e) => {
-        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-table-block, .xhs-heading');
+        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-table-block, .xhs-code-block, .xhs-heading');
         if (hard && frame.contains(hard) && isHaloTargetBlock(hard)) showHalo(hard);
       });
       frame.addEventListener('mouseleave', hideHalo);
@@ -4602,6 +4654,18 @@ function studioHtmlV2(payload, libs) {
       });
       ctx.restore();
     }
+    function downsampleExportCanvas(sourceCanvas) {
+      if (!sourceCanvas || sourceCanvas.width === config.width) return sourceCanvas;
+      const output = document.createElement('canvas');
+      output.width = config.width;
+      output.height = config.height;
+      const ctx = output.getContext('2d');
+      if (!ctx) return sourceCanvas;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(sourceCanvas, 0, 0, output.width, output.height);
+      return output;
+    }
     function fitHeadingTitles(root = stageScale) {
       const base = Number(config.headingTitleSize || 48);
       const lv2Size = Number(config.bodyFontSize || 36);
@@ -4718,7 +4782,7 @@ function studioHtmlV2(payload, libs) {
         if (!bold) return Boolean(el.closest('.' + className));
         if (el.closest('strong, b, .xhs-cover-bold')) return true;
         const weight = getComputedStyle(el).fontWeight;
-        return weight === 'bold' || (Number.parseInt(weight, 10) || 0) >= 700;
+        return weight === 'bold' || (Number.parseInt(weight, 10) || 0) >= 720;
       };
       if (range.collapsed) return styled(range.startContainer) ? 'on' : 'off';
       const textNodes = [];
@@ -4750,6 +4814,7 @@ function studioHtmlV2(payload, libs) {
       setToolbarButtonState(headingBtn2, info?.type === 'heading' && info.level === '2' ? 'on' : 'off');
       setToolbarButtonState(italicBtn, info?.type === 'quote' ? 'on' : 'off');
       setToolbarButtonState(keypointBtn, info?.type === 'card' ? 'on' : 'off');
+      setToolbarButtonState(codeBtn, info?.type === 'code' ? 'on' : 'off');
       setToolbarButtonState(listUnorderedBtn, info?.type === 'list' && info.listType !== 'ordered' ? 'on' : 'off');
       setToolbarButtonState(listOrderedBtn, info?.type === 'list' && info.listType === 'ordered' ? 'on' : 'off');
     }
@@ -4787,7 +4852,7 @@ function studioHtmlV2(payload, libs) {
       if (shouldSave) saveCurrentPage();
     }
     function reorderableFlowNode(target) {
-      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-image-grid, .xhs-image-block');
+      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-code-block, .xhs-image-grid, .xhs-image-block');
     }
     function flowBlocksInBody(bodyFrame) {
       return Array.from(bodyFrame.children).filter((node) => {
@@ -4800,6 +4865,7 @@ function studioHtmlV2(payload, libs) {
           node.classList?.contains('xhs-quote') ||
           node.classList?.contains('xhs-list-line') ||
           node.classList?.contains('xhs-table-block') ||
+          node.classList?.contains('xhs-code-block') ||
           node.classList?.contains('xhs-rich');
       });
     }
@@ -5546,7 +5612,7 @@ function studioHtmlV2(payload, libs) {
       toggleInlineClass('xhs-green-underline', 'box-shadow');
     }
     function blockNestHost(node) {
-      return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-list-body');
+      return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content');
     }
     function nextAutoHeadingNumber() {
       const existingLevel1 = stageScale.querySelectorAll('.xhs-heading[data-level="1"], .xhs-heading:not([data-level])');
@@ -5566,6 +5632,8 @@ function studioHtmlV2(payload, libs) {
       if (quote) return { type: 'quote', el: quote };
       const callout = el.closest('.xhs-callout');
       if (callout) return { type: 'card', el: callout };
+      const code = el.closest('.xhs-code-block');
+      if (code) return { type: 'code', el: code };
       const list = el.closest('.xhs-list-line');
       if (list) {
         return {
@@ -5597,6 +5665,7 @@ function studioHtmlV2(payload, libs) {
           .map((body) => normalizeInlineHtml(body.innerHTML))
           .join('<br>');
       }
+      if (info.type === 'code') return escWithBreaks(flowBlockPlainText(info));
       return info.el.innerHTML;
     }
     function flowBlockPlainText(info) {
@@ -5612,6 +5681,7 @@ function studioHtmlV2(payload, libs) {
       if (info.type === 'list') {
         return flowBlockListBodies(info).map((body) => textWithBreaks(body)).join('\\n');
       }
+      if (info.type === 'code') return info.el.querySelector('.xhs-code-content')?.textContent || '';
       return textWithBreaks(info.el);
     }
     function buildFlowBlocksFromContent(targetType, targetLevel, info) {
@@ -5633,6 +5703,9 @@ function studioHtmlV2(payload, libs) {
         block.innerHTML = '<div class="xhs-callout-label">' + esc(label) + '</div><div class="xhs-callout-body">' +
           cleanCalloutBodyHtml(flowBlockContentHtml(info)) + '</div>';
         return [block];
+      }
+      if (targetType === 'code') {
+        return [makeNewCodeBlock(flowBlockPlainText(info), info.el?.dataset?.codeLanguage || 'Code')];
       }
       if (targetType === 'list') {
         const listType = targetLevel === 'ordered' ? 'ordered' : 'unordered';
@@ -5673,7 +5746,7 @@ function studioHtmlV2(payload, libs) {
       return nextBlocks[0];
     }
     function focusFlowBlock(block) {
-      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body') || block;
+      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body, .xhs-code-content') || block;
       if (target) setCaretInside(target);
     }
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
@@ -5774,6 +5847,44 @@ function studioHtmlV2(payload, libs) {
         item.range.insertNode(block);
       }
       item.selection.removeAllRanges();
+      normalizeNestedFlowBlocks(stageScale);
+      saveCurrentPage();
+      scheduleOverflowReflow(true);
+    }
+    function makeCodeBlock() {
+      if (tryToggleOrSwitchFlowBlock('code')) return;
+      const editable = stageScale.querySelector('.xhs-body-card .xhs-body-frame') ||
+        stageScale.querySelector('.xhs-cover-tail-frame');
+      if (!editable) return;
+      const item = getStageSelection();
+      let block = makeNewCodeBlock('', 'Code');
+      if (item) {
+        const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+          ? item.range.commonAncestorContainer
+          : item.range.commonAncestorContainer.parentElement;
+        const sourceBlock = parent?.closest?.('.xhs-p, .xhs-rich');
+        if (item.range.collapsed && sourceBlock && stageScale.contains(sourceBlock)) {
+          block = makeNewCodeBlock(textWithBreaks(sourceBlock), 'Code');
+          sourceBlock.replaceWith(block);
+        } else if (!item.range.collapsed) {
+          const fragment = item.range.extractContents();
+          const holder = document.createElement('div');
+          holder.appendChild(fragment);
+          block = makeNewCodeBlock(textWithBreaks(holder), 'Code');
+          if (sourceBlock && stageScale.contains(sourceBlock) && rangeCoversEntireBlock(item.range, sourceBlock)) {
+            sourceBlock.replaceWith(block);
+          } else {
+            item.range.insertNode(block);
+          }
+        } else {
+          item.range.insertNode(block);
+        }
+        item.selection.removeAllRanges();
+      } else {
+        insertNodesAtSelection([block], editable);
+      }
+      focusFlowBlock(block);
+      selectFlowBlock(block);
       normalizeNestedFlowBlocks(stageScale);
       saveCurrentPage();
       scheduleOverflowReflow(true);
@@ -6524,18 +6635,19 @@ function studioHtmlV2(payload, libs) {
           flattenImagesForExport(card);
           const underlineRects = stabilizeExportInlineStyles(card, theme);
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          const canvas = await html2canvas(card, {
+          const renderedCanvas = await html2canvas(card, {
             width: config.width,
             height: config.height,
             windowWidth: config.width,
             windowHeight: config.height,
-            scale: 1,
+            scale: EXPORT_RENDER_SCALE,
             backgroundColor: theme.cardBg,
             useCORS: true,
             allowTaint: true,
             logging: false,
           });
-          paintExportUnderlineRects(canvas, underlineRects);
+          paintExportUnderlineRects(renderedCanvas, underlineRects);
+          const canvas = downsampleExportCanvas(renderedCanvas);
           const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
           zip.file(String(i + 1).padStart(2, '0') + '.png', blob);
         }
@@ -6637,7 +6749,7 @@ function studioHtmlV2(payload, libs) {
         recordEditorHistory();
       }, true);
     });
-    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listUnorderedBtn, listOrderedBtn].forEach((button) => {
+    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, codeBtn, listUnorderedBtn, listOrderedBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
       button?.addEventListener('click', () => recordEditorHistory(), true);
     });
@@ -6648,6 +6760,7 @@ function studioHtmlV2(payload, libs) {
     greenTextBtn.addEventListener('click', applyGreenText);
     greenUnderlineBtn.addEventListener('click', applyGreenUnderline);
     keypointBtn.addEventListener('click', makeKeypointBlock);
+    codeBtn?.addEventListener('click', makeCodeBlock);
     listUnorderedBtn?.addEventListener('click', () => makeListBlock('unordered'));
     listOrderedBtn?.addEventListener('click', () => makeListBlock('ordered'));
     overviewModeBtn?.addEventListener('click', () => setViewMode('overview'));
