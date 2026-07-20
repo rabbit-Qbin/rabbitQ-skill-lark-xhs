@@ -248,9 +248,33 @@ async function main() {
   assert.strictEqual(flowConvert.status, 0, flowConvert.stderr || flowConvert.stdout);
   const flowHtmlPath = path.join(flowOutputDir, "xhs-studio.html");
 
+  const continuousSourceDir = path.join(root, "continuous-flow-source");
+  const continuousOutputDir = path.join(root, "continuous-flow-output");
+  fs.mkdirSync(continuousSourceDir, { recursive: true });
+  const continuousParagraph = Array.from(
+    { length: 260 },
+    (_, index) => `连续片段${String(index + 1).padStart(3, "0")}保持前后顺序`,
+  ).join("，") + "。";
+  const continuousMarkdown = [
+    "# 连续分页回归",
+    "",
+    "## 01 正文应该跨页连续",
+    "",
+    continuousParagraph,
+    "",
+    "> 引用块跨页时必须保持完整，不能消失。",
+  ].join("\n");
+  fs.writeFileSync(path.join(continuousSourceDir, "article.md"), continuousMarkdown, "utf8");
+  const continuousConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), continuousSourceDir, "-o", continuousOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(continuousConvert.status, 0, continuousConvert.stderr || continuousConvert.stdout);
+
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.65"/);
+  assert.match(html, /"version":"0\.8\.68"/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -267,6 +291,7 @@ async function main() {
   assert.match(html, /--body-line-px: 58px;/);
   assert.match(html, /--body-regular-weight: 720;/);
   assert.match(html, /--body-bold-weight: 720;/);
+  assert.match(html, /--body-unbold-weight: 700;/);
   assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
@@ -290,6 +315,7 @@ async function main() {
   assert.doesNotMatch(html, /fontWechatBtn|fontSongtiBtn|经典宋体/);
   assert.match(html, /\.xhs-p \{[^}]*font-weight: var\(--body-regular-weight\)/);
   assert.match(html, /\.xhs-p span,[^}]*\.xhs-table span \{[^}]*font-weight: inherit !important;/);
+  assert.match(html, /\.xhs-card \.xhs-text-regular, \.xhs-card \.xhs-text-regular \* \{ font-weight: var\(--body-unbold-weight\) !important; \}/);
   assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
   assert.match(html, /headingUnderline \/ 4/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \{[\s\S]*?margin: 0 0 40px;/, "二级标题只保留下间距，避免与前一结构块叠加");
@@ -452,6 +478,60 @@ async function main() {
     });
     assert.strictEqual(bodyWeights.normal, "720", "body text should use the unified default weight 720");
     assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
+
+    // Regression: body text starts at 720, but the B control must be a real
+    // two-state toggle: 720 default -> 700 unbold -> 720 default.
+    const boldToggleBody = orderedPage.locator('#stageScale .xhs-list-body').first();
+    await boldToggleBody.evaluate((body) => {
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      body.closest('[contenteditable="true"]')?.focus();
+    });
+    await orderedPage.waitForTimeout(80);
+    assert.strictEqual(
+      await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
+      true,
+      'default 720 selection should light the B control',
+    );
+    await orderedPage.click('#boldBtn');
+    await orderedPage.waitForTimeout(120);
+    const unboldState = await boldToggleBody.evaluate((body) => ({
+      weight: getComputedStyle(body.querySelector('.xhs-text-regular') || body).fontWeight,
+      regularMarks: body.querySelectorAll('.xhs-text-regular').length,
+    }));
+    assert.strictEqual(unboldState.weight, '700', 'first B click should change selected default text to weight 700');
+    assert.ok(unboldState.regularMarks >= 1, 'first B click should persist an explicit unbold mark');
+    assert.strictEqual(
+      await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
+      true,
+      '700 unbold formatting should be saved into the current page state',
+    );
+    assert.strictEqual(
+      await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
+      false,
+      '700 unbold selection should turn off the B control',
+    );
+    await orderedPage.click('#boldBtn');
+    await orderedPage.waitForTimeout(120);
+    const restoredBoldState = await boldToggleBody.evaluate((body) => ({
+      weight: getComputedStyle(body).fontWeight,
+      regularMarks: body.querySelectorAll('.xhs-text-regular').length,
+    }));
+    assert.strictEqual(restoredBoldState.weight, '720', 'second B click should restore selected text to weight 720');
+    assert.strictEqual(restoredBoldState.regularMarks, 0, 'second B click should remove the explicit unbold mark');
+    assert.strictEqual(
+      await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
+      false,
+      'restoring 720 should remove the saved unbold mark from page state',
+    );
+    assert.strictEqual(
+      await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
+      true,
+      'restored 720 selection should light the B control again',
+    );
 
     // Regression: Chinese IME composition must not trigger save, normalization, or reflow
     // until the candidate text has been committed.
@@ -723,6 +803,158 @@ async function main() {
     assert.strictEqual(sequenceQuoteStyle.fontFamily, sequenceCardState.fontFamily);
     await orderedPage.close();
 
+    // Regression: pagination is only a 3:4 view over one continuous text
+    // stream. Backspace before the first character of a split tail must delete
+    // the previous-page character and keep the caret at the new boundary.
+    const continuousBackspacePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await continuousBackspacePage.addInitScript(() => localStorage.clear());
+    await continuousBackspacePage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
+    await continuousBackspacePage.click('#editModeBtn');
+    await continuousBackspacePage.waitForTimeout(350);
+    const splitTailState = await continuousBackspacePage.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+      for (let index = 1; index < tabs.length; index += 1) {
+        tabs[index].click();
+        const tail = document.querySelector('#stageScale .xhs-p.xhs-split-tail, #stageScale .xhs-rich.xhs-split-tail');
+        if (!tail) continue;
+        const node = document.createTreeWalker(tail, NodeFilter.SHOW_TEXT).nextNode();
+        if (!node) continue;
+        const range = document.createRange();
+        range.setStart(node, 0);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        tail.closest('[contenteditable="true"]')?.focus();
+        const allText = pages.map((page) => {
+          const holder = document.createElement('div');
+          holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+          return holder.textContent || '';
+        }).join('');
+        const frame = tail.closest('.xhs-body-frame');
+        const firstBlock = Array.from(frame?.children || []).find((item) =>
+          !item.classList?.contains('xhs-caret-anchor') && item.dataset?.xhsPageBreak !== '1'
+        );
+        return {
+          index,
+          allText,
+          firstCharacter: Array.from(node.textContent || '')[0] || '',
+          tailClass: tail.className,
+          firstBlockClass: firstBlock?.className || '',
+          tailIsFirst: firstBlock === tail,
+          runtimePageIndex: pageIndex,
+        };
+      }
+      return null;
+    });
+    assert.ok(splitTailState, 'continuous-flow fixture should contain a split paragraph tail');
+    await continuousBackspacePage.keyboard.press('Backspace');
+    await continuousBackspacePage.waitForTimeout(350);
+    const crossPageBackspaceResult = await continuousBackspacePage.evaluate(() => {
+      const allText = pages.map((page) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+        return holder.textContent || '';
+      }).join('');
+      const selection = window.getSelection();
+      return {
+        allText,
+        pageIndex,
+        caretOffset: selection?.anchorOffset ?? -1,
+        caretText: selection?.anchorNode?.textContent || '',
+        notice: document.querySelector('#runtimeNotice')?.textContent || '',
+      };
+    });
+    assert.strictEqual(
+      crossPageBackspaceResult.allText.length,
+      splitTailState.allText.length - 1,
+      'page-start Backspace should delete exactly one previous-page character: ' + JSON.stringify(splitTailState),
+    );
+    assert.ok(crossPageBackspaceResult.allText.includes(splitTailState.firstCharacter), 'the first character on the current page must survive backward deletion');
+    assert.strictEqual(crossPageBackspaceResult.caretOffset, 0, 'caret should stay at the continuous split boundary');
+    assert.strictEqual(crossPageBackspaceResult.notice, '', 'valid cross-page deletion should not trigger an integrity rollback');
+    await continuousBackspacePage.close();
+
+    // Regression: Enter at the start of an atomic quote inserts one real blank.
+    // When that blank pushes the quote to the next page, the quote remains once
+    // and the caret stays in the blank on the previous page.
+    const continuousQuotePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await continuousQuotePage.addInitScript(() => localStorage.clear());
+    await continuousQuotePage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
+    await continuousQuotePage.click('#editModeBtn');
+    await continuousQuotePage.waitForTimeout(350);
+    const quoteThreshold = await continuousQuotePage.evaluate(() => {
+      const snapshot = pages.map((page) => ({ ...page }));
+      const quotePageIndex = () => pages.findIndex((page) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+        return Boolean(holder.querySelector('.xhs-quote'));
+      });
+      const initial = quotePageIndex();
+      let keepOnPage = 0;
+      for (let count = 1; count <= 30; count += 1) {
+        pages = snapshot.map((page) => ({ ...page }));
+        pageIndex = initial;
+        renderAll();
+        const quote = document.querySelector('#stageScale .xhs-quote');
+        if (!quote) break;
+        for (let index = 0; index < count; index += 1) quote.before(makeEmptyParagraph());
+        saveCurrentPage({ skipNormalize: true });
+        reflow();
+        if (quotePageIndex() !== initial) break;
+        keepOnPage = count;
+      }
+      pages = snapshot.map((page) => ({ ...page }));
+      pageIndex = initial;
+      renderAll();
+      const quote = document.querySelector('#stageScale .xhs-quote');
+      for (let index = 0; index < keepOnPage; index += 1) quote.before(makeEmptyParagraph());
+      saveCurrentPage({ skipNormalize: true });
+      reflow();
+      return { initial, keepOnPage };
+    });
+    assert.ok(quoteThreshold.initial > 0, 'continuous-flow fixture should place its quote on a body page');
+    await continuousQuotePage.locator('#pageTabs button').nth(quoteThreshold.initial).click();
+    await continuousQuotePage.locator('#stageScale .xhs-quote').evaluate((quote) => {
+      const node = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT).nextNode();
+      if (!node) throw new Error('quote text node missing');
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      quote.closest('[contenteditable="true"]')?.focus();
+    });
+    await continuousQuotePage.keyboard.press('Enter');
+    await continuousQuotePage.waitForTimeout(900);
+    const quoteFlowResult = await continuousQuotePage.evaluate(() => {
+      let quoteCount = 0;
+      let quotePage = -1;
+      pages.forEach((page, index) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+        const count = holder.querySelectorAll('.xhs-quote').length;
+        quoteCount += count;
+        if (count) quotePage = index;
+      });
+      const anchor = window.getSelection()?.anchorNode;
+      const element = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
+      return {
+        quoteCount,
+        quotePage,
+        pageIndex,
+        caretInBlank: Boolean(element?.closest?.('.xhs-manual-blank')),
+        notice: document.querySelector('#runtimeNotice')?.textContent || '',
+      };
+    });
+    assert.strictEqual(quoteFlowResult.quoteCount, 1, 'quote must remain exactly once after being pushed across a page boundary');
+    assert.ok(quoteFlowResult.quotePage > quoteThreshold.initial, 'one structural Enter at the threshold should move the quote to the next page');
+    assert.strictEqual(quoteFlowResult.pageIndex, quoteFlowResult.quotePage - 1, 'caret should remain on the previous page after the quote moves');
+    assert.strictEqual(quoteFlowResult.caretInBlank, true, 'caret should remain inside the inserted manual blank');
+    assert.strictEqual(quoteFlowResult.notice, '', 'valid structural Enter should not trigger an integrity rollback');
+    await continuousQuotePage.close();
+
     // Regression: the same list-backspace rule must work when an environment
     // emits only beforeinput (for example, some IMEs and virtual keyboards).
     const beforeInputPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
@@ -946,6 +1178,81 @@ async function main() {
     });
     assert.ok(listImageFitProbe.continuedMargin < listImageFitProbe.terminalMargin, 'continued list items should keep their compact item gap while measuring pagination');
     assert.strictEqual(listImageFitProbe.pageCount, 1, 'list item gaps must not be over-counted and push a fitting image to the next page');
+
+    const atomicListProbe = await page.evaluate(() => {
+      const lines = Array.from({ length: 4 }, (_, index) => {
+        const line = document.createElement('p');
+        line.className = 'xhs-p xhs-block xhs-list-line';
+        line.dataset.listType = 'ordered';
+        line.innerHTML = '<span class="xhs-list-marker xhs-list-marker-ordered">' + (index + 1) + '.</span><span class="xhs-list-body">整组换页测试 ' + (index + 1) + '</span>';
+        return line;
+      });
+      const runFit = lines.reduce((total, line, index) => {
+        const next = lines[index + 1] || null;
+        const metrics = measureBlockMetrics(line, next);
+        return total + (next ? metrics.outer : metrics.fit);
+      }, 0);
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - runFit + 20) + 'px';
+      const result = paginateBlocks([lead, ...lines]);
+      return result.map((item) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = item.html;
+        return holder.querySelectorAll('.xhs-list-line').length;
+      });
+    });
+    assert.deepStrictEqual(atomicListProbe, [0, 4], 'a list that fits on one page must move as one structural block');
+
+    const atomicCalloutProbe = await page.evaluate(() => {
+      const callout = document.createElement('section');
+      callout.className = 'xhs-callout xhs-block';
+      callout.innerHTML = '<div class="xhs-callout-label">划重点</div><div class="xhs-callout-body">' +
+        '卡片内容保持完整，空间不足时整块进入下一页。'.repeat(7) + '</div>';
+      const fit = measureBlockMetrics(callout).fit;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - fit + 20) + 'px';
+      const result = paginateBlocks([lead, callout]);
+      return result.map((item) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = item.html;
+        return {
+          callouts: holder.querySelectorAll('.xhs-callout').length,
+          splitCallouts: holder.querySelectorAll('.xhs-callout[data-split]').length,
+        };
+      });
+    });
+    assert.deepStrictEqual(atomicCalloutProbe, [
+      { callouts: 0, splitCallouts: 0 },
+      { callouts: 1, splitCallouts: 0 },
+    ], 'a card must never be split to fill the previous page remainder');
+
+    const atomicShortTableProbe = await page.evaluate(() => {
+      const table = document.createElement('section');
+      table.className = 'xhs-table-block xhs-block';
+      table.innerHTML = '<table class="xhs-table"><thead><tr><th>项目</th><th>说明</th></tr></thead><tbody>' +
+        Array.from({ length: 4 }, (_, index) => '<tr><td>' + (index + 1) + '</td><td>短表整块换页</td></tr>').join('') +
+        '</tbody></table>';
+      const fit = measureBlockMetrics(table).fit;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - fit + 20) + 'px';
+      const result = paginateBlocks([lead, table]);
+      return result.map((item) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = item.html;
+        return {
+          tables: holder.querySelectorAll('.xhs-table-block').length,
+          rows: holder.querySelectorAll('.xhs-table-block tbody > tr').length,
+          splitTables: holder.querySelectorAll('.xhs-table-block[data-split]').length,
+        };
+      });
+    });
+    assert.deepStrictEqual(atomicShortTableProbe, [
+      { tables: 0, rows: 0, splitTables: 0 },
+      { tables: 1, rows: 4, splitTables: 0 },
+    ], 'a short table must move whole; only a table taller than a full page may split by rows');
 
     const headingKeepWithNextProbe = await page.evaluate(() => {
       const sourceBlocks = extractBlocksFromTemplate();
@@ -1423,7 +1730,14 @@ async function main() {
     assert.strictEqual(listEnterState.lineCount, listLineCountBeforeEnter + 1);
     assert.ok(listEnterState.currentBody.includes("重新分页"));
     assert.strictEqual(listEnterState.previousBody, "");
-    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    const emptyListExitState = await page.evaluate(() => ({
+      listLineCount: document.querySelectorAll("#stageScale .xhs-list-line").length,
+      manualBlankCount: document.querySelectorAll("#stageScale .xhs-manual-blank").length,
+    }));
+    assert.strictEqual(emptyListExitState.listLineCount, listLineCountBeforeEnter, "Enter on an empty list item should exit the list instead of creating another bullet");
+    assert.ok(emptyListExitState.manualBlankCount >= 1, "exiting an empty list item should leave an editable plain paragraph");
 
     const paragraphHaloState = await page.locator("#stageScale .xhs-p").first().evaluate((paragraph) => {
       paragraph.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));

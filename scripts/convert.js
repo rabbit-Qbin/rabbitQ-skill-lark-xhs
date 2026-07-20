@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.65";
+const VERSION = "0.8.68";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -894,6 +894,7 @@ function studioHtmlV2(payload, libs) {
       --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
       --body-regular-weight: 720;
       --body-bold-weight: 720;
+      --body-unbold-weight: 700;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
@@ -1034,6 +1035,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-table em { font-style: italic; }
     .xhs-rich { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-p strong, .xhs-p b, .xhs-rich strong, .xhs-rich b, .xhs-list-body strong, .xhs-list-body b, .xhs-callout-body strong, .xhs-callout-body b, .xhs-quote strong, .xhs-quote b { font-weight: var(--body-bold-weight) !important; }
+    .xhs-card .xhs-text-regular, .xhs-card .xhs-text-regular * { font-weight: var(--body-unbold-weight) !important; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-split-head { margin-bottom: 0 !important; }
@@ -1070,7 +1072,7 @@ function studioHtmlV2(payload, libs) {
       ${warnings.length ? `<div class="notice">原稿里有 ${warnings.length} 个视频链接。小红书图文卡片这里只放图片，视频已跳过；需要视频请在小红书发布页单独上传，或先截帧/转图片再放入卡片。</div>` : ""}
       <div id="runtimeNotice" class="notice runtime-notice" hidden></div>
       <div class="toolbar">
-        <button id="boldBtn" title="加粗" aria-label="加粗">B</button>
+        <button id="boldBtn" title="切换加粗 / 不加粗" aria-label="切换加粗 / 不加粗">B</button>
         <button id="headingBtn1" title="一级标题" aria-label="一级标题">H1</button>
         <button id="headingBtn2" title="二级标题" aria-label="二级标题">H2</button>
         <button id="italicBtn" title="引用" aria-label="引用">❝</button>
@@ -2362,13 +2364,14 @@ function studioHtmlV2(payload, libs) {
         const previous = merged[merged.length - 1];
         if (canMergeSplitBlock(previous, block)) {
           appendSplitContent(previous, block);
-          stripSplitState(previous);
+          previous.classList.remove('xhs-split-head', 'xhs-split-tail');
+          delete previous.dataset.split;
         } else {
           merged.push(block);
         }
       }
       return merged.map((block) => {
-        if (!block.dataset?.split) return block;
+        if (!block.dataset?.split && !block.dataset?.flowId) return block;
         return stripSplitState(block);
       });
     }
@@ -2601,8 +2604,8 @@ function studioHtmlV2(payload, libs) {
       const metrics = measureBlockMetrics(probe);
       const lineHeight = config.bodyFontSize * config.bodyLineHeight;
       if (isSplittableTextBlock(probe)) return Math.min(metrics.fit, lineHeight);
-      if (probe.classList.contains('xhs-callout') || probe.classList.contains('xhs-table-block')) {
-        return Math.min(metrics.fit, lineHeight * 2);
+      if (probe.classList.contains('xhs-table-block') && metrics.fit > config.pageLimit) {
+        return lineHeight * 2;
       }
       return metrics.fit;
     }
@@ -2676,6 +2679,7 @@ function studioHtmlV2(payload, libs) {
       return block.classList.contains('xhs-heading') ||
         block.classList.contains('xhs-callout') ||
         block.classList.contains('xhs-quote') ||
+        block.classList.contains('xhs-list-line') ||
         block.classList.contains('xhs-image-block') ||
         block.classList.contains('xhs-image-grid') ||
         block.classList.contains('xhs-table-block') ||
@@ -2741,49 +2745,6 @@ function studioHtmlV2(payload, libs) {
       const tail = markSplitPart(cloneTextRangeElement(block, best, total), id, 'tail');
       return cleanText(head.textContent) && cleanText(tail.textContent) ? { head, tail } : null;
     }
-    function splitCalloutBlock(block, available) {
-      const body = block.querySelector('.xhs-callout-body');
-      if (!body) return null;
-      const total = textLengthDeep(body);
-      if (total < 10 || available < Math.max(118, config.bodyFontSize * config.bodyLineHeight * 2)) return null;
-      const id = flowIdFor(block);
-      let lo = 1;
-      let hi = total - 1;
-      let best = 0;
-      function makePart(end) {
-        const part = block.cloneNode(true);
-        const partBody = part.querySelector('.xhs-callout-body');
-        partBody.innerHTML = '';
-        const piece = cloneTextRangeElement(body, 0, end);
-        Array.from(piece.childNodes).forEach((node) => partBody.appendChild(node));
-        return markSplitPart(part, id, 'head');
-      }
-      while (lo <= hi) {
-        const mid = Math.floor((lo + hi) / 2);
-        const head = makePart(mid);
-        if (!cleanText(head.textContent)) {
-          lo = mid + 1;
-          continue;
-        }
-        const h = measureBlock(head, true);
-        if (h <= available) {
-          best = mid;
-          lo = mid + 1;
-        } else {
-          hi = mid - 1;
-        }
-      }
-      if (best < 2 || best >= total - 1) return null;
-      const head = makePart(best);
-      const tail = block.cloneNode(true);
-      tail.querySelector('.xhs-callout-label')?.remove();
-      const tailBody = tail.querySelector('.xhs-callout-body');
-      tailBody.innerHTML = '';
-      const tailPiece = cloneTextRangeElement(body, best, total);
-      Array.from(tailPiece.childNodes).forEach((node) => tailBody.appendChild(node));
-      markSplitPart(tail, id, 'tail');
-      return cleanText(head.textContent) && cleanText(tail.textContent) ? { head, tail } : null;
-    }
     function splitTableBlock(block, available) {
       const rows = Array.from(block.querySelectorAll('tbody > tr'));
       if (rows.length < 2 || available < 120) return null;
@@ -2820,7 +2781,6 @@ function studioHtmlV2(payload, libs) {
     }
     function isSplittableBlock(block) {
       if (isSplittableTextBlock(block)) return true;
-      if (block.classList.contains('xhs-callout')) return true;
       if (block.classList.contains('xhs-table-block')) {
         return block.querySelectorAll('tbody > tr').length >= 2;
       }
@@ -2828,9 +2788,29 @@ function studioHtmlV2(payload, libs) {
     }
     function splitBlockToFit(block, available) {
       if (isSplittableTextBlock(block)) return splitPlainTextBlock(block, available);
-      if (block.classList.contains('xhs-callout')) return splitCalloutBlock(block, available);
       if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
       return null;
+    }
+    function matchingListType(first, second) {
+      return Boolean(first?.classList?.contains('xhs-list-line') &&
+        second?.classList?.contains('xhs-list-line') &&
+        (first.dataset.listType || 'unordered') === (second.dataset.listType || 'unordered'));
+    }
+    function listRunMetricsAt(blocks, startIndex) {
+      const first = blocks[startIndex];
+      if (!first?.classList?.contains('xhs-list-line')) return null;
+      if (startIndex > 0 && matchingListType(blocks[startIndex - 1], first)) return null;
+      let fit = 0;
+      let endIndex = startIndex;
+      while (endIndex < blocks.length && matchingListType(first, blocks[endIndex])) {
+        const node = blocks[endIndex].cloneNode(true);
+        wrapBodyTextLines(node);
+        const next = matchingListType(first, blocks[endIndex + 1]) ? blocks[endIndex + 1] : null;
+        const metrics = measureBlockMetrics(node, next);
+        fit += next ? metrics.outer : metrics.fit;
+        endIndex += 1;
+      }
+      return { fit, endIndex };
     }
     function paginateBlocks(blocks) {
       const nextPages = [];
@@ -2848,6 +2828,18 @@ function studioHtmlV2(payload, libs) {
           pushPage();
           continue;
         }
+        const followingListRun = sourceBlock.classList?.contains('xhs-heading')
+          ? listRunMetricsAt(blocks, sourceIndex + 1)
+          : null;
+        if (followingListRun && current.length) {
+          const headingHeight = measureBlockMetrics(sourceBlock, nextSourceBlock).outer;
+          const combinedHeight = headingHeight + followingListRun.fit;
+          if (combinedHeight <= config.pageLimit && combinedHeight > config.pageLimit - used) pushPage();
+        }
+        const listRun = listRunMetricsAt(blocks, sourceIndex);
+        if (listRun && current.length && listRun.fit <= config.pageLimit && listRun.fit > config.pageLimit - used) {
+          pushPage();
+        }
         let pending = sourceBlock.cloneNode(true);
         while (pending) {
           let block = pending;
@@ -2861,7 +2853,7 @@ function studioHtmlV2(payload, libs) {
             remaining = config.pageLimit;
           }
           if (current.length && fitHeight > remaining) {
-            if (isSplittableBlock(block)) {
+            if (isSplittableTextBlock(block)) {
               const split = splitBlockToFit(block, remaining);
               if (split) {
                 current.push(split.head);
@@ -2919,6 +2911,23 @@ function studioHtmlV2(payload, libs) {
           rest.push(sourceBlock);
           continue;
         }
+        const followingListRun = sourceBlock.classList?.contains('xhs-heading')
+          ? listRunMetricsAt(blocks, sourceIndex + 1)
+          : null;
+        if (followingListRun) {
+          const headingHeight = measureBlockMetrics(sourceBlock, nextSourceBlock).outer;
+          if (headingHeight + followingListRun.fit > tailLimit - used) {
+            rest.push(sourceBlock);
+            tailClosed = true;
+            continue;
+          }
+        }
+        const listRun = listRunMetricsAt(blocks, sourceIndex);
+        if (listRun && (listRun.fit > tailLimit || (tailNodes.length && listRun.fit > tailLimit - used))) {
+          rest.push(sourceBlock);
+          tailClosed = true;
+          continue;
+        }
         let pending = sourceBlock.cloneNode(true);
         let placed = false;
         while (pending) {
@@ -2935,8 +2944,8 @@ function studioHtmlV2(payload, libs) {
             pending = null;
             continue;
           }
-          if (effectiveFitHeight > remaining && isSplittableBlock(block)) {
-            const split = splitBlockToFit(block, Math.max(remaining, tailLimit));
+          if (effectiveFitHeight > remaining && isSplittableTextBlock(block)) {
+            const split = splitBlockToFit(block, remaining);
             if (split) {
               tailNodes.push(split.head);
               rest.push(split.tail);
@@ -2947,19 +2956,8 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (!tailNodes.length && effectiveFitHeight > tailLimit && isSplittableBlock(block)) {
-            const split = splitBlockToFit(block, tailLimit);
-            if (split) {
-              tailNodes.push(split.head);
-              rest.push(split.tail);
-              used = tailLimit;
-              tailClosed = true;
-              pending = null;
-              placed = true;
-              continue;
-            }
-          }
-          if (effectiveFitHeight <= remaining || (!tailNodes.length && effectiveFitHeight <= tailLimit + 40)) {
+          if (effectiveFitHeight <= remaining ||
+            (!tailNodes.length && isSplittableTextBlock(block) && effectiveFitHeight <= tailLimit + 40)) {
             tailNodes.push(block);
             used += effectiveHeight;
             pending = null;
@@ -3480,7 +3478,8 @@ function studioHtmlV2(payload, libs) {
       const selection = window.getSelection();
       if (!selection || !parent) return false;
       const range = document.createRange();
-      const emptyMarkerParagraph = parent.matches?.('.xhs-p, .xhs-rich') && !cleanText(parent.textContent);
+      const isManualBlank = parent.classList?.contains('xhs-manual-blank') || parent.dataset?.xhsManualBlank === '1';
+      const emptyMarkerParagraph = parent.matches?.('.xhs-p, .xhs-rich') && !isManualBlank && !cleanText(parent.textContent);
       const previousBlock = emptyMarkerParagraph ? parent.previousElementSibling : null;
       if (previousBlock) {
         const walker = document.createTreeWalker(previousBlock, NodeFilter.SHOW_TEXT);
@@ -3570,7 +3569,7 @@ function studioHtmlV2(payload, libs) {
       setCaretInside(p);
       markParagraphEnterHandled();
       saveCurrentPage();
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
       return true;
     }
     function handleHeadingEnter(event) {
@@ -3691,31 +3690,17 @@ function studioHtmlV2(payload, libs) {
       line.replaceWith(p);
       return p;
     }
-    function removeEmptyListLine(line) {
+    function exitEmptyListLineToParagraph(line) {
       const frame = line?.closest?.('[contenteditable="true"]');
-      let previousList = line.previousElementSibling;
-      while (previousList?.classList?.contains('xhs-caret-anchor')) previousList = previousList.previousElementSibling;
-      if (previousList?.classList?.contains('xhs-list-line') && previousList.dataset.listType === line.dataset.listType) {
-        line.remove();
-        renumberContiguousListLines(previousList);
-        if (frame) {
-          frame.focus({ preventScroll: true });
-          setCaretAtFieldEnd(previousList.querySelector('.xhs-list-body'));
-        }
-        return previousList;
-      }
-      let nextFocus = line.nextElementSibling;
-      while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.nextElementSibling;
-      if (!nextFocus) {
-        nextFocus = line.previousElementSibling;
-        while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.previousElementSibling;
-      }
-      line.remove();
-      if (nextFocus && frame) {
-        frame.focus({ preventScroll: true });
-        setCaretInside(nearestCaretTarget(nextFocus));
-      }
-      return nextFocus;
+      const previous = line?.previousElementSibling;
+      const next = line?.nextElementSibling;
+      const paragraph = makeEmptyParagraph();
+      line?.replaceWith(paragraph);
+      if (previous?.classList?.contains('xhs-list-line')) renumberContiguousListLines(previous);
+      if (next?.classList?.contains('xhs-list-line')) renumberContiguousListLines(next);
+      frame?.focus({ preventScroll: true });
+      setCaretInside(paragraph);
+      return paragraph;
     }
     function handleParagraphBackspace(event) {
       const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
@@ -3777,7 +3762,7 @@ function studioHtmlV2(payload, libs) {
         return false;
       }
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
       return true;
     }
     function performParagraphEnter(frame, range) {
@@ -3878,7 +3863,7 @@ function studioHtmlV2(payload, libs) {
       event.preventDefault();
       const frame = line.closest('[contenteditable="true"]');
       if (!cleanText(textEl.textContent)) {
-        removeEmptyListLine(line);
+        exitEmptyListLineToParagraph(line);
       } else {
         const p = convertListLineToParagraph(line);
         if (p && frame) {
@@ -3887,7 +3872,7 @@ function studioHtmlV2(payload, libs) {
         }
       }
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
       return true;
     }
     function handleListEnter(event) {
@@ -3905,13 +3890,21 @@ function studioHtmlV2(payload, libs) {
       const listType = line.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
       saveCurrentPage({ skipNormalize: true });
       persistDraftCheckpoint();
+      if (!cleanText(textEl.textContent)) {
+        event.preventDefault();
+        exitEmptyListLineToParagraph(line);
+        markParagraphEnterHandled();
+        saveCurrentPage({ skipNormalize: true });
+        scheduleParagraphOverflowCheck(frame);
+        return true;
+      }
       if (isCaretAtFieldStart(range, textEl)) {
         event.preventDefault();
         const newLine = buildListLine({ html: '<br>', plain: '' }, listType, 1, { preserveBodyHtml: true });
         line.before(newLine);
         renumberContiguousListLines(line);
         frame?.focus({ preventScroll: true });
-        setCaretInside(textEl);
+        setCaretInside(newLine.querySelector('.xhs-list-body'));
         markParagraphEnterHandled();
         saveCurrentPage({ skipNormalize: true });
         scheduleParagraphOverflowCheck(frame);
@@ -3980,6 +3973,161 @@ function studioHtmlV2(payload, libs) {
       } finally {
         probe.detach?.();
       }
+    }
+    function firstContinuousBlockInFrame(frame) {
+      return Array.from(frame?.children || []).find((node) =>
+        !node.classList?.contains('xhs-caret-anchor') && node.dataset?.xhsPageBreak !== '1'
+      ) || null;
+    }
+    function topLevelFlowChild(root, node) {
+      let element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      while (element && element.parentElement !== root) element = element.parentElement;
+      return element?.parentElement === root ? element : null;
+    }
+    function previousFlowSibling(block) {
+      let previous = block?.previousElementSibling;
+      while (previous?.classList?.contains('xhs-caret-anchor')) previous = previous.previousElementSibling;
+      return previous || null;
+    }
+    function previousTextNodeBeforeMarker(root, marker) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let previous = null;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (marker.contains(node)) return previous;
+        previous = node;
+      }
+      return previous;
+    }
+    function removePreviousCodePoint(root, marker) {
+      const node = previousTextNodeBeforeMarker(root, marker);
+      if (!node) return false;
+      const chars = Array.from(node.nodeValue || '');
+      if (!chars.length) return false;
+      chars.pop();
+      node.nodeValue = chars.join('');
+      return true;
+    }
+    function mergedContinuousFlowHolder(preserveCaretMarkerId = '') {
+      const merged = document.createElement('div');
+      const cover = pages.find((page) => page.type === 'cover');
+      if (cover?.tailHtml) {
+        const tailHolder = document.createElement('div');
+        tailHolder.innerHTML = '<div class="xhs-body-frame">' + cover.tailHtml + '</div>';
+        stripReflowArtifacts(tailHolder, preserveCaretMarkerId);
+        Array.from(tailHolder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
+      }
+      pages.filter((page) => page.type === 'body').forEach((page) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = '<div class="xhs-body-frame">' + (page.html || '') + '</div>';
+        stripReflowArtifacts(holder, preserveCaretMarkerId);
+        Array.from(holder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
+      });
+      const blocks = sanitizeMergedFlowBlocks(Array.from(merged.children));
+      const normalized = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
+      merged.replaceChildren(...normalized);
+      return merged;
+    }
+    function repaginateContinuousHolder(holder, caretMarkerId, previousPages, previousPageIndex) {
+      const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
+      const flowBlocks = pairAdjacentPortraitImages(Array.from(holder.children));
+      pages = coverImageEnabled
+        ? [cover].concat(paginateBlocks(flowBlocks))
+        : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+      const caretPageIndex = pageIndexForCaretMarker(caretMarkerId);
+      if (caretMarkerId && caretPageIndex < 0) {
+        pages = previousPages;
+        pageIndex = Math.min(previousPageIndex, Math.max(0, pages.length - 1));
+        renderAll();
+        showRuntimeNotice('跨页编辑时未能恢复光标，已撤回本次操作并保留原内容。');
+        return false;
+      }
+      pageIndex = caretPageIndex >= 0
+        ? caretPageIndex
+        : Math.min(previousPageIndex, Math.max(0, pages.length - 1));
+      selectedFrame = null;
+      renderAll();
+      restoreReflowCaretMarker(caretMarkerId);
+      persistDraft();
+      return true;
+    }
+    function discardTemporaryCaretMarker(id) {
+      if (!id) return;
+      stageScale.querySelector('[data-xhs-caret-marker="' + id + '"]')?.remove();
+      saveCurrentPage({ skipNormalize: true });
+    }
+    function handleContinuousBoundaryBackspace(event) {
+      const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
+      if (key !== 'Backspace' || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed || pageIndex <= 0) return false;
+      const range = selection.getRangeAt(0);
+      const frame = event.currentTarget;
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
+      if (!block || firstContinuousBlockInFrame(frame) !== block) return false;
+      const field = caretFieldForBlock(block, range.startContainer);
+      if (!isCaretAtFieldStart(range, field) && !isCaretAtFlowBlockStart(range, block)) return false;
+      const wasSplitTail = block.dataset?.split === 'tail';
+      const markerId = insertReflowCaretMarker();
+      if (!markerId) return false;
+      saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
+      const previousPages = pages.map((page) => ({ ...page }));
+      const previousPageIndex = pageIndex;
+      const holder = mergedContinuousFlowHolder(markerId);
+      const marker = holder.querySelector('[data-xhs-caret-marker="' + markerId + '"]');
+      const current = topLevelFlowChild(holder, marker);
+      const previous = previousFlowSibling(current);
+      let changed = false;
+      if (wasSplitTail && current) {
+        changed = removePreviousCodePoint(current, marker);
+      } else if (previous?.classList?.contains('xhs-manual-blank')) {
+        previous.remove();
+        changed = true;
+      } else if (isEditableParagraphBlock(previous) && isEditableParagraphBlock(current)) {
+        const nodes = Array.from(current.childNodes);
+        nodes.forEach((node) => previous.appendChild(node));
+        current.remove();
+        changed = true;
+      }
+      if (!changed) {
+        discardTemporaryCaretMarker(markerId);
+        return false;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return repaginateContinuousHolder(holder, markerId, previousPages, previousPageIndex);
+    }
+    function performStructuralStartEnter(frame, range) {
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
+      if (!isStructuralHaloBlock(block)) return false;
+      const field = caretFieldForBlock(block, range.startContainer);
+      if (!isCaretAtFieldStart(range, field) && !isCaretAtFlowBlockStart(range, block)) return false;
+      saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
+      const blank = makeEmptyParagraph();
+      block.before(blank);
+      frame.focus({ preventScroll: true });
+      setCaretInside(blank);
+      markParagraphEnterHandled();
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(true);
+      return true;
+    }
+    function handleStructuralStartEnter(event) {
+      const key = event.key || (event.inputType === 'insertParagraph' ? 'Enter' : '');
+      if (key !== 'Enter' || event.shiftKey || isHistoryShortcut(event)) return false;
+      if (event.type === 'beforeinput' && paragraphEnterKeydownHandled) {
+        event.preventDefault();
+        return true;
+      }
+      const range = event.type === 'beforeinput'
+        ? rangeFromBeforeInputEvent(event)
+        : window.getSelection()?.getRangeAt(0);
+      if (!range?.collapsed || !performStructuralStartEnter(event.currentTarget, range)) return false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return true;
     }
     function isHistoryShortcut(event) {
       const key = String(event.key || '').toLowerCase();
@@ -4144,7 +4292,7 @@ function studioHtmlV2(payload, libs) {
       }, 0);
     }
     function scheduleParagraphOverflowCheck(frame) {
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
     }
     function scheduleReflowAfterBlankRemoval() {
       cancelPendingReflow();
@@ -4326,7 +4474,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(true);
       });
       btnAfter.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -4337,7 +4485,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(true);
       });
       function removeAdjacentBlank(e, direction) {
         e.preventDefault();
@@ -4379,6 +4527,8 @@ function studioHtmlV2(payload, libs) {
         editable.addEventListener('compositionend', () => finishTextComposition(editable));
         editable.addEventListener('beforeinput', recordHistoryBeforeInput);
         if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+          editable.addEventListener('keydown', handleStructuralStartEnter, true);
+          editable.addEventListener('keydown', handleContinuousBoundaryBackspace, true);
           editable.addEventListener('keydown', handleParagraphEnter, true);
           editable.addEventListener('keydown', handleListEnter, true);
           editable.addEventListener('beforeinput', (event) => {
@@ -4388,8 +4538,9 @@ function studioHtmlV2(payload, libs) {
               return;
             }
             if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) {
-              if (handleListBackspace(event) || handleParagraphBackspace(event) || handleManualBlankDelete(event)) return;
+              if (handleContinuousBoundaryBackspace(event) || handleListBackspace(event) || handleParagraphBackspace(event) || handleManualBlankDelete(event)) return;
             }
+            if (handleStructuralStartEnter(event)) return;
             handleBodyParagraphBeforeInput(event);
             if (event.inputType === 'insertParagraph' && paragraphEnterKeydownHandled) {
               event.preventDefault();
@@ -4780,6 +4931,7 @@ function studioHtmlV2(payload, libs) {
         const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
         if (!el) return false;
         if (!bold) return Boolean(el.closest('.' + className));
+        if (el.closest('.xhs-text-regular')) return false;
         if (el.closest('strong, b, .xhs-cover-bold')) return true;
         const weight = getComputedStyle(el).fontWeight;
         return weight === 'bold' || (Number.parseInt(weight, 10) || 0) >= 720;
@@ -5566,12 +5718,16 @@ function studioHtmlV2(payload, libs) {
         alert('请先选中要处理的文字，或把光标放在已应用该样式的文字里再点一次取消。');
         return;
       }
+      const offsets = inlineRangeTextOffsets(item.range);
       const span = toggleInlineMarkInRange(item.range, className);
       item.selection.removeAllRanges();
       if (span) {
         const styledRange = document.createRange();
         styledRange.selectNodeContents(span);
         item.selection.addRange(styledRange);
+      } else {
+        const restoredRange = restoreInlineRange(offsets);
+        if (restoredRange) item.selection.addRange(restoredRange);
       }
       normalizeNestedFlowBlocks(stageScale);
       normalizeListLinesInFrame(stageScale.querySelector('.xhs-body-frame'));
@@ -5925,8 +6081,11 @@ function studioHtmlV2(payload, libs) {
           return;
         }
       }
-      document.execCommand('bold', false, null);
-      saveCurrentPage();
+      if (selection && selection.rangeCount && !selection.getRangeAt(0).collapsed) {
+        const range = restrictRangeToInlineHost(selection.getRangeAt(0));
+        if (applyFormattingMultiBlock(range, 'xhs-text-regular')) return;
+      }
+      toggleInlineClass('xhs-text-regular', 'font-weight:700');
     }
     function italicSelection() {
       if (tryToggleOrSwitchFlowBlock('quote')) return;
