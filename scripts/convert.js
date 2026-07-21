@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.70";
+const VERSION = "0.8.77";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -965,6 +965,8 @@ function studioHtmlV2(payload, libs) {
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
     .xhs-body-frame > .xhs-page-start.xhs-manual-blank,
     .xhs-body-frame > .xhs-page-end.xhs-manual-blank { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank { min-height: var(--body-line-px) !important; height: auto !important; margin: 0 0 var(--body-paragraph-gap) !important; padding: 0 !important; overflow: visible !important; }
+    .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank:last-child { margin-bottom: 0 !important; }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
     .xhs-body-frame > .xhs-page-end { margin-bottom: 0 !important; }
@@ -976,6 +978,10 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-before { top: -11px; }
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
+    .xhs-block-drag-handle { position: absolute; left: -8px; top: 50%; transform: translate(-100%, -50%); width: 18px; height: 28px; display: grid; grid-template-columns: repeat(2, 2.5px); grid-template-rows: repeat(3, 2.5px); place-content: center; gap: 3px; padding: 0; border: 0; border-radius: 5px; background: rgba(255,255,255,.72); color: #9aa0a8; cursor: grab; pointer-events: all; opacity: .68; box-shadow: none; touch-action: none; transition: opacity .14s, color .14s, background .14s; }
+    .xhs-block-drag-handle:hover { opacity: 1; color: #6b7280; background: #f3f4f6; }
+    .xhs-block-drag-handle:active { cursor: grabbing; color: var(--xhs-accent-strong); background: #edf2fb; }
+    .xhs-block-drag-handle-dot { width: 2.5px; height: 2.5px; border-radius: 50%; background: currentColor; pointer-events: none; }
     .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span, .xhs-table span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit !important; letter-spacing: 0 !important; }
     .xhs-card code { font-family: inherit !important; font-size: inherit !important; font-weight: inherit; font-style: inherit; line-height: inherit !important; letter-spacing: inherit !important; color: inherit; background: none; }
     .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: ${headingNumberSlotWidth}px minmax(0, 1fr); column-gap: ${headingNumberTitleGap}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
@@ -1015,9 +1021,10 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
     .selectable-image.dragging { cursor: grabbing; }
-    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging, .xhs-code-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
+    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-heading.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging, .xhs-code-block.reorder-dragging { outline: 2px solid color-mix(in srgb, var(--xhs-accent) 42%, transparent); outline-offset: 2px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
-    .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
+    .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 2px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 1px rgba(255,255,255,.92); }
+    .xhs-overview-drop-indicator { position: fixed; height: 2px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 680; box-shadow: 0 0 0 1px rgba(255,255,255,.92); }
     .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.25em; margin: 0 0 var(--body-list-item-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); overflow: visible; }
     .xhs-list-line:not(:has(+ .xhs-list-line)) { margin-bottom: var(--body-paragraph-gap); }
     .xhs-list-line .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: 0.8em !important; }
@@ -1096,7 +1103,7 @@ function studioHtmlV2(payload, libs) {
     </main>
     <aside class="panel">
       <h2>小兔Q彬 · 飞书转小红书</h2>
-      <p class="hint">飞书导出的 Markdown 与附件自动分页为 3:4 图文。图纸 / 背景色 / 强调色可自由组合。按住 Alt 拖动可移动卡片、引用块、序列、图片等块。</p>
+      <p class="hint">飞书导出的 Markdown 与附件自动分页为 3:4 图文。悬浮区块可拖动左侧小手柄，也可按住 Alt 直接拖动；蓝色横线就是松手后的实际落点。</p>
       <div id="pageInfo" class="hint"></div>
       <div id="coverTools" class="tool-group" hidden>
         <p class="tool-title">封面图</p>
@@ -1179,7 +1186,7 @@ function studioHtmlV2(payload, libs) {
         <label class="tool-label">图片缩放 <input id="imageZoomRange" type="range" min="10" max="1000" value="100" /></label>
         <label class="tool-label">左右裁剪中心 <input id="imageXRange" type="range" min="-1000" max="1100" value="50" /></label>
         <label class="tool-label">上下裁剪中心 <input id="imageYRange" type="range" min="-1000" max="1100" value="50" /></label>
-        <p class="hint">图片框内拖动是裁剪位置；按住 Alt 再拖动可上下移动各类块。</p>
+        <p class="hint">图片框内拖动是裁剪位置；拖左侧小手柄或按住 Alt 拖动可移动整块。</p>
       </div>
       <div id="imageList" class="image-list"></div>
     </aside>
@@ -1240,6 +1247,7 @@ function studioHtmlV2(payload, libs) {
     let coverImageEnabled = true;
     let blockReorderDrag = null;
     let blockDropIndicator = null;
+    let overviewBlockDropIndicator = null;
     let reflowTimer = null;
     let reflowForcePending = false;
     let lightSaveTimer = null;
@@ -1257,6 +1265,7 @@ function studioHtmlV2(payload, libs) {
     let imageReflowTimer = null;
     let splitFlowCounter = 0;
     let imageIdCounter = 0;
+    let blockIdCounter = 0;
     let caretMarkerCounter = 0;
     let reflowCaretFallback = null;
     let manualBlankDeleteKeydownHandled = false;
@@ -2222,22 +2231,56 @@ function studioHtmlV2(payload, libs) {
       return Array.from(root.querySelectorAll('.xhs-image-block')).find((block) => block.dataset.imageId === id) || null;
     }
     function collectBodyFlowHolder() {
-      saveCurrentPage();
+      return collectBodyFlowHolderWithPageNodes().holder;
+    }
+    function collectBodyFlowHolderWithPageNodes() {
+      saveCurrentPage({ skipNormalize: true });
       const holder = document.createElement('div');
-      pages.filter((page) => page.type === 'body').forEach((page) => {
+      const pageNodes = new Map();
+      pages.forEach((page, index) => {
+        const html = page.type === 'cover'
+          ? (!coverImageEnabled ? (page.tailHtml || '') : '')
+          : (page.html || '');
+        if (!html) return;
         const pageHolder = document.createElement('div');
-        pageHolder.innerHTML = page.html;
+        pageHolder.innerHTML = html;
         removeAutoLineBreaks(pageHolder);
-        Array.from(pageHolder.children).forEach((node) => holder.appendChild(node));
+        const nodes = Array.from(pageHolder.children);
+        pageNodes.set(index, nodes);
+        nodes.forEach((node) => holder.appendChild(node));
       });
       holder.querySelectorAll('.xhs-image-block').forEach(ensureImageId);
-      return holder;
+      return { holder, pageNodes };
     }
     function pageIndexForImageId(id) {
       if (!id) return -1;
-      return pages.findIndex((page) => page.type === 'body' && page.html.includes('data-image-id="' + id + '"'));
+      return pages.findIndex((page) => String(page.html || '').includes('data-image-id="' + id + '"') ||
+        String(page.tailHtml || '').includes('data-image-id="' + id + '"'));
     }
-    function repaginateBodyBlocks(blocks, selectedImageId = '') {
+    function ensureFlowBlockId(block) {
+      if (!block) return '';
+      if (!block.dataset.xhsBlockId) {
+        let nextId = '';
+        do {
+          nextId = 'block-' + (++blockIdCounter);
+        } while (findFlowBlockById(stageScale, nextId) || pages.some((page) =>
+          String(page.html || '').includes('data-xhs-block-id="' + nextId + '"') ||
+          String(page.tailHtml || '').includes('data-xhs-block-id="' + nextId + '"')
+        ));
+        block.dataset.xhsBlockId = nextId;
+      }
+      return block.dataset.xhsBlockId;
+    }
+    function findFlowBlockById(root, id) {
+      if (!root || !id) return null;
+      return Array.from(root.querySelectorAll('[data-xhs-block-id]')).find((block) => block.dataset.xhsBlockId === id) || null;
+    }
+    function pageIndexForFlowBlockId(id) {
+      if (!id) return -1;
+      const token = 'data-xhs-block-id="' + id + '"';
+      return pages.findIndex((page) => String(page.html || '').includes(token) || String(page.tailHtml || '').includes(token));
+    }
+    function repaginateBodyBlocks(blocks, selectedImageId = '', selectedBlockId = '') {
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml() };
       let normalizedBlocks = blocks;
       if (blocks.length) {
@@ -2249,14 +2292,20 @@ function studioHtmlV2(payload, libs) {
       }
       const baseBlocks = normalizedBlocks.length ? mergeSplitBlocks(normalizedBlocks) : extractBlocksFromTemplate();
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
-      pages = [cover].concat(paginateBlocks(flowBlocks));
-      const nextIndex = pageIndexForImageId(selectedImageId);
+      pages = coverImageEnabled
+        ? [cover].concat(paginateBlocks(flowBlocks))
+        : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+      const nextIndex = selectedImageId
+        ? pageIndexForImageId(selectedImageId)
+        : pageIndexForFlowBlockId(selectedBlockId);
       pageIndex = nextIndex >= 0 ? nextIndex : Math.min(pageIndex, Math.max(0, pages.length - 1));
       selectedFrame = null;
       renderAll();
-      const selectedBlock = findImageBlockById(stageScale, selectedImageId);
-      const frame = selectedBlock?.querySelector('.xhs-image-frame');
+      const selectedImageBlock = findImageBlockById(stageScale, selectedImageId);
+      const frame = selectedImageBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);
+      const selectedBlock = findFlowBlockById(stageScale, selectedBlockId);
+      if (selectedBlock) selectFlowBlock(selectedBlock);
     }
     function imageGroupFromImgs(imgs) {
       if (imgs.length === 1) return [imageBlockFromImg(imgs[0])];
@@ -3179,6 +3228,25 @@ function studioHtmlV2(payload, libs) {
       p.innerHTML = '<br>';
       return p;
     }
+    function syncEmptyFlowFrame(frame, focusInsertedLine = false) {
+      if (!frame?.classList?.contains('xhs-body-frame') && !frame?.classList?.contains('xhs-cover-tail-frame')) return null;
+      let flowChildren = Array.from(frame.children).filter((node) => !node.classList?.contains('xhs-caret-anchor'));
+      let inserted = null;
+      if (!flowChildren.length) {
+        inserted = makeManualBlank();
+        frame.appendChild(inserted);
+        flowChildren = [inserted];
+      }
+      const blankOnly = flowChildren.every((node) =>
+        node.classList?.contains('xhs-manual-blank') || node.dataset?.xhsManualBlank === '1'
+      );
+      frame.classList.toggle('xhs-empty-flow-frame', blankOnly);
+      if (inserted && focusInsertedLine) {
+        frame.focus({ preventScroll: true });
+        setCaretInside(inserted);
+      }
+      return inserted;
+    }
     function ensureEditorCaretAnchors(root = stageScale) {
       const frames = Array.from(root.querySelectorAll('.xhs-body-frame, .xhs-cover-tail-frame'));
       frames.forEach((frame) => {
@@ -3193,6 +3261,7 @@ function studioHtmlV2(payload, libs) {
             node.after(makeCaretAnchor());
           }
         });
+        syncEmptyFlowFrame(frame);
       });
     }
     function stripCaretAnchors(root) {
@@ -3331,6 +3400,7 @@ function studioHtmlV2(payload, libs) {
       stripCaretAnchors(clone);
       clone.querySelectorAll('.selected-image-frame').forEach((node) => node.classList.remove('selected-image-frame'));
       clone.querySelectorAll('.selected-flow-block').forEach((node) => node.classList.remove('selected-flow-block'));
+      clone.querySelectorAll('.reorder-dragging').forEach((node) => node.classList.remove('reorder-dragging'));
       clone.querySelectorAll('.resizing-image-frame').forEach((node) => node.classList.remove('resizing-image-frame'));
       clone.querySelectorAll('.xhs-resize-handle').forEach((node) => node.remove());
       if (page.type === 'cover') {
@@ -3655,6 +3725,33 @@ function studioHtmlV2(payload, libs) {
       setCaretInside(paragraph);
       return paragraph;
     }
+    function continuationFieldForBlock(block) {
+      if (!block?.classList) return null;
+      if (block.classList.contains('xhs-list-line')) return block.querySelector('.xhs-list-body');
+      if (block.classList.contains('xhs-callout')) return block.querySelector('.xhs-callout-body');
+      if (block.classList.contains('xhs-code-block')) return block.querySelector('.xhs-code-content');
+      if (block.classList.contains('xhs-quote')) return block;
+      return null;
+    }
+    function mergeParagraphIntoContinuationField(paragraph, previousBlock) {
+      const field = continuationFieldForBlock(previousBlock);
+      if (!field || !isEditableParagraphBlock(paragraph)) return null;
+      if (!cleanText(field.textContent)) field.innerHTML = '';
+      const insertionOffset = field.childNodes.length;
+      Array.from(paragraph.childNodes).forEach((node) => field.appendChild(node));
+      paragraph.remove();
+      return { field, insertionOffset };
+    }
+    function restoreCaretAtChildOffset(field, offset, frame, selection) {
+      if (!field?.isConnected || !selection) return false;
+      frame?.focus?.({ preventScroll: true });
+      const range = document.createRange();
+      range.setStart(field, Math.max(0, Math.min(Number(offset) || 0, field.childNodes.length)));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
     function handleParagraphBackspace(event) {
       const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
       if (key !== 'Backspace' || isHistoryShortcut(event)) return false;
@@ -3666,30 +3763,11 @@ function studioHtmlV2(payload, libs) {
       if (!isEditableParagraphBlock(block)) return false;
       if (!isCaretAtFieldStart(range, block)) return false;
       event.preventDefault();
-      const prev = block.previousElementSibling;
+      let prev = block.previousElementSibling;
       while (prev?.classList?.contains('xhs-caret-anchor')) prev = prev.previousElementSibling;
-      const previousListBody = prev?.classList?.contains('xhs-list-line')
-        ? prev.querySelector('.xhs-list-body')
-        : null;
-      if (previousListBody) {
-        const currentHtml = normalizeInlineHtml(block.innerHTML || '<br>') || '<br>';
-        if (!cleanText(previousListBody.textContent)) {
-          previousListBody.innerHTML = currentHtml;
-          block.remove();
-          frame.focus({ preventScroll: true });
-          setCaretAtFieldEnd(previousListBody);
-        } else {
-          const continuation = buildListLine(
-            { html: currentHtml, plain: cleanText(block.textContent) },
-            prev.dataset.listType,
-            1,
-            { preserveBodyHtml: true },
-          );
-          block.replaceWith(continuation);
-          renumberContiguousListLines(continuation);
-          frame.focus({ preventScroll: true });
-          setCaretAtFieldEnd(continuation.querySelector('.xhs-list-body'));
-        }
+      const mergedIntoBlock = mergeParagraphIntoContinuationField(block, prev);
+      if (mergedIntoBlock) {
+        restoreCaretAtChildOffset(mergedIntoBlock.field, mergedIntoBlock.insertionOffset, frame, selection);
       } else if (!cleanText(block.textContent)) {
         block.remove();
         if (prev) {
@@ -4047,6 +4125,8 @@ function studioHtmlV2(payload, libs) {
       } else if (previous?.classList?.contains('xhs-manual-blank')) {
         previous.remove();
         changed = true;
+      } else if (isEditableParagraphBlock(current) && continuationFieldForBlock(previous)) {
+        changed = Boolean(mergeParagraphIntoContinuationField(current, previous));
       } else if (isEditableParagraphBlock(previous) && isEditableParagraphBlock(current)) {
         const nodes = Array.from(current.childNodes);
         nodes.forEach((node) => previous.appendChild(node));
@@ -4148,7 +4228,7 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-image-grid');
     }
     function isHaloTargetBlock(node) {
-      return isStructuralHaloBlock(node);
+      return isStructuralHaloBlock(node) || node?.classList?.contains('xhs-list-line');
     }
     function isEditableParagraphBlock(block) {
       return Boolean(block?.classList &&
@@ -4361,10 +4441,21 @@ function studioHtmlV2(payload, libs) {
       btnAfterRemove.className = 'xhs-block-halo-btn halo-after halo-remove';
       btnAfterRemove.title = '减少下方空行';
       btnAfterRemove.textContent = '−';
+      const dragHandle = document.createElement('button');
+      dragHandle.type = 'button';
+      dragHandle.className = 'xhs-block-drag-handle';
+      dragHandle.title = '拖动区块（也可按住 Alt 拖动）';
+      dragHandle.setAttribute('aria-label', '拖动区块');
+      for (let index = 0; index < 6; index += 1) {
+        const dot = document.createElement('span');
+        dot.className = 'xhs-block-drag-handle-dot';
+        dragHandle.appendChild(dot);
+      }
       halo.appendChild(btnBefore);
       halo.appendChild(btnBeforeRemove);
       halo.appendChild(btnAfter);
       halo.appendChild(btnAfterRemove);
+      halo.appendChild(dragHandle);
       let targetBlock = null;
       let haloHideTimer = null;
       function adjacentManualBlank(block, direction) {
@@ -4389,6 +4480,7 @@ function studioHtmlV2(payload, libs) {
       }
       function showHalo(block) {
         if (!block || !stageScale.contains(block)) return;
+        block = reorderableFlowNode(block) || block;
         targetBlock = block;
         clearTimeout(haloHideTimer);
         const wrapRect = stageHost.getBoundingClientRect();
@@ -4407,12 +4499,22 @@ function studioHtmlV2(payload, libs) {
       }
       function hideHalo() {
         haloHideTimer = setTimeout(() => {
+          if (blockReorderDrag) return;
           halo.style.display = 'none';
           targetBlock = null;
         }, 120);
       }
       halo.addEventListener('mouseenter', () => clearTimeout(haloHideTimer));
       halo.addEventListener('mouseleave', hideHalo);
+      dragHandle.addEventListener('pointerdown', (event) => {
+        if (!targetBlock) return;
+        const frame = targetBlock.closest?.('[contenteditable="true"]');
+        if (!frame) return;
+        beginFlowBlockReorder(event, targetBlock, frame, dragHandle);
+      });
+      dragHandle.addEventListener('pointermove', continueFlowBlockReorder);
+      dragHandle.addEventListener('pointerup', endFlowBlockReorder);
+      dragHandle.addEventListener('pointercancel', endFlowBlockReorder);
       function insertAndFocusBlank(blank) {
         const frame = blank.closest?.('[contenteditable="true"]') || stageScale.querySelector('.xhs-body-frame');
         if (frame) frame.focus({ preventScroll: true });
@@ -4475,11 +4577,26 @@ function studioHtmlV2(payload, libs) {
         const blank = e.target.closest?.('.xhs-manual-blank');
         if (blank && frame.contains(blank)) {
           e.preventDefault();
+          frame.focus({ preventScroll: true });
           setCaretInside(blank);
+          return;
+        }
+        if (e.target === frame && frame.classList.contains('xhs-empty-flow-frame')) {
+          const blanks = Array.from(frame.children).filter((node) => node.classList?.contains('xhs-manual-blank'));
+          if (!blanks.length) return;
+          const nearest = blanks.reduce((best, node) => {
+            const rect = node.getBoundingClientRect();
+            const distance = Math.abs(e.clientY - (rect.top + rect.height / 2));
+            return !best || distance < best.distance ? { node, distance } : best;
+          }, null)?.node;
+          if (!nearest) return;
+          e.preventDefault();
+          frame.focus({ preventScroll: true });
+          setCaretInside(nearest);
         }
       });
       frame.addEventListener('mouseover', (e) => {
-        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-table-block, .xhs-code-block, .xhs-heading');
+        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-code-block, .xhs-heading');
         if (hard && frame.contains(hard) && isHaloTargetBlock(hard)) showHalo(hard);
       });
       frame.addEventListener('mouseleave', hideHalo);
@@ -4539,6 +4656,7 @@ function studioHtmlV2(payload, libs) {
           }
           if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
             normalizeFilledManualBlanks(editable);
+            syncEmptyFlowFrame(editable, /^deleteContent(?:Backward|Forward)$/.test(inputType));
             if (isHistoryInputType(inputType)) {
               cancelPendingReflow();
               scheduleLightSave();
@@ -4967,7 +5085,9 @@ function studioHtmlV2(payload, libs) {
       if (shouldSave) saveCurrentPage();
     }
     function reorderableFlowNode(target) {
-      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-code-block, .xhs-image-grid, .xhs-image-block');
+      const matched = target?.closest?.('.xhs-heading, .xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-code-block, .xhs-image-grid, .xhs-image-block');
+      if (matched?.classList?.contains('xhs-image-block')) return matched.closest('.xhs-image-grid') || matched;
+      return matched;
     }
     function flowBlocksInBody(bodyFrame) {
       return Array.from(bodyFrame.children).filter((node) => {
@@ -4985,7 +5105,8 @@ function studioHtmlV2(payload, libs) {
       });
     }
     function ensureBlockDropIndicator() {
-      if (blockDropIndicator) return blockDropIndicator;
+      if (blockDropIndicator?.isConnected && blockDropIndicator.parentNode === stageScale) return blockDropIndicator;
+      blockDropIndicator = null;
       blockDropIndicator = document.createElement('div');
       blockDropIndicator.className = 'xhs-drop-indicator';
       blockDropIndicator.hidden = true;
@@ -4995,25 +5116,133 @@ function studioHtmlV2(payload, libs) {
     function hideBlockDropIndicator() {
       if (blockDropIndicator) blockDropIndicator.hidden = true;
     }
+    function ensureOverviewBlockDropIndicator() {
+      if (overviewBlockDropIndicator?.isConnected) return overviewBlockDropIndicator;
+      overviewBlockDropIndicator = null;
+      overviewBlockDropIndicator = document.createElement('div');
+      overviewBlockDropIndicator.className = 'xhs-overview-drop-indicator';
+      overviewBlockDropIndicator.hidden = true;
+      document.body.appendChild(overviewBlockDropIndicator);
+      return overviewBlockDropIndicator;
+    }
+    function hideOverviewBlockDropIndicator() {
+      if (overviewBlockDropIndicator) overviewBlockDropIndicator.hidden = true;
+    }
+    function showOverviewBlockDropIndicator(frame, insertionTop) {
+      const frameRect = frame.getBoundingClientRect();
+      const indicator = ensureOverviewBlockDropIndicator();
+      indicator.style.left = frameRect.left + 'px';
+      indicator.style.top = insertionTop + 'px';
+      indicator.style.width = frameRect.width + 'px';
+      indicator.hidden = false;
+    }
+    function dropInsertionTop(frame, blocks, index) {
+      const frameRect = frame.getBoundingClientRect();
+      if (!blocks.length) return frameRect.top;
+      if (index < blocks.length) return blocks[index].getBoundingClientRect().top;
+      const lastRect = blocks[blocks.length - 1].getBoundingClientRect();
+      return Math.min(frameRect.bottom, lastRect.bottom + ${bodyParagraphGap} * stageLocalScale(frame));
+    }
+    function clearBlockDropFeedback() {
+      hideBlockDropIndicator();
+      hideOverviewBlockDropIndicator();
+    }
+    function clearOverviewDropPage() {
+      overviewRail.querySelectorAll('.overview-item.reorder-drop-page').forEach((item) => item.classList.remove('reorder-drop-page'));
+    }
+    function isImageReorderNode(node) {
+      return Boolean(node?.classList?.contains('xhs-image-block') || node?.classList?.contains('xhs-image-grid'));
+    }
+    function reorderGroupNodes(node) {
+      if (!node) return [];
+      return [node];
+    }
+    function overviewPageDropTarget(clientX, clientY) {
+      if (viewMode !== 'overview' || !blockReorderDrag || blockReorderDrag.node?.dataset?.split) return null;
+      const item = Array.from(overviewRail.querySelectorAll('.overview-item')).find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+      });
+      const targetPageIndex = Number(item?.dataset?.index);
+      const targetPage = pages[targetPageIndex];
+      const acceptsBodyFlow = targetPage?.type === 'body' || (targetPage?.type === 'cover' && !coverImageEnabled);
+      if (!item || !Number.isInteger(targetPageIndex) || targetPageIndex === pageIndex || !acceptsBodyFlow) return null;
+      const frame = item.querySelector('.xhs-cover-tail-frame, .xhs-body-frame');
+      if (!frame) return null;
+      const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
+      let targetBlockIndex = blocks.length;
+      for (let index = 0; index < blocks.length; index += 1) {
+        const rect = blocks[index].getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          targetBlockIndex = index;
+          break;
+        }
+      }
+      if (isImageReorderNode(blockReorderDrag.node)) {
+        const frameRect = frame.getBoundingClientRect();
+        const imageHeight = blockReorderDrag.node.getBoundingClientRect().height;
+        while (targetBlockIndex > 0 && frameRect.bottom - dropInsertionTop(frame, blocks, targetBlockIndex) < imageHeight + 4) {
+          targetBlockIndex -= 1;
+        }
+      }
+      return {
+        item,
+        frame,
+        insertionTop: dropInsertionTop(frame, blocks, targetBlockIndex),
+        pageIndex: targetPageIndex,
+        blockIndex: targetBlockIndex,
+      };
+    }
+    function updateFlowBlockDropTarget(clientX, clientY, bodyFrame) {
+      const crossPage = overviewPageDropTarget(clientX, clientY);
+      clearOverviewDropPage();
+      hideOverviewBlockDropIndicator();
+      if (crossPage) {
+        blockReorderDrag.crossPage = crossPage;
+        blockReorderDrag.hasDropTarget = true;
+        hideBlockDropIndicator();
+        showOverviewBlockDropIndicator(crossPage.frame, crossPage.insertionTop);
+        return;
+      }
+      blockReorderDrag.crossPage = null;
+      const frameRect = bodyFrame?.getBoundingClientRect();
+      const insideSourceFrame = frameRect && clientX >= frameRect.left && clientX <= frameRect.right && clientY >= frameRect.top && clientY <= frameRect.bottom;
+      if (insideSourceFrame) {
+        blockReorderDrag.hasDropTarget = true;
+        updateBlockDropIndicator(clientY, bodyFrame);
+      } else {
+        blockReorderDrag.hasDropTarget = false;
+        blockReorderDrag.insertBefore = null;
+        clearBlockDropFeedback();
+      }
+    }
     function updateBlockDropIndicator(clientY, bodyFrame) {
       const flowNode = blockReorderDrag?.node;
       if (!bodyFrame || !flowNode) return hideBlockDropIndicator();
-      const blocks = flowBlocksInBody(bodyFrame).filter((node) => node !== flowNode);
+      const movingNodes = new Set(reorderGroupNodes(flowNode));
+      const blocks = flowBlocksInBody(bodyFrame).filter((node) => !movingNodes.has(node));
       const indicator = ensureBlockDropIndicator();
       const cardRect = stageScale.getBoundingClientRect();
       const scale = stageLocalScale(bodyFrame);
       let target = null;
-      let top = bodyFrame.getBoundingClientRect().top;
+      let targetIndex = blocks.length;
       for (const block of blocks) {
         const rect = block.getBoundingClientRect();
         const mid = rect.top + rect.height / 2;
         if (clientY < mid) {
-          target = block;
-          top = rect.top;
+          targetIndex = blocks.indexOf(block);
           break;
         }
-        top = rect.bottom;
       }
+      if (isImageReorderNode(flowNode)) {
+        const frameRect = bodyFrame.getBoundingClientRect();
+        const imageHeight = flowNode.getBoundingClientRect().height;
+        while (targetIndex > 0 && frameRect.bottom - dropInsertionTop(bodyFrame, blocks, targetIndex) < imageHeight + 4) {
+          targetIndex -= 1;
+        }
+      }
+      target = blocks[targetIndex] || null;
+      const top = dropInsertionTop(bodyFrame, blocks, targetIndex);
       indicator.hidden = false;
       indicator.style.top = ((top - cardRect.top) / scale) + 'px';
       blockReorderDrag.insertBefore = target;
@@ -5022,51 +5251,111 @@ function studioHtmlV2(payload, libs) {
       const bodyFrame = blockReorderDrag?.bodyFrame;
       const flowNode = blockReorderDrag?.node;
       if (!bodyFrame || !flowNode) return;
+      if (!blockReorderDrag.hasDropTarget) {
+        reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
+      const crossPage = blockReorderDrag.crossPage;
+      if (crossPage) {
+        const selectedImageId = blockReorderDrag.imageId || '';
+        const selectedBlockId = blockReorderDrag.blockId || ensureFlowBlockId(flowNode);
+        const { holder, pageNodes } = collectBodyFlowHolderWithPageNodes();
+        const selectedBlock = findFlowBlockById(holder, selectedBlockId);
+        const movingNodes = reorderGroupNodes(selectedBlock);
+        const movingSet = new Set(movingNodes);
+        const targetNodes = (pageNodes.get(crossPage.pageIndex) || []).filter((node) =>
+          !node.classList?.contains('xhs-caret-anchor') && !movingSet.has(node)
+        );
+        let anchor = targetNodes[Math.max(0, Math.min(crossPage.blockIndex, targetNodes.length))] || null;
+        if (movingNodes.length) {
+          if (!anchor) {
+            const last = targetNodes[targetNodes.length - 1];
+            anchor = last?.nextSibling || null;
+          }
+          movingNodes.forEach((node) => holder.insertBefore(node, anchor));
+          reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+          clearOverviewDropPage();
+          clearBlockDropFeedback();
+          repaginateBodyBlocks(Array.from(holder.children), selectedImageId, selectedBlockId);
+          return;
+        }
+        reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
       const parent = flowNode.parentNode;
-      if (!parent) return;
-      if (blockReorderDrag.insertBefore) parent.insertBefore(flowNode, blockReorderDrag.insertBefore);
-      else parent.appendChild(flowNode);
-      flowNode.classList.remove('reorder-dragging');
-      hideBlockDropIndicator();
-      saveCurrentPage();
-      scheduleOverflowReflow(true);
+      if (!parent) {
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
+      const movingNodes = reorderGroupNodes(flowNode);
+      if (blockReorderDrag.insertBefore) movingNodes.forEach((node) => parent.insertBefore(node, blockReorderDrag.insertBefore));
+      else movingNodes.forEach((node) => parent.appendChild(node));
+      movingNodes.forEach((node) => node.classList.remove('reorder-dragging'));
+      clearOverviewDropPage();
+      clearBlockDropFeedback();
+      const selectedImageId = blockReorderDrag.imageId || '';
+      const selectedBlockId = blockReorderDrag.blockId || ensureFlowBlockId(flowNode);
+      const { holder } = collectBodyFlowHolderWithPageNodes();
+      repaginateBodyBlocks(Array.from(holder.children), selectedImageId, selectedBlockId);
+    }
+    function beginFlowBlockReorder(event, candidate, bodyFrame, captureTarget) {
+      if (blockReorderDrag || event.button !== 0) return false;
+      const flowNode = reorderableFlowNode(candidate);
+      if (!flowNode || !bodyFrame?.contains(flowNode)) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      recordEditorHistory();
+      selectFlowBlock(flowNode);
+      const imgFrame = flowNode.querySelector?.('.xhs-image-frame');
+      if (imgFrame) selectFrame(imgFrame);
+      const blockId = ensureFlowBlockId(flowNode);
+      blockReorderDrag = {
+        id: event.pointerId,
+        node: flowNode,
+        insertBefore: null,
+        bodyFrame,
+        captureTarget: captureTarget || event.currentTarget,
+        crossPage: null,
+        hasDropTarget: false,
+        blockId,
+        imageId: isImageReorderNode(flowNode)
+          ? ensureImageId(flowNode.querySelector?.('.xhs-image-block') || flowNode)
+          : '',
+      };
+      reorderGroupNodes(flowNode).forEach((node) => node.classList.add('reorder-dragging'));
+      blockReorderDrag.captureTarget?.setPointerCapture?.(event.pointerId);
+      updateFlowBlockDropTarget(event.clientX, event.clientY, bodyFrame);
+      return true;
+    }
+    function continueFlowBlockReorder(event) {
+      if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return false;
+      event.preventDefault();
+      updateFlowBlockDropTarget(event.clientX, event.clientY, blockReorderDrag.bodyFrame);
+      return true;
+    }
+    function endFlowBlockReorder(event) {
+      if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return false;
+      const drag = blockReorderDrag;
+      drag.captureTarget?.releasePointerCapture?.(event.pointerId);
+      finishFlowBlockReorder();
+      blockReorderDrag = null;
+      return true;
     }
     function bindBodyFrameReorder(bodyFrame) {
       if (!bodyFrame || bodyFrame.dataset.reorderBound === '1') return;
       bodyFrame.dataset.reorderBound = '1';
       bodyFrame.addEventListener('pointerdown', (event) => {
-        if (!event.altKey) return;
-        if (event.target?.closest?.('.xhs-resize-handle')) return;
-        const flowNode = reorderableFlowNode(event.target);
-        if (!flowNode || !bodyFrame.contains(flowNode)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        selectFlowBlock(flowNode);
-        const imgFrame = flowNode.querySelector?.('.xhs-image-frame');
-        if (imgFrame) selectFrame(imgFrame);
-        blockReorderDrag = {
-          id: event.pointerId,
-          node: flowNode,
-          insertBefore: null,
-          bodyFrame,
-        };
-        flowNode.classList.add('reorder-dragging');
-        bodyFrame.setPointerCapture?.(event.pointerId);
-        updateBlockDropIndicator(event.clientY, bodyFrame);
+        if (!event.altKey || event.target?.closest?.('.xhs-resize-handle')) return;
+        beginFlowBlockReorder(event, event.target, bodyFrame, bodyFrame);
       }, true);
-      bodyFrame.addEventListener('pointermove', (event) => {
-        if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return;
-        event.preventDefault();
-        updateBlockDropIndicator(event.clientY, blockReorderDrag.bodyFrame);
-      });
-      function endBlockReorder(event) {
-        if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return;
-        blockReorderDrag.bodyFrame.releasePointerCapture?.(event.pointerId);
-        finishFlowBlockReorder();
-        blockReorderDrag = null;
-      }
-      bodyFrame.addEventListener('pointerup', endBlockReorder);
-      bodyFrame.addEventListener('pointercancel', endBlockReorder);
+      bodyFrame.addEventListener('pointermove', continueFlowBlockReorder);
+      bodyFrame.addEventListener('pointerup', endFlowBlockReorder);
+      bodyFrame.addEventListener('pointercancel', endFlowBlockReorder);
       bodyFrame.addEventListener('mousedown', (event) => {
         if (event.altKey) return;
         const block = reorderableFlowNode(event.target);
