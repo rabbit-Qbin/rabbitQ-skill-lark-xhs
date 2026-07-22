@@ -277,7 +277,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.77"/);
+  assert.match(html, /"version":"0\.8\.78"/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
@@ -1036,6 +1036,7 @@ async function main() {
     // contains only user-created blank paragraphs, every blank remains a
     // visible line and can receive the caret independently.
     const emptyPageState = await page.evaluate(() => {
+      window.__virtualRowOriginalPages = pages.map((savedPage) => ({ ...savedPage }));
       saveCurrentPage({ skipNormalize: true });
       const originalPageCount = pages.length;
       pages.push({ type: 'body', html: '' });
@@ -1061,10 +1062,22 @@ async function main() {
       const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
         ? selection.anchorNode
         : selection?.anchorNode?.parentElement;
-      return Boolean(anchor?.closest?.('.xhs-manual-blank'));
+      const blank = anchor?.closest?.('.xhs-manual-blank');
+      const blanks = Array.from(document.querySelectorAll('#stageScale .xhs-body-frame > .xhs-manual-blank'));
+      return {
+        caretInBlank: Boolean(blank),
+        blankIndex: blanks.indexOf(blank),
+        blankCount: blanks.length,
+        virtualCount: blanks.filter((node) => node.classList.contains('xhs-virtual-row-blank')).length,
+        rowTops: blanks.slice(0, 4).map((node) => node.offsetTop),
+      };
     });
-    assert.strictEqual(emptyFrameCaret, true, 'clicking unused space on an empty page should focus its real blank line');
+    assert.strictEqual(emptyFrameCaret.caretInBlank, true, 'clicking unused space on an empty page should focus a real blank line');
+    assert.ok(emptyFrameCaret.blankIndex >= 5, 'clicking lower unused space should materialize the selected virtual row');
+    assert.strictEqual(emptyFrameCaret.virtualCount, emptyFrameCaret.blankCount, 'empty-page virtual rows should all be real editable blanks');
+    assert.ok(emptyFrameCaret.rowTops.slice(1).every((top, index) => Math.abs(top - emptyFrameCaret.rowTops[index] - 58) <= 1), 'virtual blank rows should use a 58px pitch');
     await page.evaluate(() => {
+      cancelPendingReflow();
       const frame = document.querySelector('#stageScale .xhs-body-frame');
       frame.replaceChildren(makeManualBlank(), makeManualBlank(), makeManualBlank());
       saveCurrentPage({ skipNormalize: true });
@@ -1100,12 +1113,103 @@ async function main() {
     }));
     assert.match(filledBlankState.text, /空白行可以直接输入/);
     assert.strictEqual(filledBlankState.manualBlankCount, 2, 'typing should promote only the focused blank into normal prose');
-    await page.evaluate((originalPageCount) => {
-      pages = pages.slice(0, originalPageCount);
+
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      const cover = window.__virtualRowOriginalPages.find((savedPage) => savedPage.type === 'cover');
+      pages = [{ ...cover }, { type: 'body', html: '<p class="xhs-p xhs-block">正文锚点</p>' }];
+      pageIndex = 1;
+      renderAll();
+    });
+    const proseVirtualFrame = await page.locator('#stageScale .xhs-body-frame').boundingBox();
+    assert.ok(proseVirtualFrame, 'non-empty body page should expose its remaining blank area');
+    await page.mouse.click(proseVirtualFrame.x + proseVirtualFrame.width / 2, proseVirtualFrame.y + proseVirtualFrame.height * 0.35);
+    const proseVirtualClick = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      return {
+        caretInVirtualRow: Boolean(anchor?.closest?.('.xhs-virtual-row-blank')),
+        virtualRows: document.querySelectorAll('#stageScale .xhs-virtual-row-blank').length,
+      };
+    });
+    assert.strictEqual(proseVirtualClick.caretInVirtualRow, true, 'clicking unused space below prose should create and focus the selected virtual row');
+    assert.ok(proseVirtualClick.virtualRows >= 3, 'clicking lower blank space after prose should materialize multiple rows');
+
+    // Empty visual space below content is a 58px virtual row grid. A block
+    // dragged there should materialize only the required blank rows, keep the
+    // insertion line snapped to the chosen row, and survive full repagination.
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      const source = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-callout'));
+      if (!source) throw new Error('callout fixture missing for virtual-row drag');
+      const probe = source.cloneNode(true);
+      probe.dataset.virtualRowDragProbe = '1';
+      probe.dataset.xhsBlockId = 'virtual-row-drag-probe';
+      const cover = window.__virtualRowOriginalPages.find((savedPage) => savedPage.type === 'cover');
+      pages = [{ ...cover }, { type: 'body', html: probe.outerHTML }];
+      pageIndex = 1;
+      renderAll();
+    });
+    await page.waitForTimeout(100);
+    const virtualDragBlock = page.locator('#stageScale [data-virtual-row-drag-probe="1"]');
+    await virtualDragBlock.hover();
+    await page.waitForTimeout(80);
+    const virtualDragHandle = page.locator('#blockHalo .xhs-block-drag-handle');
+    const virtualHandleBox = await virtualDragHandle.boundingBox();
+    const virtualFrameBox = await page.locator('#stageScale .xhs-body-frame').boundingBox();
+    assert.ok(virtualHandleBox && virtualFrameBox, 'virtual-row drag fixture should expose its block handle and body frame');
+    await page.mouse.move(virtualHandleBox.x + virtualHandleBox.width / 2, virtualHandleBox.y + virtualHandleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(virtualFrameBox.x + virtualFrameBox.width / 2, virtualFrameBox.y + virtualFrameBox.height * 0.42, { steps: 8 });
+    const virtualDragFeedback = await page.evaluate(() => {
+      const indicator = document.querySelector('.xhs-drop-indicator:not([hidden])');
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      const indicatorRect = indicator?.getBoundingClientRect();
+      const frameRect = frame?.getBoundingClientRect();
+      const scale = frame ? stageLocalScale(frame) : 1;
+      return {
+        rowsBefore: blockReorderDrag?.virtualRowsBefore,
+        indicatorVisible: Boolean(indicator),
+        logicalTop: indicatorRect && frameRect ? (indicatorRect.top - frameRect.top) / scale : -1,
+      };
+    });
+    assert.ok(Number.isInteger(virtualDragFeedback.rowsBefore) && virtualDragFeedback.rowsBefore >= 3, 'blank-area drag should resolve to a virtual row below the first line');
+    assert.strictEqual(virtualDragFeedback.indicatorVisible, true, 'blank-area drag should show the insertion line');
+    assert.ok(Math.abs(virtualDragFeedback.logicalTop / 58 - Math.round(virtualDragFeedback.logicalTop / 58)) < 0.05, 'blank-area insertion line should snap to the 58px row grid');
+    await page.mouse.up();
+    await page.waitForTimeout(850);
+    const virtualDragCommitted = await page.evaluate(() => {
+      const { holder } = collectBodyFlowHolderWithPageNodes();
+      const probe = holder.querySelector('[data-virtual-row-drag-probe="1"]');
+      let previous = probe?.previousElementSibling || null;
+      let precedingRows = 0;
+      while (isVirtualRowBlank(previous)) {
+        precedingRows += 1;
+        previous = previous.previousElementSibling;
+      }
+      const visibleRows = Array.from(document.querySelectorAll('#stageScale .xhs-virtual-row-blank'));
+      return {
+        probeCount: holder.querySelectorAll('[data-virtual-row-drag-probe="1"]').length,
+        precedingRows,
+        visibleRowHeights: visibleRows.map((row) => row.offsetHeight),
+        selected: Boolean(document.querySelector('#stageScale [data-virtual-row-drag-probe="1"].selected-flow-block')),
+      };
+    });
+    assert.strictEqual(virtualDragCommitted.probeCount, 1, 'virtual-row drag must keep the moved block exactly once');
+    assert.strictEqual(virtualDragCommitted.precedingRows, virtualDragFeedback.rowsBefore, 'drop should materialize exactly the selected number of preceding virtual rows');
+    assert.ok(virtualDragCommitted.visibleRowHeights.length >= 1 && virtualDragCommitted.visibleRowHeights.every((height) => Math.abs(height - 58) <= 1), 'materialized rows must remain 58px after repagination');
+    assert.strictEqual(virtualDragCommitted.selected, true, 'moved block should remain selected after virtual-row repagination');
+
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      pages = window.__virtualRowOriginalPages.map((savedPage) => ({ ...savedPage }));
+      delete window.__virtualRowOriginalPages;
       pageIndex = Math.min(1, pages.length - 1);
       persistDraft();
       renderAll();
-    }, emptyPageState.originalPageCount);
+    });
     await page.waitForTimeout(120);
 
   const sourceCodeProbe = await page.evaluate(() => {

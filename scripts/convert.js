@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.77";
+const VERSION = "0.8.78";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -967,6 +967,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-body-frame > .xhs-page-end.xhs-manual-blank { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
     .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank { min-height: var(--body-line-px) !important; height: auto !important; margin: 0 0 var(--body-paragraph-gap) !important; padding: 0 !important; overflow: visible !important; }
     .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank:last-child { margin-bottom: 0 !important; }
+    .xhs-body-frame > .xhs-manual-blank.xhs-virtual-row-blank { min-height: var(--body-line-px) !important; height: var(--body-line-px) !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
     .xhs-body-frame > .xhs-page-end { margin-bottom: 0 !important; }
@@ -2900,7 +2901,9 @@ function studioHtmlV2(payload, libs) {
             h = metrics.outer;
             fitHeight = metrics.fit;
           }
-          const collapsesAtPageStart = !current.length && block.classList.contains('xhs-manual-blank');
+          const collapsesAtPageStart = !current.length &&
+            block.classList.contains('xhs-manual-blank') &&
+            !block.classList.contains('xhs-virtual-row-blank');
           current.push(block);
           used += collapsesAtPageStart ? 0 : h;
           pending = null;
@@ -2935,7 +2938,9 @@ function studioHtmlV2(payload, libs) {
           const metrics = measureBlockMetrics(block, nextSourceBlock);
           const h = metrics.outer;
           const fitHeight = metrics.fit;
-          const collapsesAtPageStart = !tailNodes.length && block.classList.contains('xhs-manual-blank');
+          const collapsesAtPageStart = !tailNodes.length &&
+            block.classList.contains('xhs-manual-blank') &&
+            !block.classList.contains('xhs-virtual-row-blank');
           const effectiveHeight = collapsesAtPageStart ? 0 : h;
           const effectiveFitHeight = collapsesAtPageStart ? 0 : fitHeight;
           const remaining = tailLimit - used;
@@ -3221,10 +3226,14 @@ function studioHtmlV2(payload, libs) {
       p.innerHTML = '<br>';
       return p;
     }
-    function makeManualBlank() {
+    function makeManualBlank(options = {}) {
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-manual-blank';
       p.dataset.xhsManualBlank = '1';
+      if (options.virtualRow) {
+        p.classList.add('xhs-virtual-row-blank');
+        p.dataset.xhsVirtualRow = '1';
+      }
       p.innerHTML = '<br>';
       return p;
     }
@@ -3233,7 +3242,7 @@ function studioHtmlV2(payload, libs) {
       let flowChildren = Array.from(frame.children).filter((node) => !node.classList?.contains('xhs-caret-anchor'));
       let inserted = null;
       if (!flowChildren.length) {
-        inserted = makeManualBlank();
+        inserted = makeManualBlank({ virtualRow: true });
         frame.appendChild(inserted);
         flowChildren = [inserted];
       }
@@ -4247,8 +4256,9 @@ function studioHtmlV2(payload, libs) {
     function normalizeFilledManualBlanks(root) {
       root?.querySelectorAll?.('.xhs-manual-blank').forEach((blank) => {
         if (cleanText(blank.textContent || '')) {
-          blank.classList.remove('xhs-manual-blank');
+          blank.classList.remove('xhs-manual-blank', 'xhs-virtual-row-blank');
           delete blank.dataset.xhsManualBlank;
+          delete blank.dataset.xhsVirtualRow;
         }
       });
     }
@@ -4581,18 +4591,8 @@ function studioHtmlV2(payload, libs) {
           setCaretInside(blank);
           return;
         }
-        if (e.target === frame && frame.classList.contains('xhs-empty-flow-frame')) {
-          const blanks = Array.from(frame.children).filter((node) => node.classList?.contains('xhs-manual-blank'));
-          if (!blanks.length) return;
-          const nearest = blanks.reduce((best, node) => {
-            const rect = node.getBoundingClientRect();
-            const distance = Math.abs(e.clientY - (rect.top + rect.height / 2));
-            return !best || distance < best.distance ? { node, distance } : best;
-          }, null)?.node;
-          if (!nearest) return;
+        if (e.target === frame && focusVirtualBodyRow(frame, e.clientY)) {
           e.preventDefault();
-          frame.focus({ preventScroll: true });
-          setCaretInside(nearest);
         }
       });
       frame.addEventListener('mouseover', (e) => {
@@ -5104,6 +5104,75 @@ function studioHtmlV2(payload, libs) {
           node.classList?.contains('xhs-rich');
       });
     }
+    function isVirtualRowBlank(node) {
+      return Boolean(node?.classList?.contains('xhs-virtual-row-blank') || node?.dataset?.xhsVirtualRow === '1');
+    }
+    function splitTrailingVirtualRows(blocks) {
+      const contentBlocks = Array.from(blocks || []);
+      const trailingRows = [];
+      while (contentBlocks.length && isVirtualRowBlank(contentBlocks[contentBlocks.length - 1])) {
+        trailingRows.unshift(contentBlocks.pop());
+      }
+      return { contentBlocks, trailingRows };
+    }
+    function virtualRowHeight(frame) {
+      return Math.max(1, Number(config.bodyFontSize || ${bodyFontSize}) * Number(config.bodyLineHeight || ${bodyLineHeight}) * stageLocalScale(frame));
+    }
+    function movingBlockHeightInFrame(node, frame) {
+      if (!node || !frame) return virtualRowHeight(frame);
+      const sourceFrame = node.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      const sourceScale = sourceFrame ? stageLocalScale(sourceFrame) : 1;
+      const logicalHeight = Math.max(
+        Number(node.offsetHeight || 0),
+        node.getBoundingClientRect().height / Math.max(0.01, sourceScale),
+      );
+      return logicalHeight * stageLocalScale(frame);
+    }
+    function virtualRowPosition(frame, blocks, clientY, movingNode = null) {
+      if (!frame) return null;
+      const frameRect = frame.getBoundingClientRect();
+      const { contentBlocks, trailingRows } = splitTrailingVirtualRows(blocks);
+      const baseTop = dropInsertionTop(frame, contentBlocks, contentBlocks.length);
+      if (clientY < baseTop || clientY > frameRect.bottom) return null;
+      const rowHeight = virtualRowHeight(frame);
+      const reservedHeight = movingNode ? movingBlockHeightInFrame(movingNode, frame) : rowHeight;
+      const safety = 6 * stageLocalScale(frame);
+      if (movingNode && reservedHeight + safety > frameRect.bottom - baseTop) return null;
+      const maxRowsBefore = Math.max(0, Math.floor((frameRect.bottom - baseTop - reservedHeight - safety) / rowHeight));
+      const rowsBefore = Math.max(0, Math.min(maxRowsBefore, Math.floor((clientY - baseTop) / rowHeight)));
+      return {
+        baseTop,
+        contentBlocks,
+        trailingRows,
+        rowsBefore,
+        insertionTop: baseTop + rowsBefore * rowHeight,
+      };
+    }
+    function ensureVirtualRows(container, rows, count, endAnchor = null) {
+      const nextRows = Array.from(rows || []);
+      while (nextRows.length < count) {
+        const blank = makeManualBlank({ virtualRow: true });
+        container.insertBefore(blank, endAnchor);
+        nextRows.push(blank);
+      }
+      return nextRows;
+    }
+    function focusVirtualBodyRow(frame, clientY) {
+      const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
+      const target = virtualRowPosition(frame, blocks, clientY);
+      if (!target) return false;
+      recordEditorHistory();
+      persistDraftCheckpoint();
+      const rows = ensureVirtualRows(frame, target.trailingRows, target.rowsBefore + 1);
+      const blank = rows[target.rowsBefore];
+      if (!blank) return false;
+      syncEmptyFlowFrame(frame);
+      frame.focus({ preventScroll: true });
+      setCaretInside(blank);
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(true);
+      return true;
+    }
     function ensureBlockDropIndicator() {
       if (blockDropIndicator?.isConnected && blockDropIndicator.parentNode === stageScale) return blockDropIndicator;
       blockDropIndicator = null;
@@ -5170,6 +5239,17 @@ function studioHtmlV2(payload, libs) {
       const frame = item.querySelector('.xhs-cover-tail-frame, .xhs-body-frame');
       if (!frame) return null;
       const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
+      const virtualTarget = virtualRowPosition(frame, blocks, clientY, blockReorderDrag.node);
+      if (virtualTarget) {
+        return {
+          item,
+          frame,
+          insertionTop: virtualTarget.insertionTop,
+          pageIndex: targetPageIndex,
+          blockIndex: virtualTarget.contentBlocks.length,
+          virtualRowsBefore: virtualTarget.rowsBefore,
+        };
+      }
       let targetBlockIndex = blocks.length;
       for (let index = 0; index < blocks.length; index += 1) {
         const rect = blocks[index].getBoundingClientRect();
@@ -5213,6 +5293,7 @@ function studioHtmlV2(payload, libs) {
       } else {
         blockReorderDrag.hasDropTarget = false;
         blockReorderDrag.insertBefore = null;
+        blockReorderDrag.virtualRowsBefore = null;
         clearBlockDropFeedback();
       }
     }
@@ -5224,6 +5305,15 @@ function studioHtmlV2(payload, libs) {
       const indicator = ensureBlockDropIndicator();
       const cardRect = stageScale.getBoundingClientRect();
       const scale = stageLocalScale(bodyFrame);
+      const virtualTarget = virtualRowPosition(bodyFrame, blocks, clientY, flowNode);
+      if (virtualTarget) {
+        indicator.hidden = false;
+        indicator.style.top = ((virtualTarget.insertionTop - cardRect.top) / scale) + 'px';
+        blockReorderDrag.insertBefore = null;
+        blockReorderDrag.virtualRowsBefore = virtualTarget.rowsBefore;
+        return;
+      }
+      blockReorderDrag.virtualRowsBefore = null;
       let target = null;
       let targetIndex = blocks.length;
       for (const block of blocks) {
@@ -5268,9 +5358,23 @@ function studioHtmlV2(payload, libs) {
         const targetNodes = (pageNodes.get(crossPage.pageIndex) || []).filter((node) =>
           !node.classList?.contains('xhs-caret-anchor') && !movingSet.has(node)
         );
-        let anchor = targetNodes[Math.max(0, Math.min(crossPage.blockIndex, targetNodes.length))] || null;
+        let anchor = null;
+        if (Number.isInteger(crossPage.virtualRowsBefore)) {
+          const { trailingRows } = splitTrailingVirtualRows(targetNodes);
+          let pageEndAnchor = targetNodes[targetNodes.length - 1]?.nextSibling || null;
+          while (pageEndAnchor && movingSet.has(pageEndAnchor)) pageEndAnchor = pageEndAnchor.nextSibling;
+          if (!pageEndAnchor && !targetNodes.length) {
+            for (let index = crossPage.pageIndex + 1; index < pages.length && !pageEndAnchor; index += 1) {
+              pageEndAnchor = (pageNodes.get(index) || []).find((node) => !movingSet.has(node)) || null;
+            }
+          }
+          const rows = ensureVirtualRows(holder, trailingRows, crossPage.virtualRowsBefore, pageEndAnchor);
+          anchor = rows[crossPage.virtualRowsBefore] || pageEndAnchor;
+        } else {
+          anchor = targetNodes[Math.max(0, Math.min(crossPage.blockIndex, targetNodes.length))] || null;
+        }
         if (movingNodes.length) {
-          if (!anchor) {
+          if (!anchor && !Number.isInteger(crossPage.virtualRowsBefore)) {
             const last = targetNodes[targetNodes.length - 1];
             anchor = last?.nextSibling || null;
           }
@@ -5293,7 +5397,17 @@ function studioHtmlV2(payload, libs) {
         return;
       }
       const movingNodes = reorderGroupNodes(flowNode);
-      if (blockReorderDrag.insertBefore) movingNodes.forEach((node) => parent.insertBefore(node, blockReorderDrag.insertBefore));
+      let samePageAnchor = blockReorderDrag.insertBefore;
+      if (Number.isInteger(blockReorderDrag.virtualRowsBefore)) {
+        const movingSet = new Set(movingNodes);
+        const targetNodes = flowBlocksInBody(parent).filter((node) =>
+          !node.classList?.contains('xhs-caret-anchor') && !movingSet.has(node)
+        );
+        const { trailingRows } = splitTrailingVirtualRows(targetNodes);
+        const rows = ensureVirtualRows(parent, trailingRows, blockReorderDrag.virtualRowsBefore);
+        samePageAnchor = rows[blockReorderDrag.virtualRowsBefore] || null;
+      }
+      if (samePageAnchor) movingNodes.forEach((node) => parent.insertBefore(node, samePageAnchor));
       else movingNodes.forEach((node) => parent.appendChild(node));
       movingNodes.forEach((node) => node.classList.remove('reorder-dragging'));
       clearOverviewDropPage();
@@ -5322,6 +5436,7 @@ function studioHtmlV2(payload, libs) {
         captureTarget: captureTarget || event.currentTarget,
         crossPage: null,
         hasDropTarget: false,
+        virtualRowsBefore: null,
         blockId,
         imageId: isImageReorderNode(flowNode)
           ? ensureImageId(flowNode.querySelector?.('.xhs-image-block') || flowNode)
