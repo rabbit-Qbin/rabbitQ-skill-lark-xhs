@@ -277,7 +277,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.78"/);
+  assert.match(html, /"version":"0\.8\.81"/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
@@ -1032,9 +1032,9 @@ async function main() {
     assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
     assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
 
-    // A body page with no prose must still expose a real editable line. If it
-    // contains only user-created blank paragraphs, every blank remains a
-    // visible line and can receive the caret independently.
+    // A body page with no prose exposes one real editable line. Clicking lower
+    // empty canvas moves the selection to that line; it must not manufacture
+    // a stack of persistent paragraphs just to draw the caret.
     const emptyPageState = await page.evaluate(() => {
       window.__virtualRowOriginalPages = pages.map((savedPage) => ({ ...savedPage }));
       saveCurrentPage({ skipNormalize: true });
@@ -1068,14 +1068,13 @@ async function main() {
         caretInBlank: Boolean(blank),
         blankIndex: blanks.indexOf(blank),
         blankCount: blanks.length,
-        virtualCount: blanks.filter((node) => node.classList.contains('xhs-virtual-row-blank')).length,
-        rowTops: blanks.slice(0, 4).map((node) => node.offsetTop),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
       };
     });
     assert.strictEqual(emptyFrameCaret.caretInBlank, true, 'clicking unused space on an empty page should focus a real blank line');
-    assert.ok(emptyFrameCaret.blankIndex >= 5, 'clicking lower unused space should materialize the selected virtual row');
-    assert.strictEqual(emptyFrameCaret.virtualCount, emptyFrameCaret.blankCount, 'empty-page virtual rows should all be real editable blanks');
-    assert.ok(emptyFrameCaret.rowTops.slice(1).every((top, index) => Math.abs(top - emptyFrameCaret.rowTops[index] - 58) <= 1), 'virtual blank rows should use a 58px pitch');
+    assert.strictEqual(emptyFrameCaret.blankIndex, 0, 'empty-canvas clicks should reuse the single editable line');
+    assert.strictEqual(emptyFrameCaret.blankCount, 1, 'selection-only clicks must not add document paragraphs');
+    assert.strictEqual(emptyFrameCaret.gapCursorCount, 0, 'the real empty paragraph does not need an extra gap cursor');
     await page.evaluate(() => {
       cancelPendingReflow();
       const frame = document.querySelector('#stageScale .xhs-body-frame');
@@ -1130,16 +1129,17 @@ async function main() {
         ? selection.anchorNode
         : selection?.anchorNode?.parentElement;
       return {
-        caretInVirtualRow: Boolean(anchor?.closest?.('.xhs-virtual-row-blank')),
-        virtualRows: document.querySelectorAll('#stageScale .xhs-virtual-row-blank').length,
+        caretInGapCursor: Boolean(anchor?.closest?.('.xhs-gap-cursor')),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+        manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
       };
     });
-    assert.strictEqual(proseVirtualClick.caretInVirtualRow, true, 'clicking unused space below prose should create and focus the selected virtual row');
-    assert.ok(proseVirtualClick.virtualRows >= 3, 'clicking lower blank space after prose should materialize multiple rows');
+    assert.strictEqual(proseVirtualClick.caretInGapCursor, true, 'clicking unused space below prose should focus a temporary gap cursor');
+    assert.strictEqual(proseVirtualClick.gapCursorCount, 1, 'blank canvas needs only one selection decoration');
+    assert.strictEqual(proseVirtualClick.manualBlankCount, 0, 'a gap cursor must not mutate the document into empty paragraphs');
 
-    // Empty visual space below content is a 58px virtual row grid. A block
-    // dragged there should materialize only the required blank rows, keep the
-    // insertion line snapped to the chosen row, and survive full repagination.
+    // A drop cursor in empty visual space is only feedback. Dropping moves the
+    // block to the end-of-page document position without writing blank rows.
     await page.evaluate(() => {
       cancelPendingReflow();
       const source = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-callout'));
@@ -1148,7 +1148,7 @@ async function main() {
       probe.dataset.virtualRowDragProbe = '1';
       probe.dataset.xhsBlockId = 'virtual-row-drag-probe';
       const cover = window.__virtualRowOriginalPages.find((savedPage) => savedPage.type === 'cover');
-      pages = [{ ...cover }, { type: 'body', html: probe.outerHTML }];
+      pages = [{ ...cover }, { type: 'body', html: probe.outerHTML + '<p class="xhs-p xhs-block">正文保留</p>' }];
       pageIndex = 1;
       renderAll();
     });
@@ -1170,37 +1170,53 @@ async function main() {
       const frameRect = frame?.getBoundingClientRect();
       const scale = frame ? stageLocalScale(frame) : 1;
       return {
-        rowsBefore: blockReorderDrag?.virtualRowsBefore,
+        hasDropTarget: Boolean(blockReorderDrag?.hasDropTarget),
         indicatorVisible: Boolean(indicator),
         logicalTop: indicatorRect && frameRect ? (indicatorRect.top - frameRect.top) / scale : -1,
+        expectedTop: frameRect ? (dropInsertionTop(frame, flowBlocksInBody(frame).filter((node) => !node.classList.contains('reorder-dragging')), flowBlocksInBody(frame).filter((node) => !node.classList.contains('reorder-dragging')).length) - frameRect.top) / scale : -1,
       };
     });
-    assert.ok(Number.isInteger(virtualDragFeedback.rowsBefore) && virtualDragFeedback.rowsBefore >= 3, 'blank-area drag should resolve to a virtual row below the first line');
+    assert.strictEqual(virtualDragFeedback.hasDropTarget, true, 'blank-area drag should resolve to the document tail');
     assert.strictEqual(virtualDragFeedback.indicatorVisible, true, 'blank-area drag should show the insertion line');
-    assert.ok(Math.abs(virtualDragFeedback.logicalTop / 58 - Math.round(virtualDragFeedback.logicalTop / 58)) < 0.05, 'blank-area insertion line should snap to the 58px row grid');
+    assert.ok(Math.abs(virtualDragFeedback.logicalTop - virtualDragFeedback.expectedTop) <= 2, 'drop cursor should show the actual end-of-content insertion point');
     await page.mouse.up();
     await page.waitForTimeout(850);
     const virtualDragCommitted = await page.evaluate(() => {
       const { holder } = collectBodyFlowHolderWithPageNodes();
       const probe = holder.querySelector('[data-virtual-row-drag-probe="1"]');
-      let previous = probe?.previousElementSibling || null;
-      let precedingRows = 0;
-      while (isVirtualRowBlank(previous)) {
-        precedingRows += 1;
-        previous = previous.previousElementSibling;
-      }
-      const visibleRows = Array.from(document.querySelectorAll('#stageScale .xhs-virtual-row-blank'));
       return {
         probeCount: holder.querySelectorAll('[data-virtual-row-drag-probe="1"]').length,
-        precedingRows,
-        visibleRowHeights: visibleRows.map((row) => row.offsetHeight),
+        previousText: (probe?.previousElementSibling?.textContent || '').trim(),
+        manualBlankCount: holder.querySelectorAll('.xhs-manual-blank').length,
         selected: Boolean(document.querySelector('#stageScale [data-virtual-row-drag-probe="1"].selected-flow-block')),
       };
     });
-    assert.strictEqual(virtualDragCommitted.probeCount, 1, 'virtual-row drag must keep the moved block exactly once');
-    assert.strictEqual(virtualDragCommitted.precedingRows, virtualDragFeedback.rowsBefore, 'drop should materialize exactly the selected number of preceding virtual rows');
-    assert.ok(virtualDragCommitted.visibleRowHeights.length >= 1 && virtualDragCommitted.visibleRowHeights.every((height) => Math.abs(height - 58) <= 1), 'materialized rows must remain 58px after repagination');
-    assert.strictEqual(virtualDragCommitted.selected, true, 'moved block should remain selected after virtual-row repagination');
+    assert.strictEqual(virtualDragCommitted.probeCount, 1, 'blank-area drag must keep the moved block exactly once');
+    assert.strictEqual(virtualDragCommitted.previousText, '正文保留', 'dropping in blank canvas should move the block after existing page content');
+    assert.strictEqual(virtualDragCommitted.manualBlankCount, 0, 'drop feedback must not persist as blank paragraphs');
+    assert.strictEqual(virtualDragCommitted.selected, true, 'moved block should remain selected after repagination');
+
+    const imageTailFitState = await page.evaluate(() => {
+      const image = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-image-block'))?.cloneNode(true);
+      if (!image) return null;
+      const beforeHeight = parseFloat(image.querySelector('.xhs-image-frame')?.style.height || '0');
+      const beforeFit = measureBlockMetrics(image).fit;
+      const available = beforeFit - 24;
+      const changed = fitImageBlockIntoTailSpace(image, available);
+      return {
+        changed,
+        available,
+        beforeHeight,
+        afterHeight: parseFloat(image.querySelector('.xhs-image-frame')?.style.height || '0'),
+        afterFit: measureBlockMetrics(image).fit,
+        userHeight: image.querySelector('.xhs-image-frame')?.dataset.userHeight || '',
+      };
+    });
+    assert.ok(imageTailFitState, 'expected an image fixture for tail-space fitting');
+    assert.strictEqual(imageTailFitState.changed, true, 'an image that narrowly misses the target page should shrink to the tail space');
+    assert.ok(imageTailFitState.afterHeight < imageTailFitState.beforeHeight, 'tail fitting must adjust only the image frame height');
+    assert.ok(imageTailFitState.afterFit <= imageTailFitState.available + 1, 'the adjusted image must fit the target tail');
+    assert.strictEqual(imageTailFitState.userHeight, '1', 'tail-fitted image height must survive later repagination');
 
     await page.evaluate(() => {
       cancelPendingReflow();
@@ -1861,9 +1877,9 @@ async function main() {
     assert.ok(["金句", "注意", "结论", "划重点"].every((label) => content.labels.includes(label)));
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
-    // In overview mode, Alt-drag an image near the bottom of another page.
-    // If the exact pointer position cannot fit the image, the insertion index
-    // should shift upward inside that page instead of rejecting the move.
+    // In overview mode, Alt-drag an image into the middle of prose on another
+    // page. The text caret under the pointer is the document insertion point:
+    // prose must split around the image instead of collapsing to a block edge.
     const crossDragImagePageIndex = await page.evaluate(() => {
       const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
       for (let index = 1; index < tabs.length; index += 1) {
@@ -1873,14 +1889,25 @@ async function main() {
       return -1;
     });
     assert.ok(crossDragImagePageIndex > 0, 'expected an image on a body page for cross-page drag');
-    const crossPageTargetIndex = crossDragImagePageIndex + 1 < pageCount ? crossDragImagePageIndex + 1 : crossDragImagePageIndex - 1;
-    assert.ok(crossPageTargetIndex > 0 && crossPageTargetIndex !== crossDragImagePageIndex, 'expected another body page for image drag target');
     await page.locator('#pageTabs button').nth(crossDragImagePageIndex).click({ force: true });
     await page.locator('#overviewModeBtn').click();
     await page.waitForTimeout(160);
+    const crossPageTargetIndex = await page.evaluate((sourceIndex) => {
+      const target = Array.from(document.querySelectorAll('.overview-item')).find((item) => {
+        const index = Number(item.dataset.index);
+        const paragraph = Array.from(item.querySelectorAll('.xhs-p, .xhs-rich')).find((node) =>
+          !node.classList.contains('xhs-manual-blank') && (node.textContent || '').trim().length >= 6
+        );
+        return index > 0 && index !== sourceIndex && paragraph;
+      });
+      return Number(target?.dataset?.index ?? -1);
+    }, crossDragImagePageIndex);
+    assert.ok(crossPageTargetIndex > 0 && crossPageTargetIndex !== crossDragImagePageIndex, 'expected prose on another body page for image drag target');
     const sourceImageFrame = page.locator('#stageScale .xhs-image-frame').first();
     const targetOverviewCard = page.locator(`.overview-item[data-index="${crossPageTargetIndex}"] .overview-card-frame`);
     await targetOverviewCard.scrollIntoViewIfNeeded();
+    const targetParagraph = targetOverviewCard.locator('.xhs-p:not(.xhs-manual-blank), .xhs-rich:not(.xhs-manual-blank)').filter({ hasText: /\S/ }).first();
+    const targetParagraphText = (await targetParagraph.textContent()).trim();
     await sourceImageFrame.hover();
     await page.waitForTimeout(80);
     const sourceHandle = page.locator('#blockHalo .xhs-block-drag-handle');
@@ -1900,10 +1927,16 @@ async function main() {
     assert.ok(handleStyle.dotWidth <= 3, 'drag handle dots must stay visually light');
     const sourceBox = await sourceHandle.boundingBox();
     const targetBox = await targetOverviewCard.boundingBox();
-    assert.ok(sourceBox && targetBox, 'expected visible image handle and target overview page');
+    const targetParagraphBox = await targetParagraph.boundingBox();
+    assert.ok(sourceBox && targetBox && targetParagraphBox, 'expected visible image handle and target prose');
+    const sourceDragImageId = await sourceImageFrame.evaluate((frame) => ensureImageId(frame.closest('.xhs-image-block')));
     await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
     await page.mouse.down();
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * 0.84, { steps: 8 });
+    await page.mouse.move(
+      targetParagraphBox.x + Math.min(150, targetParagraphBox.width * 0.25),
+      targetParagraphBox.y + targetParagraphBox.height / 2,
+      { steps: 8 },
+    );
     const dragFeedbackState = await page.evaluate((targetIndex) => {
       const indicator = document.querySelector('.xhs-overview-drop-indicator');
       const target = document.querySelector('.overview-item[data-index="' + targetIndex + '"] .overview-card-frame');
@@ -1914,26 +1947,46 @@ async function main() {
         indicatorVisible: Boolean(indicator && !indicator.hidden),
         indicatorHeight: indicatorRect?.height || 0,
         indicatorInsideTarget: Boolean(indicatorRect && targetRect && indicatorRect.top >= targetRect.top && indicatorRect.top <= targetRect.bottom),
+        textOffset: blockReorderDrag?.crossPage?.textOffset,
       };
     }, crossPageTargetIndex);
     assert.strictEqual(dragFeedbackState.previewExists, false, 'dragging must not create a transparent destination clone');
     assert.ok(dragFeedbackState.indicatorVisible, 'dragging should show the exact cross-page insertion line');
     assert.ok(dragFeedbackState.indicatorHeight <= 3, 'cross-page feedback should stay a lightweight insertion line');
     assert.ok(dragFeedbackState.indicatorInsideTarget, 'insertion line should stay inside the target page');
+    assert.ok(Number.isInteger(dragFeedbackState.textOffset) && dragFeedbackState.textOffset > 0 && dragFeedbackState.textOffset < targetParagraphText.length, 'cross-page prose drop should resolve to a character offset inside the paragraph: ' + JSON.stringify({ dragFeedbackState, targetParagraphText }));
     await page.mouse.up();
     await page.waitForTimeout(850);
-    const imageDragState = await page.evaluate(() => ({
+    const imageDragState = await page.evaluate(({ imageId }) => {
+      const holder = collectBodyFlowHolder();
+      const image = findImageBlockById(holder, imageId);
+      const previousText = (image?.previousElementSibling?.textContent || '').trim();
+      const nextText = (image?.nextElementSibling?.textContent || '').trim();
+      return {
       activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
+      imagePageIndex: pageIndexForImageId(imageId),
       selectedImageCount: document.querySelectorAll('#stageScale .xhs-image-block .selected-image-frame').length,
       targetOutlineCount: document.querySelectorAll('.overview-item.reorder-drop-page').length,
       draggingClassCount: document.querySelectorAll('#stageScale .reorder-dragging').length,
       indicatorVisible: Boolean(document.querySelector('.xhs-overview-drop-indicator:not([hidden])')),
-    }));
-    assert.strictEqual(imageDragState.activeIndex, crossPageTargetIndex, 'cross-page image drag should activate the target page after repagination');
+      previousText,
+      nextText,
+      };
+    }, { imageId: sourceDragImageId });
+    assert.strictEqual(imageDragState.activeIndex, imageDragState.imagePageIndex, 'cross-page image drag should activate the image page after repagination');
+    assert.ok(imageDragState.previousText && imageDragState.nextText, 'the target paragraph should be split into text before and after the image');
+    assert.strictEqual(imageDragState.previousText + imageDragState.nextText, targetParagraphText, 'dropping inside prose must preserve every target-paragraph character');
     assert.strictEqual(imageDragState.selectedImageCount, 1, 'moved image should remain selected after cross-page repagination');
     assert.strictEqual(imageDragState.targetOutlineCount, 0, 'cross-page drop highlight should clear after drop');
     assert.strictEqual(imageDragState.draggingClassCount, 0, 'cross-page image drag must not persist its temporary dragging style');
     assert.strictEqual(imageDragState.indicatorVisible, false, 'cross-page insertion line should clear after drop');
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(450);
+    const paragraphRestoredAfterDragUndo = await page.evaluate((text) => {
+      const holder = collectBodyFlowHolder();
+      return Array.from(holder.querySelectorAll('.xhs-p, .xhs-rich')).some((node) => (node.textContent || '').trim() === text);
+    }, targetParagraphText);
+    assert.strictEqual(paragraphRestoredAfterDragUndo, true, 'undo after a prose drop should restore the original unsplit paragraph');
     await page.locator('#editModeBtn').click();
     await page.waitForTimeout(100);
 
@@ -1963,6 +2016,7 @@ async function main() {
     const calloutBox = await sourceCallout.boundingBox();
     const structuralTargetBox = await structuralTargetCard.boundingBox();
     assert.ok(calloutBox && structuralTargetBox, 'expected visible card block and structural target page');
+    const structuralBlockId = await sourceCallout.evaluate((callout) => ensureFlowBlockId(callout));
     await page.mouse.move(calloutBox.x + calloutBox.width / 2, calloutBox.y + calloutBox.height / 2);
     await page.keyboard.down('Alt');
     await page.mouse.down();
@@ -1970,14 +2024,15 @@ async function main() {
     await page.mouse.up();
     await page.keyboard.up('Alt');
     await page.waitForTimeout(850);
-    const structuralDragState = await page.evaluate(() => ({
+    const structuralDragState = await page.evaluate((blockId) => ({
       activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
+      blockPageIndex: pageIndexForFlowBlockId(blockId),
       selectedCardCount: document.querySelectorAll('#stageScale .xhs-callout.selected-flow-block').length,
       integrity: Array.from(studioFlowIntegritySignature(pages)).sort().join(''),
       targetOutlineCount: document.querySelectorAll('.overview-item.reorder-drop-page').length,
       draggingClassCount: document.querySelectorAll('#stageScale .reorder-dragging').length,
-    }));
-    assert.strictEqual(structuralDragState.activeIndex, structuralDragTargetIndex, 'cross-page structural drag should activate the moved block page');
+    }), structuralBlockId);
+    assert.strictEqual(structuralDragState.activeIndex, structuralDragState.blockPageIndex, 'cross-page structural drag should activate the moved block page');
     assert.strictEqual(structuralDragState.selectedCardCount, 1, 'moved card should remain selected after cross-page repagination');
     assert.strictEqual(structuralDragState.integrity, structuralFlowBefore, 'cross-page structural drag must preserve all text, images, blanks and page breaks');
     assert.strictEqual(structuralDragState.targetOutlineCount, 0, 'structural cross-page drop highlight should clear after drop');

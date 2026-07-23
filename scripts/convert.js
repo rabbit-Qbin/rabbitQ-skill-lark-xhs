@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.78";
+const VERSION = "0.8.81";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -967,11 +967,11 @@ function studioHtmlV2(payload, libs) {
     .xhs-body-frame > .xhs-page-end.xhs-manual-blank { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
     .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank { min-height: var(--body-line-px) !important; height: auto !important; margin: 0 0 var(--body-paragraph-gap) !important; padding: 0 !important; overflow: visible !important; }
     .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank:last-child { margin-bottom: 0 !important; }
-    .xhs-body-frame > .xhs-manual-blank.xhs-virtual-row-blank { min-height: var(--body-line-px) !important; height: var(--body-line-px) !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
     .xhs-body-frame > .xhs-page-end { margin-bottom: 0 !important; }
     .xhs-caret-anchor:hover { opacity: 1; }
+    .xhs-caret-anchor.xhs-gap-cursor { opacity: 1; }
     .xhs-caret-anchor::before { content: ''; position: absolute; left: 10%; right: 10%; top: -8px; height: 16px; border-top: 1.5px dashed var(--xhs-accent, #5fa66a); opacity: 0.55; pointer-events: auto; }
     .xhs-block-halo { position: absolute; pointer-events: none; z-index: 200; }
     .xhs-block-halo-btn { position: absolute; left: 50%; transform: translateX(-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--xhs-accent, #5fa66a); color: #fff; border: none; cursor: pointer; font-size: 16px; line-height: 22px; text-align: center; padding: 0; pointer-events: all; opacity: 0.82; box-shadow: 0 2px 6px rgba(0,0,0,.18); transition: opacity 0.15s, transform 0.1s; }
@@ -2901,9 +2901,7 @@ function studioHtmlV2(payload, libs) {
             h = metrics.outer;
             fitHeight = metrics.fit;
           }
-          const collapsesAtPageStart = !current.length &&
-            block.classList.contains('xhs-manual-blank') &&
-            !block.classList.contains('xhs-virtual-row-blank');
+          const collapsesAtPageStart = !current.length && block.classList.contains('xhs-manual-blank');
           current.push(block);
           used += collapsesAtPageStart ? 0 : h;
           pending = null;
@@ -2938,9 +2936,7 @@ function studioHtmlV2(payload, libs) {
           const metrics = measureBlockMetrics(block, nextSourceBlock);
           const h = metrics.outer;
           const fitHeight = metrics.fit;
-          const collapsesAtPageStart = !tailNodes.length &&
-            block.classList.contains('xhs-manual-blank') &&
-            !block.classList.contains('xhs-virtual-row-blank');
+          const collapsesAtPageStart = !tailNodes.length && block.classList.contains('xhs-manual-blank');
           const effectiveHeight = collapsesAtPageStart ? 0 : h;
           const effectiveFitHeight = collapsesAtPageStart ? 0 : fitHeight;
           const remaining = tailLimit - used;
@@ -3226,14 +3222,10 @@ function studioHtmlV2(payload, libs) {
       p.innerHTML = '<br>';
       return p;
     }
-    function makeManualBlank(options = {}) {
+    function makeManualBlank() {
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-manual-blank';
       p.dataset.xhsManualBlank = '1';
-      if (options.virtualRow) {
-        p.classList.add('xhs-virtual-row-blank');
-        p.dataset.xhsVirtualRow = '1';
-      }
       p.innerHTML = '<br>';
       return p;
     }
@@ -3242,7 +3234,7 @@ function studioHtmlV2(payload, libs) {
       let flowChildren = Array.from(frame.children).filter((node) => !node.classList?.contains('xhs-caret-anchor'));
       let inserted = null;
       if (!flowChildren.length) {
-        inserted = makeManualBlank({ virtualRow: true });
+        inserted = makeManualBlank();
         frame.appendChild(inserted);
         flowChildren = [inserted];
       }
@@ -3277,6 +3269,13 @@ function studioHtmlV2(payload, libs) {
       root.querySelectorAll('.xhs-caret-anchor').forEach((node) => {
         if (isEmptyCaretAnchor(node)) node.remove();
         else node.classList.remove('xhs-caret-anchor');
+      });
+    }
+    function normalizeFilledCaretAnchors(root) {
+      root?.querySelectorAll?.('.xhs-caret-anchor').forEach((node) => {
+        if (!cleanText(node.textContent || '')) return;
+        node.classList.remove('xhs-caret-anchor', 'xhs-gap-cursor');
+        delete node.dataset.xhsGapCursor;
       });
     }
     function renderStage() {
@@ -4256,9 +4255,8 @@ function studioHtmlV2(payload, libs) {
     function normalizeFilledManualBlanks(root) {
       root?.querySelectorAll?.('.xhs-manual-blank').forEach((blank) => {
         if (cleanText(blank.textContent || '')) {
-          blank.classList.remove('xhs-manual-blank', 'xhs-virtual-row-blank');
+          blank.classList.remove('xhs-manual-blank');
           delete blank.dataset.xhsManualBlank;
-          delete blank.dataset.xhsVirtualRow;
         }
       });
     }
@@ -4591,7 +4589,7 @@ function studioHtmlV2(payload, libs) {
           setCaretInside(blank);
           return;
         }
-        if (e.target === frame && focusVirtualBodyRow(frame, e.clientY)) {
+        if (e.target === frame && focusBodyGapCursor(frame, e.clientY)) {
           e.preventDefault();
         }
       });
@@ -4655,6 +4653,7 @@ function studioHtmlV2(payload, libs) {
             balanceCoverSubtitle();
           }
           if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+            normalizeFilledCaretAnchors(editable);
             normalizeFilledManualBlanks(editable);
             syncEmptyFlowFrame(editable, /^deleteContent(?:Backward|Forward)$/.test(inputType));
             if (isHistoryInputType(inputType)) {
@@ -5104,73 +5103,42 @@ function studioHtmlV2(payload, libs) {
           node.classList?.contains('xhs-rich');
       });
     }
-    function isVirtualRowBlank(node) {
-      return Boolean(node?.classList?.contains('xhs-virtual-row-blank') || node?.dataset?.xhsVirtualRow === '1');
-    }
-    function splitTrailingVirtualRows(blocks) {
-      const contentBlocks = Array.from(blocks || []);
-      const trailingRows = [];
-      while (contentBlocks.length && isVirtualRowBlank(contentBlocks[contentBlocks.length - 1])) {
-        trailingRows.unshift(contentBlocks.pop());
-      }
-      return { contentBlocks, trailingRows };
-    }
-    function virtualRowHeight(frame) {
-      return Math.max(1, Number(config.bodyFontSize || ${bodyFontSize}) * Number(config.bodyLineHeight || ${bodyLineHeight}) * stageLocalScale(frame));
-    }
-    function movingBlockHeightInFrame(node, frame) {
-      if (!node || !frame) return virtualRowHeight(frame);
-      const sourceFrame = node.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
-      const sourceScale = sourceFrame ? stageLocalScale(sourceFrame) : 1;
-      const logicalHeight = Math.max(
-        Number(node.offsetHeight || 0),
-        node.getBoundingClientRect().height / Math.max(0.01, sourceScale),
-      );
-      return logicalHeight * stageLocalScale(frame);
-    }
-    function virtualRowPosition(frame, blocks, clientY, movingNode = null) {
+    function tailGapPosition(frame, blocks, clientY) {
       if (!frame) return null;
       const frameRect = frame.getBoundingClientRect();
-      const { contentBlocks, trailingRows } = splitTrailingVirtualRows(blocks);
+      const contentBlocks = Array.from(blocks || []);
       const baseTop = dropInsertionTop(frame, contentBlocks, contentBlocks.length);
-      if (clientY < baseTop || clientY > frameRect.bottom) return null;
-      const rowHeight = virtualRowHeight(frame);
-      const reservedHeight = movingNode ? movingBlockHeightInFrame(movingNode, frame) : rowHeight;
-      const safety = 6 * stageLocalScale(frame);
-      if (movingNode && reservedHeight + safety > frameRect.bottom - baseTop) return null;
-      const maxRowsBefore = Math.max(0, Math.floor((frameRect.bottom - baseTop - reservedHeight - safety) / rowHeight));
-      const rowsBefore = Math.max(0, Math.min(maxRowsBefore, Math.floor((clientY - baseTop) / rowHeight)));
+      const lastRect = contentBlocks[contentBlocks.length - 1]?.getBoundingClientRect();
+      const tailStart = lastRect?.bottom ?? frameRect.top;
+      if (clientY < tailStart || clientY > frameRect.bottom) return null;
       return {
         baseTop,
         contentBlocks,
-        trailingRows,
-        rowsBefore,
-        insertionTop: baseTop + rowsBefore * rowHeight,
+        insertionTop: baseTop,
+        availableHeight: Math.max(0, (frameRect.bottom - baseTop) / Math.max(0.1, stageLocalScale(frame))),
       };
     }
-    function ensureVirtualRows(container, rows, count, endAnchor = null) {
-      const nextRows = Array.from(rows || []);
-      while (nextRows.length < count) {
-        const blank = makeManualBlank({ virtualRow: true });
-        container.insertBefore(blank, endAnchor);
-        nextRows.push(blank);
-      }
-      return nextRows;
-    }
-    function focusVirtualBodyRow(frame, clientY) {
+    function focusBodyGapCursor(frame, clientY) {
       const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
-      const target = virtualRowPosition(frame, blocks, clientY);
+      const target = tailGapPosition(frame, blocks, clientY);
       if (!target) return false;
-      recordEditorHistory();
-      persistDraftCheckpoint();
-      const rows = ensureVirtualRows(frame, target.trailingRows, target.rowsBefore + 1);
-      const blank = rows[target.rowsBefore];
-      if (!blank) return false;
-      syncEmptyFlowFrame(frame);
+      const blankOnly = blocks.length && blocks.every((node) => node.classList.contains('xhs-manual-blank'));
+      if (blankOnly) {
+        frame.focus({ preventScroll: true });
+        setCaretInside(blocks[blocks.length - 1]);
+        return true;
+      }
+      frame.querySelectorAll('.xhs-gap-cursor').forEach((node) => {
+        if (isEmptyCaretAnchor(node)) node.remove();
+      });
+      const gap = makeCaretAnchor();
+      gap.classList.add('xhs-gap-cursor');
+      gap.dataset.xhsGapCursor = '1';
+      const last = target.contentBlocks[target.contentBlocks.length - 1] || null;
+      if (last) last.after(gap);
+      else frame.appendChild(gap);
       frame.focus({ preventScroll: true });
-      setCaretInside(blank);
-      saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(true);
+      setCaretInside(gap);
       return true;
     }
     function ensureBlockDropIndicator() {
@@ -5212,6 +5180,110 @@ function studioHtmlV2(payload, libs) {
       const lastRect = blocks[blocks.length - 1].getBoundingClientRect();
       return Math.min(frameRect.bottom, lastRect.bottom + ${bodyParagraphGap} * stageLocalScale(frame));
     }
+    function caretRangeAtPoint(clientX, clientY) {
+      const position = document.caretPositionFromPoint?.(clientX, clientY);
+      if (position?.offsetNode) {
+        const range = document.createRange();
+        range.setStart(position.offsetNode, position.offset);
+        range.collapse(true);
+        return range;
+      }
+      return document.caretRangeFromPoint?.(clientX, clientY) || null;
+    }
+    function caretProbeRect(range) {
+      if (!range) return null;
+      const direct = range.getBoundingClientRect();
+      if (direct?.height) return direct;
+      const node = range.startContainer;
+      if (node?.nodeType !== Node.TEXT_NODE || !node.textContent?.length) return direct;
+      const offset = range.startOffset;
+      const probe = document.createRange();
+      if (offset < node.textContent.length) {
+        probe.setStart(node, offset);
+        probe.setEnd(node, offset + 1);
+      } else {
+        probe.setStart(node, Math.max(0, offset - 1));
+        probe.setEnd(node, offset);
+      }
+      return probe.getBoundingClientRect();
+    }
+    function geometricTextCaret(block, clientX, clientY) {
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      let absolute = 0;
+      let best = null;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent || '';
+        for (let offset = 0; offset < text.length; offset += 1) {
+          const probe = document.createRange();
+          probe.setStart(node, offset);
+          probe.setEnd(node, offset + 1);
+          const rect = Array.from(probe.getClientRects()).find((candidate) => candidate.height > 0);
+          if (!rect) continue;
+          const dy = clientY < rect.top ? rect.top - clientY : (clientY > rect.bottom ? clientY - rect.bottom : 0);
+          const dx = clientX < rect.left ? rect.left - clientX : (clientX > rect.right ? clientX - rect.right : 0);
+          const score = dy * 10000 + dx;
+          const candidate = {
+            offset: absolute + offset + (clientX >= rect.left + rect.width / 2 ? 1 : 0),
+            rect,
+            score,
+          };
+          if (!best || candidate.score < best.score) best = candidate;
+        }
+        absolute += text.length;
+      }
+      return best;
+    }
+    function textDropPosition(frame, blocks, clientX, clientY) {
+      const index = blocks.findIndex((block) => {
+        if (!isPlainSplittable(block)) return false;
+        const rect = block.getBoundingClientRect();
+        return clientY >= rect.top && clientY <= rect.bottom;
+      });
+      if (index < 0) return null;
+      const block = blocks[index];
+      const range = caretRangeAtPoint(clientX, clientY);
+      const container = range?.startContainer?.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range?.startContainer?.parentElement;
+      let offset = -1;
+      let caretRect = null;
+      if (range && container && block.contains(container)) {
+        const before = document.createRange();
+        before.selectNodeContents(block);
+        before.setEnd(range.startContainer, range.startOffset);
+        offset = before.toString().length;
+        caretRect = caretProbeRect(range);
+      } else {
+        const geometric = geometricTextCaret(block, clientX, clientY);
+        offset = geometric?.offset ?? -1;
+        caretRect = geometric?.rect || null;
+      }
+      if (offset < 0) return null;
+      const total = textLengthDeep(block);
+      const blockRect = block.getBoundingClientRect();
+      if (offset <= 0) return { block, blockIndex: index, insertionTop: blockRect.top };
+      if (offset >= total) return { block, blockIndex: index + 1, insertionTop: blockRect.bottom };
+      return {
+        block,
+        blockIndex: index,
+        textOffset: offset,
+        insertionTop: Math.min(blockRect.bottom, Math.max(blockRect.top, caretRect?.bottom || clientY)),
+      };
+    }
+    function splitTextBlockForDrop(block, offset) {
+      if (!isPlainSplittable(block)) return block;
+      const total = textLengthDeep(block);
+      if (!Number.isInteger(offset) || offset <= 0) return block;
+      if (offset >= total) return block.nextSibling;
+      const head = cloneTextRangeElement(block, 0, offset);
+      const tail = cloneTextRangeElement(block, offset, total);
+      if (!cleanText(head.textContent) || !cleanText(tail.textContent)) return block;
+      head.classList.remove('xhs-page-start', 'xhs-page-end');
+      tail.classList.remove('xhs-page-start', 'xhs-page-end');
+      delete tail.dataset.xhsBlockId;
+      block.replaceWith(head, tail);
+      return tail;
+    }
     function clearBlockDropFeedback() {
       hideBlockDropIndicator();
       hideOverviewBlockDropIndicator();
@@ -5239,15 +5311,27 @@ function studioHtmlV2(payload, libs) {
       const frame = item.querySelector('.xhs-cover-tail-frame, .xhs-body-frame');
       if (!frame) return null;
       const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
-      const virtualTarget = virtualRowPosition(frame, blocks, clientY, blockReorderDrag.node);
-      if (virtualTarget) {
+      const tailTarget = tailGapPosition(frame, blocks, clientY);
+      if (tailTarget) {
         return {
           item,
           frame,
-          insertionTop: virtualTarget.insertionTop,
+          insertionTop: tailTarget.insertionTop,
           pageIndex: targetPageIndex,
-          blockIndex: virtualTarget.contentBlocks.length,
-          virtualRowsBefore: virtualTarget.rowsBefore,
+          blockIndex: tailTarget.contentBlocks.length,
+          tailDrop: true,
+          availableHeight: tailTarget.availableHeight,
+        };
+      }
+      const textTarget = textDropPosition(frame, blocks, clientX, clientY);
+      if (textTarget) {
+        return {
+          item,
+          frame,
+          insertionTop: textTarget.insertionTop,
+          pageIndex: targetPageIndex,
+          blockIndex: textTarget.blockIndex,
+          textOffset: textTarget.textOffset,
         };
       }
       let targetBlockIndex = blocks.length;
@@ -5256,13 +5340,6 @@ function studioHtmlV2(payload, libs) {
         if (clientY < rect.top + rect.height / 2) {
           targetBlockIndex = index;
           break;
-        }
-      }
-      if (isImageReorderNode(blockReorderDrag.node)) {
-        const frameRect = frame.getBoundingClientRect();
-        const imageHeight = blockReorderDrag.node.getBoundingClientRect().height;
-        while (targetBlockIndex > 0 && frameRect.bottom - dropInsertionTop(frame, blocks, targetBlockIndex) < imageHeight + 4) {
-          targetBlockIndex -= 1;
         }
       }
       return {
@@ -5289,15 +5366,15 @@ function studioHtmlV2(payload, libs) {
       const insideSourceFrame = frameRect && clientX >= frameRect.left && clientX <= frameRect.right && clientY >= frameRect.top && clientY <= frameRect.bottom;
       if (insideSourceFrame) {
         blockReorderDrag.hasDropTarget = true;
-        updateBlockDropIndicator(clientY, bodyFrame);
+        updateBlockDropIndicator(clientX, clientY, bodyFrame);
       } else {
         blockReorderDrag.hasDropTarget = false;
         blockReorderDrag.insertBefore = null;
-        blockReorderDrag.virtualRowsBefore = null;
+        blockReorderDrag.textDrop = null;
         clearBlockDropFeedback();
       }
     }
-    function updateBlockDropIndicator(clientY, bodyFrame) {
+    function updateBlockDropIndicator(clientX, clientY, bodyFrame) {
       const flowNode = blockReorderDrag?.node;
       if (!bodyFrame || !flowNode) return hideBlockDropIndicator();
       const movingNodes = new Set(reorderGroupNodes(flowNode));
@@ -5305,15 +5382,26 @@ function studioHtmlV2(payload, libs) {
       const indicator = ensureBlockDropIndicator();
       const cardRect = stageScale.getBoundingClientRect();
       const scale = stageLocalScale(bodyFrame);
-      const virtualTarget = virtualRowPosition(bodyFrame, blocks, clientY, flowNode);
-      if (virtualTarget) {
+      const tailTarget = tailGapPosition(bodyFrame, blocks, clientY);
+      if (tailTarget) {
         indicator.hidden = false;
-        indicator.style.top = ((virtualTarget.insertionTop - cardRect.top) / scale) + 'px';
+        indicator.style.top = ((tailTarget.insertionTop - cardRect.top) / scale) + 'px';
         blockReorderDrag.insertBefore = null;
-        blockReorderDrag.virtualRowsBefore = virtualTarget.rowsBefore;
+        blockReorderDrag.textDrop = null;
         return;
       }
-      blockReorderDrag.virtualRowsBefore = null;
+      const textTarget = textDropPosition(bodyFrame, blocks, clientX, clientY);
+      if (textTarget) {
+        indicator.hidden = false;
+        indicator.style.top = ((textTarget.insertionTop - cardRect.top) / scale) + 'px';
+        blockReorderDrag.insertBefore = null;
+        blockReorderDrag.textDrop = Number.isInteger(textTarget.textOffset)
+          ? { block: textTarget.block, offset: textTarget.textOffset }
+          : null;
+        if (!blockReorderDrag.textDrop) blockReorderDrag.insertBefore = blocks[textTarget.blockIndex] || null;
+        return;
+      }
+      blockReorderDrag.textDrop = null;
       let target = null;
       let targetIndex = blocks.length;
       for (const block of blocks) {
@@ -5324,18 +5412,50 @@ function studioHtmlV2(payload, libs) {
           break;
         }
       }
-      if (isImageReorderNode(flowNode)) {
-        const frameRect = bodyFrame.getBoundingClientRect();
-        const imageHeight = flowNode.getBoundingClientRect().height;
-        while (targetIndex > 0 && frameRect.bottom - dropInsertionTop(bodyFrame, blocks, targetIndex) < imageHeight + 4) {
-          targetIndex -= 1;
-        }
-      }
       target = blocks[targetIndex] || null;
       const top = dropInsertionTop(bodyFrame, blocks, targetIndex);
       indicator.hidden = false;
       indicator.style.top = ((top - cardRect.top) / scale) + 'px';
       blockReorderDrag.insertBefore = target;
+    }
+    function fitImageBlockIntoTailSpace(block, availableHeight) {
+      if (!isImageReorderNode(block) || !Number.isFinite(availableHeight) || availableHeight <= 0) return false;
+      const frames = Array.from(block.querySelectorAll('.xhs-image-frame'));
+      if (!frames.length) return false;
+      const original = frames.map((frame) => ({
+        frame,
+        height: frame.style.height,
+        userHeight: frame.dataset.userHeight,
+      }));
+      let metrics = measureBlockMetrics(block);
+      if (metrics.fit <= availableHeight + 1) return false;
+      const rowCount = block.classList.contains('xhs-image-grid') ? Math.ceil(frames.length / 2) : 1;
+      for (let attempt = 0; attempt < 4 && metrics.fit > availableHeight + 1; attempt += 1) {
+        const reduction = Math.ceil((metrics.fit - availableHeight) / rowCount) + 2;
+        let changed = false;
+        frames.forEach((frame) => {
+          const current = parseFloat(frame.style.height || '') || config.imageFrameHeight;
+          const next = Math.max(90, current - reduction);
+          if (next < current) {
+            frame.style.height = Math.floor(next) + 'px';
+            changed = true;
+          }
+        });
+        if (!changed) break;
+        metrics = measureBlockMetrics(block);
+      }
+      if (metrics.fit > availableHeight + 1) {
+        original.forEach(({ frame, height, userHeight }) => {
+          frame.style.height = height;
+          if (userHeight === undefined) delete frame.dataset.userHeight;
+          else frame.dataset.userHeight = userHeight;
+        });
+        return false;
+      }
+      frames.forEach((frame) => {
+        frame.dataset.userHeight = '1';
+      });
+      return true;
     }
     function finishFlowBlockReorder() {
       const bodyFrame = blockReorderDrag?.bodyFrame;
@@ -5353,28 +5473,21 @@ function studioHtmlV2(payload, libs) {
         const selectedBlockId = blockReorderDrag.blockId || ensureFlowBlockId(flowNode);
         const { holder, pageNodes } = collectBodyFlowHolderWithPageNodes();
         const selectedBlock = findFlowBlockById(holder, selectedBlockId);
+        const fittedToTail = Boolean(crossPage.tailDrop && selectedBlock &&
+          fitImageBlockIntoTailSpace(selectedBlock, Number(crossPage.availableHeight)));
         const movingNodes = reorderGroupNodes(selectedBlock);
         const movingSet = new Set(movingNodes);
         const targetNodes = (pageNodes.get(crossPage.pageIndex) || []).filter((node) =>
           !node.classList?.contains('xhs-caret-anchor') && !movingSet.has(node)
         );
         let anchor = null;
-        if (Number.isInteger(crossPage.virtualRowsBefore)) {
-          const { trailingRows } = splitTrailingVirtualRows(targetNodes);
-          let pageEndAnchor = targetNodes[targetNodes.length - 1]?.nextSibling || null;
-          while (pageEndAnchor && movingSet.has(pageEndAnchor)) pageEndAnchor = pageEndAnchor.nextSibling;
-          if (!pageEndAnchor && !targetNodes.length) {
-            for (let index = crossPage.pageIndex + 1; index < pages.length && !pageEndAnchor; index += 1) {
-              pageEndAnchor = (pageNodes.get(index) || []).find((node) => !movingSet.has(node)) || null;
-            }
-          }
-          const rows = ensureVirtualRows(holder, trailingRows, crossPage.virtualRowsBefore, pageEndAnchor);
-          anchor = rows[crossPage.virtualRowsBefore] || pageEndAnchor;
+        if (Number.isInteger(crossPage.textOffset)) {
+          anchor = splitTextBlockForDrop(targetNodes[crossPage.blockIndex], crossPage.textOffset);
         } else {
           anchor = targetNodes[Math.max(0, Math.min(crossPage.blockIndex, targetNodes.length))] || null;
         }
         if (movingNodes.length) {
-          if (!anchor && !Number.isInteger(crossPage.virtualRowsBefore)) {
+          if (!anchor) {
             const last = targetNodes[targetNodes.length - 1];
             anchor = last?.nextSibling || null;
           }
@@ -5383,6 +5496,7 @@ function studioHtmlV2(payload, libs) {
           clearOverviewDropPage();
           clearBlockDropFeedback();
           repaginateBodyBlocks(Array.from(holder.children), selectedImageId, selectedBlockId);
+          if (fittedToTail) showRuntimeNotice('图片已按目标页剩余空间自动调整高度，可继续拖动控制点修改。');
           return;
         }
         reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
@@ -5398,14 +5512,8 @@ function studioHtmlV2(payload, libs) {
       }
       const movingNodes = reorderGroupNodes(flowNode);
       let samePageAnchor = blockReorderDrag.insertBefore;
-      if (Number.isInteger(blockReorderDrag.virtualRowsBefore)) {
-        const movingSet = new Set(movingNodes);
-        const targetNodes = flowBlocksInBody(parent).filter((node) =>
-          !node.classList?.contains('xhs-caret-anchor') && !movingSet.has(node)
-        );
-        const { trailingRows } = splitTrailingVirtualRows(targetNodes);
-        const rows = ensureVirtualRows(parent, trailingRows, blockReorderDrag.virtualRowsBefore);
-        samePageAnchor = rows[blockReorderDrag.virtualRowsBefore] || null;
+      if (blockReorderDrag.textDrop?.block?.isConnected) {
+        samePageAnchor = splitTextBlockForDrop(blockReorderDrag.textDrop.block, blockReorderDrag.textDrop.offset);
       }
       if (samePageAnchor) movingNodes.forEach((node) => parent.insertBefore(node, samePageAnchor));
       else movingNodes.forEach((node) => parent.appendChild(node));
@@ -5436,7 +5544,7 @@ function studioHtmlV2(payload, libs) {
         captureTarget: captureTarget || event.currentTarget,
         crossPage: null,
         hasDropTarget: false,
-        virtualRowsBefore: null,
+        textDrop: null,
         blockId,
         imageId: isImageReorderNode(flowNode)
           ? ensureImageId(flowNode.querySelector?.('.xhs-image-block') || flowNode)
