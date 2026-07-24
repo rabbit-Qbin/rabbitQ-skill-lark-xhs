@@ -25,6 +25,13 @@ function findBrowser() {
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
+async function activateStudioPage(page, index) {
+  await page.evaluate((targetIndex) => {
+    document.querySelectorAll('#pageTabs button')[targetIndex]?.click();
+  }, index);
+  await page.waitForTimeout(80);
+}
+
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "rabbitq-xhs-smoke-"));
   const sourceDir = path.join(root, "source");
@@ -35,8 +42,11 @@ async function main() {
     "",
     "## 01 结构识别",
     "",
+    "序列前的普通正文。",
+    "",
     "- Alt + 拖动：卡片和图片整块移动",
     "- 重新分页：改完内容一键重排",
+    "- 序列续写测试：保留后一项",
     "",
     "> 引用块适合放金句：这仍然应该是引用，不是卡片。",
     "",
@@ -59,6 +69,11 @@ async function main() {
     "| 半页封面 | 标题 + 首段同页 | 5 |",
     ...Array.from({ length: 18 }, (_, index) => `| 长表第 ${index + 1} 行 | 跨页时保持完整数据行 | ${index + 9} |`),
     "",
+    "```JavaScript",
+    "const studio = 'rabbitQ';",
+    "console.log(studio);",
+    "```",
+    "",
     "![回归测试图片](fixture.png)",
     "",
     "---",
@@ -66,6 +81,8 @@ async function main() {
     "### 二级小标题回归",
     "",
     "**项目**：rabbitQ-skill-lark-xhs（GitHub）",
+    "",
+    "> （注：部分内容可能由 AI 生成）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
   const fixturePng = Buffer.from(
@@ -241,9 +258,37 @@ async function main() {
   assert.strictEqual(flowConvert.status, 0, flowConvert.stderr || flowConvert.stdout);
   const flowHtmlPath = path.join(flowOutputDir, "xhs-studio.html");
 
+  const continuousSourceDir = path.join(root, "continuous-flow-source");
+  const continuousOutputDir = path.join(root, "continuous-flow-output");
+  fs.mkdirSync(continuousSourceDir, { recursive: true });
+  const continuousParagraph = Array.from(
+    { length: 260 },
+    (_, index) => `连续片段${String(index + 1).padStart(3, "0")}保持前后顺序`,
+  ).join("，") + "。";
+  const continuousMarkdown = [
+    "# 连续分页回归",
+    "",
+    "## 01 正文应该跨页连续",
+    "",
+    continuousParagraph,
+    "",
+    "> 引用块跨页时必须保持完整，不能消失。",
+  ].join("\n");
+  fs.writeFileSync(path.join(continuousSourceDir, "article.md"), continuousMarkdown, "utf8");
+  const continuousConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), continuousSourceDir, "-o", continuousOutputDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(continuousConvert.status, 0, continuousConvert.stderr || continuousConvert.stdout);
+
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.59"/);
+  assert.match(html, /"version":"0\.9\.1"/);
+  assert.match(html, /xhs-block-drag-handle/);
+  assert.doesNotMatch(html, /xhs-block-drop-preview/);
+  assert.match(html, /xhs-overview-drop-indicator/);
+  assert.match(html, /按住 Alt 拖动/);
   assert.match(html, /data-xhs-block-type="quote"/);
   assert.match(html, /data-xhs-block-type="table"/);
   assert.match(html, /<th>模式<\/th>/);
@@ -258,18 +303,33 @@ async function main() {
   assert.match(html, /--body-list-item-gap: 20px;/);
   assert.match(html, /\.xhs-list-line:not\(:has\(\+ \.xhs-list-line\)\) \{ margin-bottom: var\(--body-paragraph-gap\); \}/);
   assert.match(html, /--body-line-px: 58px;/);
-  assert.match(html, /--body-regular-weight: 700;/);
+  assert.match(html, /--body-regular-weight: 720;/);
   assert.match(html, /--body-bold-weight: 720;/);
+  assert.match(html, /--body-unbold-weight: 700;/);
+  assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
+  assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-table thead th \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \.xhs-heading-title \{[^}]*font-weight: var\(--body-bold-weight\)/);
-  assert.match(html, /\.xhs-heading \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: 14px;/, 'level-one number slot should follow its real glyph width');
+  assert.match(html, /\.xhs-heading \{[^}]*grid-template-columns: 129px minmax\(0, 1fr\);[^}]*column-gap: 18px;/, 'level-one headings should reserve one consistent two-digit number slot');
+  assert.match(html, /\.xhs-heading-number \{[^}]*justify-content: center;[^}]*font-variant-numeric: tabular-nums;/);
+  assert.match(html, /data-xhs-block-type="code" data-code-language="JavaScript"/);
+  assert.match(html, /\.xhs-code-block \{[^}]*background: #17191f;/);
+  assert.match(html, /id="codeBtn"[^>]*aria-label="代码块"/);
+  assert.doesNotMatch(html, /部分内容可能由 AI 生成/);
+  const mainTemplate = html.match(/<template id="wechatTemplate">([\s\S]*?)<\/template>/)?.[1] || '';
+  assert.doesNotMatch(mainTemplate, /data-xhs-auto-underline/, 'Markdown bold must not silently receive an underline style');
+  assert.match(html, /const EXPORT_RENDER_SCALE = 2;/);
+  assert.match(html, /scale: EXPORT_RENDER_SCALE/);
+  assert.match(html, /imageSmoothingQuality = 'high'/);
   assert.match(html, /data-paper-pattern="linen">细麻纸<\/button>/);
   assert.match(html, /data-bg-theme="yellow">浅黄<\/button>/);
   assert.match(html, /data-bg-theme="pink">浅粉<\/button>/);
   assert.match(html, /data-bg-theme="purple">浅紫<\/button>/);
   assert.doesNotMatch(html, /fontWechatBtn|fontSongtiBtn|经典宋体/);
   assert.match(html, /\.xhs-p \{[^}]*font-weight: var\(--body-regular-weight\)/);
+  assert.match(html, /\.xhs-p span,[^}]*\.xhs-table span \{[^}]*font-weight: inherit !important;/);
+  assert.match(html, /\.xhs-card \.xhs-text-regular, \.xhs-card \.xhs-text-regular \* \{ font-weight: var\(--body-unbold-weight\) !important; \}/);
   assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
   assert.match(html, /headingUnderline \/ 4/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \{[\s\S]*?margin: 0 0 40px;/, "二级标题只保留下间距，避免与前一结构块叠加");
@@ -284,7 +344,9 @@ async function main() {
   assert.match(html, /<button id="headingBtn2"[^>]*>H2<\/button>/);
   assert.match(html, /id="listUnorderedBtn"[^>]*aria-label="无序列表"[^>]*><svg class="toolbar-icon"/);
   assert.match(html, /id="listOrderedBtn"[^>]*aria-label="有序列表"[^>]*><svg class="toolbar-icon"/);
+  assert.match(html, /id="insertImageBtn"[^>]*aria-label="插入图片"[^>]*><svg class="toolbar-icon"/);
   assert.match(html, /id="overviewRail" class="overview-rail"/);
+  assert.doesNotMatch(html, /id="overviewModeBtn"|id="editModeBtn"|单页编辑/);
   assert.match(html, /\.xhs-quote \{[^}]*background: transparent;/);
   assert.doesNotMatch(html, /id="headingBtn"/);
   assert.doesNotMatch(html, /id="replaceImageBtn"/);
@@ -319,30 +381,17 @@ async function main() {
       await overviewSubtitle.click();
       await orderedPage.keyboard.press('Shift+Enter');
       await orderedPage.keyboard.type('第二行');
-      assert.strictEqual(
-        await orderedPage.locator('#overviewModeBtn').evaluate((button) => button.classList.contains('active')),
-        true,
-        'typing a subtitle line break in overview should not open single-page edit',
-      );
+      assert.strictEqual(await orderedPage.locator('#editModeBtn').count(), 0, 'Studio should expose only the overview editor');
       assert.match(await overviewSubtitle.innerText(), /第一行\r?\n+第二行/, 'overview subtitle should keep the inserted line break');
       await overviewSubtitle.dblclick();
-      assert.strictEqual(
-        await orderedPage.locator('#overviewModeBtn').evaluate((button) => button.classList.contains('active')),
-        true,
-        'double-clicking editable overview text should select text without opening single-page edit',
-      );
+      assert.strictEqual(await orderedPage.locator('#editModeBtn').count(), 0, 'double-clicking text must stay in overview');
     }
     const overviewItems = orderedPage.locator('#overviewRail .overview-item');
     if (await overviewItems.count() > 1) {
-      await overviewItems.nth(1).dblclick();
+      await overviewItems.nth(1).click();
       await orderedPage.waitForTimeout(350);
-      assert.strictEqual(await orderedPage.locator('#editModeBtn').evaluate((button) => button.classList.contains('active')), true, 'double-clicking an overview page should open single-page edit');
-      assert.match(await orderedPage.locator('#pageInfo').innerText(), /当前第 2 \/ /, 'double-click should open the selected overview page');
-      await orderedPage.click('#overviewModeBtn');
-      await orderedPage.waitForTimeout(300);
+      assert.match(await orderedPage.locator('#pageInfo').innerText(), /当前第 2 \/ /, 'clicking a page should activate it in overview');
     }
-    await orderedPage.click('#editModeBtn');
-    await orderedPage.waitForTimeout(500);
     const orderedListPageIndex = await orderedPage.evaluate(() => {
       const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
       for (let index = 0; index < tabs.length; index += 1) {
@@ -352,7 +401,7 @@ async function main() {
       return -1;
     });
     assert.ok(orderedListPageIndex >= 0, "expected ordered list page in Studio runtime");
-    await orderedPage.locator("#pageTabs button").nth(orderedListPageIndex).click();
+    await orderedPage.evaluate((index) => document.querySelectorAll("#pageTabs button")[index]?.click(), orderedListPageIndex);
     await orderedPage.waitForTimeout(100);
     assert.strictEqual(
       await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"]').count(),
@@ -379,7 +428,7 @@ async function main() {
       body.closest('[contenteditable="true"]')?.focus();
     });
     await orderedPage.waitForTimeout(40);
-    assert.strictEqual(await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')), true, 'default 700 body text should light the bold control');
+    assert.strictEqual(await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')), true, 'default 720 body text should light the bold control');
     assert.strictEqual(await orderedPage.locator('#listOrderedBtn').evaluate((button) => button.classList.contains('active')), true, 'ordered-list control should reflect the current block');
     await orderedPage.keyboard.press("Enter");
     await orderedPage.waitForTimeout(250);
@@ -411,7 +460,7 @@ async function main() {
       };
     });
     assert.ok(Math.abs(orderedSpacing.gap - 9) < 0.2, "sequence marker gap should equal 9px");
-    assert.strictEqual(orderedSpacing.lineWeight, "700", "sequence body should use the regular 700 weight");
+    assert.strictEqual(orderedSpacing.lineWeight, "720", "sequence body should use the unified 720 weight");
     assert.ok(orderedSpacing.markerWidth <= 44, "ordered marker slot should not create a wide indent");
     assert.strictEqual(orderedSpacing.markerFontSize, orderedSpacing.bodyFontSize, "ordered sequence marker should match its body text size");
     assert.ok(Math.abs(orderedSpacing.markerHeight - orderedSpacing.bodyLineHeight) < 0.2, "ordered marker should occupy the body line box for vertical centering");
@@ -430,8 +479,62 @@ async function main() {
         bold: bold ? getComputedStyle(bold).fontWeight : '',
       };
     });
-    assert.strictEqual(bodyWeights.normal, "700", "regular body text should use weight 700");
+    assert.strictEqual(bodyWeights.normal, "720", "body text should use the unified default weight 720");
     assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
+
+    // Regression: body text starts at 720, but the B control must be a real
+    // two-state toggle: 720 default -> 700 unbold -> 720 default.
+    const boldToggleBody = orderedPage.locator('#stageScale .xhs-list-body').first();
+    await boldToggleBody.evaluate((body) => {
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      body.closest('[contenteditable="true"]')?.focus();
+    });
+    await orderedPage.waitForTimeout(80);
+    assert.strictEqual(
+      await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
+      true,
+      'default 720 selection should light the B control',
+    );
+    await orderedPage.click('#boldBtn');
+    await orderedPage.waitForTimeout(120);
+    const unboldState = await boldToggleBody.evaluate((body) => ({
+      weight: getComputedStyle(body.querySelector('.xhs-text-regular') || body).fontWeight,
+      regularMarks: body.querySelectorAll('.xhs-text-regular').length,
+    }));
+    assert.strictEqual(unboldState.weight, '700', 'first B click should change selected default text to weight 700');
+    assert.ok(unboldState.regularMarks >= 1, 'first B click should persist an explicit unbold mark');
+    assert.strictEqual(
+      await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
+      true,
+      '700 unbold formatting should be saved into the current page state',
+    );
+    assert.strictEqual(
+      await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
+      false,
+      '700 unbold selection should turn off the B control',
+    );
+    await orderedPage.click('#boldBtn');
+    await orderedPage.waitForTimeout(120);
+    const restoredBoldState = await boldToggleBody.evaluate((body) => ({
+      weight: getComputedStyle(body).fontWeight,
+      regularMarks: body.querySelectorAll('.xhs-text-regular').length,
+    }));
+    assert.strictEqual(restoredBoldState.weight, '720', 'second B click should restore selected text to weight 720');
+    assert.strictEqual(restoredBoldState.regularMarks, 0, 'second B click should remove the explicit unbold mark');
+    assert.strictEqual(
+      await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
+      false,
+      'restoring 720 should remove the saved unbold mark from page state',
+    );
+    assert.strictEqual(
+      await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
+      true,
+      'restored 720 selection should light the B control again',
+    );
 
     // Regression: Chinese IME composition must not trigger save, normalization, or reflow
     // until the candidate text has been committed.
@@ -472,7 +575,7 @@ async function main() {
     assert.strictEqual(compositionState.savedAfterComposition, true, "committed IME text must save after compositionend");
 
     // Regression: Backspace from a paragraph directly below a sequence should
-    // continue that sequence instead of leaving behind an orphan marker.
+    // merge into the previous item's body instead of creating another bullet.
     const sequenceContinuationTarget = orderedPage.locator('#stageScale .xhs-body-frame').first();
     await sequenceContinuationTarget.evaluate((frame) => {
       const lastLine = Array.from(frame.querySelectorAll('.xhs-list-line')).at(-1);
@@ -493,7 +596,8 @@ async function main() {
       listText: Array.from(frame.querySelectorAll('.xhs-list-line')).map((line) => line.querySelector('.xhs-list-body')?.textContent || ''),
       plainText: Array.from(frame.querySelectorAll('.xhs-p:not(.xhs-list-line)')).map((node) => node.textContent || ''),
     }));
-    assert.ok(sequenceContinuationState.listText.includes('接回序列的正文'), 'Backspace should continue the previous sequence');
+    assert.ok(sequenceContinuationState.listText.some((text) => text.endsWith('接回序列的正文')), 'Backspace should merge into the previous sequence item');
+    assert.ok(!sequenceContinuationState.listText.includes('接回序列的正文'), 'merged text must not become a standalone sequence item');
     assert.ok(!sequenceContinuationState.plainText.includes('接回序列的正文'), 'continued text must not remain as a plain paragraph');
     await orderedPage.keyboard.press('Control+z');
     await orderedPage.waitForTimeout(120);
@@ -703,12 +807,161 @@ async function main() {
     assert.strictEqual(sequenceQuoteStyle.fontFamily, sequenceCardState.fontFamily);
     await orderedPage.close();
 
+    // Regression: pagination is only a 3:4 view over one continuous text
+    // stream. Backspace before the first character of a split tail must delete
+    // the previous-page character and keep the caret at the new boundary.
+    const continuousBackspacePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await continuousBackspacePage.addInitScript(() => localStorage.clear());
+    await continuousBackspacePage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
+    await continuousBackspacePage.waitForTimeout(350);
+    const splitTailState = await continuousBackspacePage.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+      for (let index = 1; index < tabs.length; index += 1) {
+        tabs[index].click();
+        const tail = document.querySelector('#stageScale .xhs-p.xhs-split-tail, #stageScale .xhs-rich.xhs-split-tail');
+        if (!tail) continue;
+        const node = document.createTreeWalker(tail, NodeFilter.SHOW_TEXT).nextNode();
+        if (!node) continue;
+        const range = document.createRange();
+        range.setStart(node, 0);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        tail.closest('[contenteditable="true"]')?.focus();
+        const allText = pages.map((page) => {
+          const holder = document.createElement('div');
+          holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+          return holder.textContent || '';
+        }).join('');
+        const frame = tail.closest('.xhs-body-frame');
+        const firstBlock = Array.from(frame?.children || []).find((item) =>
+          !item.classList?.contains('xhs-caret-anchor') && item.dataset?.xhsPageBreak !== '1'
+        );
+        return {
+          index,
+          allText,
+          firstCharacter: Array.from(node.textContent || '')[0] || '',
+          tailClass: tail.className,
+          firstBlockClass: firstBlock?.className || '',
+          tailIsFirst: firstBlock === tail,
+          runtimePageIndex: pageIndex,
+        };
+      }
+      return null;
+    });
+    assert.ok(splitTailState, 'continuous-flow fixture should contain a split paragraph tail');
+    await continuousBackspacePage.keyboard.press('Backspace');
+    await continuousBackspacePage.waitForTimeout(350);
+    const crossPageBackspaceResult = await continuousBackspacePage.evaluate(() => {
+      const allText = pages.map((page) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+        return holder.textContent || '';
+      }).join('');
+      const selection = window.getSelection();
+      return {
+        allText,
+        pageIndex,
+        caretOffset: selection?.anchorOffset ?? -1,
+        caretText: selection?.anchorNode?.textContent || '',
+        notice: document.querySelector('#runtimeNotice')?.textContent || '',
+      };
+    });
+    assert.strictEqual(
+      crossPageBackspaceResult.allText.length,
+      splitTailState.allText.length - 1,
+      'page-start Backspace should delete exactly one previous-page character: ' + JSON.stringify(splitTailState),
+    );
+    assert.ok(crossPageBackspaceResult.allText.includes(splitTailState.firstCharacter), 'the first character on the current page must survive backward deletion');
+    assert.strictEqual(crossPageBackspaceResult.caretOffset, 0, 'caret should stay at the continuous split boundary');
+    assert.strictEqual(crossPageBackspaceResult.notice, '', 'valid cross-page deletion should not trigger an integrity rollback');
+    await continuousBackspacePage.close();
+
+    // Regression: Enter at the start of an atomic quote inserts one real blank.
+    // When that blank pushes the quote to the next page, the quote remains once
+    // and the caret stays in the blank on the previous page.
+    const continuousQuotePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await continuousQuotePage.addInitScript(() => localStorage.clear());
+    await continuousQuotePage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
+    await continuousQuotePage.waitForTimeout(350);
+    const quoteThreshold = await continuousQuotePage.evaluate(() => {
+      const snapshot = pages.map((page) => ({ ...page }));
+      const quotePageIndex = () => pages.findIndex((page) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+        return Boolean(holder.querySelector('.xhs-quote'));
+      });
+      const initial = quotePageIndex();
+      let keepOnPage = 0;
+      for (let count = 1; count <= 30; count += 1) {
+        pages = snapshot.map((page) => ({ ...page }));
+        pageIndex = initial;
+        renderAll();
+        const quote = document.querySelector('#stageScale .xhs-quote');
+        if (!quote) break;
+        for (let index = 0; index < count; index += 1) quote.before(makeEmptyParagraph());
+        saveCurrentPage({ skipNormalize: true });
+        reflow();
+        if (quotePageIndex() !== initial) break;
+        keepOnPage = count;
+      }
+      pages = snapshot.map((page) => ({ ...page }));
+      pageIndex = initial;
+      renderAll();
+      const quote = document.querySelector('#stageScale .xhs-quote');
+      for (let index = 0; index < keepOnPage; index += 1) quote.before(makeEmptyParagraph());
+      saveCurrentPage({ skipNormalize: true });
+      reflow();
+      return { initial, keepOnPage };
+    });
+    assert.ok(quoteThreshold.initial > 0, 'continuous-flow fixture should place its quote on a body page');
+    await activateStudioPage(continuousQuotePage, quoteThreshold.initial);
+    await continuousQuotePage.locator('#stageScale .xhs-quote').evaluate((quote) => {
+      const node = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT).nextNode();
+      if (!node) throw new Error('quote text node missing');
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      quote.closest('[contenteditable="true"]')?.focus();
+    });
+    await continuousQuotePage.keyboard.press('Enter');
+    await continuousQuotePage.waitForTimeout(900);
+    const quoteFlowResult = await continuousQuotePage.evaluate(() => {
+      let quoteCount = 0;
+      let quotePage = -1;
+      pages.forEach((page, index) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = page.type === 'cover' ? (page.tailHtml || '') : (page.html || '');
+        const count = holder.querySelectorAll('.xhs-quote').length;
+        quoteCount += count;
+        if (count) quotePage = index;
+      });
+      const anchor = window.getSelection()?.anchorNode;
+      const element = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
+      return {
+        quoteCount,
+        quotePage,
+        pageIndex,
+        caretInBlank: Boolean(element?.closest?.('.xhs-manual-blank')),
+        notice: document.querySelector('#runtimeNotice')?.textContent || '',
+      };
+    });
+    assert.strictEqual(quoteFlowResult.quoteCount, 1, 'quote must remain exactly once after being pushed across a page boundary');
+    assert.ok(quoteFlowResult.quotePage > quoteThreshold.initial, 'one structural Enter at the threshold should move the quote to the next page');
+    assert.strictEqual(quoteFlowResult.pageIndex, quoteFlowResult.quotePage - 1, 'caret should remain on the previous page after the quote moves');
+    assert.strictEqual(quoteFlowResult.caretInBlank, true, 'caret should remain inside the inserted manual blank');
+    assert.strictEqual(quoteFlowResult.notice, '', 'valid structural Enter should not trigger an integrity rollback');
+    await continuousQuotePage.close();
+
     // Regression: the same list-backspace rule must work when an environment
     // emits only beforeinput (for example, some IMEs and virtual keyboards).
     const beforeInputPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await beforeInputPage.addInitScript(() => localStorage.clear());
     await beforeInputPage.goto(`file://${path.join(boldListOutputDir, "xhs-studio.html")}`);
-    await beforeInputPage.click('#editModeBtn');
     await beforeInputPage.waitForTimeout(300);
     const beforeInputListPageIndex = await beforeInputPage.evaluate(() => {
       for (const [index, tab] of Array.from(document.querySelectorAll('#pageTabs button')).entries()) {
@@ -717,7 +970,7 @@ async function main() {
       }
       return -1;
     });
-    await beforeInputPage.locator('#pageTabs button').nth(beforeInputListPageIndex).click();
+    await activateStudioPage(beforeInputPage, beforeInputListPageIndex);
     const beforeInputListState = await beforeInputPage.evaluate(() => {
       const body = document.querySelector('#stageScale .xhs-list-line .xhs-list-body');
       const frame = body.closest('[contenteditable="true"]');
@@ -743,7 +996,7 @@ async function main() {
     });
     assert.strictEqual(beforeInputListState.allowed, false, 'list beforeinput should be handled by the Studio command chain');
     assert.ok(beforeInputListState.plainText.some((text) => text.includes(beforeInputListState.sample.slice(0, 4))), 'beforeinput list backspace should unlist into a paragraph');
-    await beforeInputPage.locator('#pageTabs button').first().click();
+    await activateStudioPage(beforeInputPage, 0);
     const coverUndoState = await beforeInputPage.evaluate(async () => {
       const title = document.querySelector('#stageScale .cover-title');
       const suffix = '封面撤回';
@@ -760,9 +1013,63 @@ async function main() {
     assert.strictEqual(await beforeInputPage.locator('#stageScale .cover-title').innerText().then((text) => text.includes(coverUndoState.suffix)), false, 'cover text should also use Studio undo history');
     await beforeInputPage.close();
 
+    const insertImagePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await insertImagePage.addInitScript(() => localStorage.clear());
+    await insertImagePage.goto(`file://${htmlPath}`);
+    await insertImagePage.waitForTimeout(350);
+    const insertBodyPageIndex = await insertImagePage.evaluate(() => {
+      for (const [index, tab] of Array.from(document.querySelectorAll('#pageTabs button')).entries()) {
+        tab.click();
+        if (document.querySelector('#stageScale .xhs-body-frame .xhs-p:not(.xhs-manual-blank)')) return index;
+      }
+      return -1;
+    });
+    assert.ok(insertBodyPageIndex > 0, 'insert-image fixture should contain editable body prose');
+    await activateStudioPage(insertImagePage, insertBodyPageIndex);
+    const imageInsertBefore = await insertImagePage.evaluate(() => {
+      const paragraph = document.querySelector('#stageScale .xhs-body-frame .xhs-p:not(.xhs-manual-blank)');
+      const text = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT).nextNode();
+      const range = document.createRange();
+      range.setStart(text, Math.min(2, text.textContent.length));
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      paragraph.closest('[contenteditable="true"]')?.focus();
+      const state = serializeStudioState();
+      const holder = document.createElement('div');
+      holder.innerHTML = state.flowHtml || '';
+      return {
+        imageCount: holder.querySelectorAll('.xhs-image-block img').length,
+        hasFlowHtml: Boolean(state.flowHtml),
+      };
+    });
+    assert.strictEqual(imageInsertBefore.hasFlowHtml, true, 'saved Studio state should include one canonical continuous flow');
+    const [imageChooser] = await Promise.all([
+      insertImagePage.waitForEvent('filechooser'),
+      insertImagePage.click('#insertImageBtn'),
+    ]);
+    await imageChooser.setFiles(path.join(sourceDir, 'fixture.png'));
+    await insertImagePage.waitForTimeout(700);
+    const imageInsertAfter = await insertImagePage.evaluate(() => {
+      const state = serializeStudioState();
+      const holder = document.createElement('div');
+      holder.innerHTML = state.flowHtml || '';
+      return {
+        imageCount: holder.querySelectorAll('.xhs-image-block img').length,
+        pageImageCount: pages.reduce((total, savedPage) => {
+          const pageHolder = document.createElement('div');
+          pageHolder.innerHTML = savedPage.type === 'cover' ? (savedPage.tailHtml || '') : (savedPage.html || '');
+          return total + pageHolder.querySelectorAll('.xhs-image-block img').length;
+        }, 0),
+      };
+    });
+    assert.strictEqual(imageInsertAfter.imageCount, imageInsertBefore.imageCount + 1, 'toolbar image insertion should add one image to the continuous document');
+    assert.strictEqual(imageInsertAfter.pageImageCount, imageInsertAfter.imageCount, 'paginated views must derive every image from the canonical flow exactly once');
+    await insertImagePage.close();
+
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await page.goto(`file://${htmlPath}`);
-    await page.click('#editModeBtn');
     await page.waitForTimeout(500);
     const draftIdentity = await page.evaluate(() => ({
       key: draftStorageKey(),
@@ -771,6 +1078,344 @@ async function main() {
     }));
     assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
     assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
+
+    // A body page with no prose exposes one real editable line. Clicking lower
+    // empty canvas moves the selection to that line; it must not manufacture
+    // a stack of persistent paragraphs just to draw the caret.
+    const emptyPageState = await page.evaluate(() => {
+      window.__virtualRowOriginalPages = pages.map((savedPage) => ({ ...savedPage }));
+      saveCurrentPage({ skipNormalize: true });
+      const originalPageCount = pages.length;
+      pages.push({ type: 'body', html: '' });
+      pageIndex = pages.length - 1;
+      renderAll();
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      const blanks = Array.from(frame?.querySelectorAll(':scope > .xhs-manual-blank') || []);
+      return {
+        originalPageCount,
+        blankCount: blanks.length,
+        blankHeights: blanks.map((blank) => blank.offsetHeight),
+        emptyFrame: frame?.classList.contains('xhs-empty-flow-frame') || false,
+      };
+    });
+    assert.strictEqual(emptyPageState.blankCount, 1, 'an empty body page should automatically expose one editable blank line');
+    assert.strictEqual(emptyPageState.emptyFrame, true, 'an empty body page should enter blank-line editing mode');
+    assert.ok(emptyPageState.blankHeights.every((height) => height >= 50), 'the empty-page caret line must not collapse to zero height');
+    const emptyFrameBox = await page.locator('#stageScale .xhs-body-frame').boundingBox();
+    assert.ok(emptyFrameBox, 'expected visible empty body frame');
+    await page.mouse.click(emptyFrameBox.x + emptyFrameBox.width / 2, emptyFrameBox.y + emptyFrameBox.height * 0.7);
+    const emptyFrameCaret = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      const blank = anchor?.closest?.('.xhs-manual-blank');
+      const blanks = Array.from(document.querySelectorAll('#stageScale .xhs-body-frame > .xhs-manual-blank'));
+      return {
+        caretInBlank: Boolean(blank),
+        blankIndex: blanks.indexOf(blank),
+        blankCount: blanks.length,
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+      };
+    });
+    assert.strictEqual(emptyFrameCaret.caretInBlank, true, 'clicking unused space on an empty page should focus a real blank line');
+    assert.strictEqual(emptyFrameCaret.blankIndex, 0, 'empty-canvas clicks should reuse the single editable line');
+    assert.strictEqual(emptyFrameCaret.blankCount, 1, 'selection-only clicks must not add document paragraphs');
+    assert.strictEqual(emptyFrameCaret.gapCursorCount, 0, 'the real empty paragraph does not need an extra gap cursor');
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      frame.replaceChildren(makeManualBlank(), makeManualBlank(), makeManualBlank());
+      saveCurrentPage({ skipNormalize: true });
+      renderAll();
+    });
+    const visibleBlankState = await page.evaluate(() => {
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      const blanks = Array.from(frame?.querySelectorAll(':scope > .xhs-manual-blank') || []);
+      return {
+        count: blanks.length,
+        heights: blanks.map((blank) => blank.offsetHeight),
+        emptyFrame: frame?.classList.contains('xhs-empty-flow-frame') || false,
+      };
+    });
+    assert.strictEqual(visibleBlankState.count, 3, 'all explicit blank lines should survive rendering on an otherwise empty page');
+    assert.strictEqual(visibleBlankState.emptyFrame, true);
+    assert.ok(visibleBlankState.heights.every((height) => height >= 50), 'every explicit blank must remain a full editable line');
+    await page.locator('#stageScale .xhs-manual-blank').nth(1).click({ position: { x: 8, y: 8 } });
+    const focusedBlankIndex = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      const blank = anchor?.closest?.('.xhs-manual-blank');
+      return Array.from(document.querySelectorAll('#stageScale .xhs-manual-blank')).indexOf(blank);
+    });
+    assert.strictEqual(focusedBlankIndex, 1, 'each visible blank line should receive its own caret');
+    await page.keyboard.type('空白行可以直接输入');
+    await page.waitForTimeout(260);
+    const filledBlankState = await page.evaluate(() => ({
+      text: document.querySelector('#stageScale .xhs-body-frame')?.textContent || '',
+      manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
+    }));
+    assert.match(filledBlankState.text, /空白行可以直接输入/);
+    assert.strictEqual(filledBlankState.manualBlankCount, 2, 'typing should promote only the focused blank into normal prose');
+
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      const cover = window.__virtualRowOriginalPages.find((savedPage) => savedPage.type === 'cover');
+      pages = [{ ...cover }, { type: 'body', html: '<p class="xhs-p xhs-block">正文锚点</p>' }];
+      pageIndex = 1;
+      renderAll();
+    });
+    const proseVirtualFrame = await page.locator('#stageScale .xhs-body-frame').boundingBox();
+    assert.ok(proseVirtualFrame, 'non-empty body page should expose its remaining blank area');
+    await page.mouse.click(proseVirtualFrame.x + proseVirtualFrame.width / 2, proseVirtualFrame.y + proseVirtualFrame.height * 0.35);
+    const proseVirtualClick = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      return {
+        caretInGapCursor: Boolean(anchor?.closest?.('.xhs-gap-cursor')),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+        manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
+      };
+    });
+    assert.strictEqual(proseVirtualClick.caretInGapCursor, true, 'clicking unused space below prose should focus a temporary gap cursor');
+    assert.strictEqual(proseVirtualClick.gapCursorCount, 1, 'blank canvas needs only one selection decoration');
+    assert.strictEqual(proseVirtualClick.manualBlankCount, 0, 'a gap cursor must not mutate the document into empty paragraphs');
+    await page.evaluate(() => reflow());
+    await page.waitForTimeout(120);
+    const proseGapAfterReflow = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      return {
+        caretInGapCursor: Boolean(anchor?.closest?.('.xhs-gap-cursor')),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+        manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
+      };
+    });
+    assert.strictEqual(proseGapAfterReflow.caretInGapCursor, true, 'automatic repagination must restore the temporary tail caret');
+    assert.strictEqual(proseGapAfterReflow.gapCursorCount, 1, 'repagination must not make the tail caret blink away');
+    assert.strictEqual(proseGapAfterReflow.manualBlankCount, 0, 'restoring a temporary caret must not create a document blank');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    const proseGapAfterEnter = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      const state = serializeStudioState();
+      const flow = document.createElement('div');
+      flow.innerHTML = state.flowHtml || '';
+      return {
+        caretInBlank: Boolean(anchor?.closest?.('.xhs-manual-blank')),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+        manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
+        flowBlankCount: flow.querySelectorAll('.xhs-manual-blank').length,
+      };
+    });
+    assert.strictEqual(proseGapAfterEnter.caretInBlank, true, 'Enter on a temporary tail caret should create and keep one real editable blank');
+    assert.strictEqual(proseGapAfterEnter.gapCursorCount, 0, 'the temporary cursor must be consumed after Enter');
+    assert.strictEqual(proseGapAfterEnter.manualBlankCount, 1, 'one Enter should create exactly one blank line');
+    assert.strictEqual(proseGapAfterEnter.flowBlankCount, 1, 'the new blank line must persist in the canonical flow');
+
+    // A drop cursor in empty visual space is only feedback. Dropping moves the
+    // block to the end-of-page document position without writing blank rows.
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      const source = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-callout'));
+      if (!source) throw new Error('callout fixture missing for virtual-row drag');
+      const probe = source.cloneNode(true);
+      probe.dataset.virtualRowDragProbe = '1';
+      probe.dataset.xhsBlockId = 'virtual-row-drag-probe';
+      const cover = window.__virtualRowOriginalPages.find((savedPage) => savedPage.type === 'cover');
+      pages = [{ ...cover }, { type: 'body', html: probe.outerHTML + '<p class="xhs-p xhs-block">正文保留</p>' }];
+      pageIndex = 1;
+      renderAll();
+    });
+    await page.waitForTimeout(100);
+    const virtualDragBlock = page.locator('#stageScale [data-virtual-row-drag-probe="1"]');
+    await virtualDragBlock.hover();
+    await page.waitForTimeout(80);
+    const virtualDragHandle = page.locator('#blockHalo .xhs-block-drag-handle');
+    const virtualHandleBox = await virtualDragHandle.boundingBox();
+    const virtualFrameBox = await page.locator('#stageScale .xhs-body-frame').boundingBox();
+    assert.ok(virtualHandleBox && virtualFrameBox, 'virtual-row drag fixture should expose its block handle and body frame');
+    await page.mouse.move(virtualHandleBox.x + virtualHandleBox.width / 2, virtualHandleBox.y + virtualHandleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(virtualFrameBox.x + virtualFrameBox.width / 2, virtualFrameBox.y + virtualFrameBox.height * 0.42, { steps: 8 });
+    const virtualDragFeedback = await page.evaluate(() => {
+      const indicator = document.querySelector('.xhs-drop-indicator:not([hidden])');
+      const frame = document.querySelector('#stageScale .xhs-body-frame');
+      const indicatorRect = indicator?.getBoundingClientRect();
+      const frameRect = frame?.getBoundingClientRect();
+      const scale = frame ? stageLocalScale(frame) : 1;
+      return {
+        hasDropTarget: Boolean(blockReorderDrag?.hasDropTarget),
+        indicatorVisible: Boolean(indicator),
+        logicalTop: indicatorRect && frameRect ? (indicatorRect.top - frameRect.top) / scale : -1,
+        expectedTop: frameRect ? (dropInsertionTop(frame, flowBlocksInBody(frame).filter((node) => !node.classList.contains('reorder-dragging')), flowBlocksInBody(frame).filter((node) => !node.classList.contains('reorder-dragging')).length) - frameRect.top) / scale : -1,
+      };
+    });
+    assert.strictEqual(virtualDragFeedback.hasDropTarget, true, 'blank-area drag should resolve to the document tail');
+    assert.strictEqual(virtualDragFeedback.indicatorVisible, true, 'blank-area drag should show the insertion line');
+    assert.ok(Math.abs(virtualDragFeedback.logicalTop - virtualDragFeedback.expectedTop) <= 2, 'drop cursor should show the actual end-of-content insertion point');
+    await page.mouse.up();
+    await page.waitForTimeout(850);
+    const virtualDragCommitted = await page.evaluate(() => {
+      const { holder } = collectBodyFlowHolderWithPageNodes();
+      const probe = holder.querySelector('[data-virtual-row-drag-probe="1"]');
+      return {
+        probeCount: holder.querySelectorAll('[data-virtual-row-drag-probe="1"]').length,
+        previousText: (probe?.previousElementSibling?.textContent || '').trim(),
+        manualBlankCount: holder.querySelectorAll('.xhs-manual-blank').length,
+        selected: Boolean(document.querySelector('#stageScale [data-virtual-row-drag-probe="1"].selected-flow-block')),
+      };
+    });
+    assert.strictEqual(virtualDragCommitted.probeCount, 1, 'blank-area drag must keep the moved block exactly once');
+    assert.strictEqual(virtualDragCommitted.previousText, '正文保留', 'dropping in blank canvas should move the block after existing page content');
+    assert.strictEqual(virtualDragCommitted.manualBlankCount, 0, 'drop feedback must not persist as blank paragraphs');
+    assert.strictEqual(virtualDragCommitted.selected, true, 'moved block should remain selected after repagination');
+
+    const imageTailFitState = await page.evaluate(() => {
+      const image = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-image-block'))?.cloneNode(true);
+      if (!image) return null;
+      const beforeHeight = parseFloat(image.querySelector('.xhs-image-frame')?.style.height || '0');
+      const beforeFit = measureBlockMetrics(image).fit;
+      const available = beforeFit - 24;
+      const changed = fitImageBlockIntoTailSpace(image, available);
+      return {
+        changed,
+        available,
+        beforeHeight,
+        afterHeight: parseFloat(image.querySelector('.xhs-image-frame')?.style.height || '0'),
+        afterFit: measureBlockMetrics(image).fit,
+        userHeight: image.querySelector('.xhs-image-frame')?.dataset.userHeight || '',
+      };
+    });
+    assert.ok(imageTailFitState, 'expected an image fixture for tail-space fitting');
+    assert.strictEqual(imageTailFitState.changed, true, 'an image that narrowly misses the target page should shrink to the tail space');
+    assert.ok(imageTailFitState.afterHeight < imageTailFitState.beforeHeight, 'tail fitting must adjust only the image frame height');
+    assert.ok(imageTailFitState.afterFit <= imageTailFitState.available + 1, 'the adjusted image must fit the target tail');
+    assert.strictEqual(imageTailFitState.userHeight, '1', 'tail-fitted image height must survive later repagination');
+
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      pages = window.__virtualRowOriginalPages.map((savedPage) => ({ ...savedPage }));
+      delete window.__virtualRowOriginalPages;
+      pageIndex = Math.min(1, pages.length - 1);
+      persistDraft();
+      renderAll();
+    });
+    await page.waitForTimeout(120);
+
+  const sourceCodeProbe = await page.evaluate(() => {
+    const code = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-code-block'));
+    if (!code) return null;
+    const rendered = code.cloneNode(true);
+    rendered.style.position = 'fixed';
+    rendered.style.left = '0';
+    rendered.style.top = '0';
+    rendered.style.width = '936px';
+    rendered.style.zIndex = '-1';
+    document.body.appendChild(rendered);
+    const renderedDots = Array.from(rendered.querySelectorAll('.xhs-code-dot'));
+    const dotCenters = renderedDots.map((dot) => {
+      const rect = dot.getBoundingClientRect();
+      return rect.top + rect.height / 2;
+    });
+    const dotSizes = renderedDots.map((dot) => getComputedStyle(dot).width);
+    const toolbarStyle = getComputedStyle(rendered.querySelector('.xhs-code-toolbar'));
+    const codeStyle = getComputedStyle(rendered.querySelector('.xhs-code-content'));
+    const languageStyle = getComputedStyle(rendered.querySelector('.xhs-code-language'));
+    const toolbarBorder = toolbarStyle.borderBottomWidth;
+    const toolbarHeight = toolbarStyle.height;
+    const codeFontSize = codeStyle.fontSize;
+    const codeLineHeight = codeStyle.lineHeight;
+    const languageFontSize = languageStyle.fontSize;
+    rendered.remove();
+    return code ? {
+      language: code.querySelector('.xhs-code-language')?.textContent || '',
+      text: code.querySelector('.xhs-code-content')?.textContent || '',
+      editable: code.querySelector('.xhs-code-content')?.getAttribute('contenteditable') || '',
+      dots: code.querySelectorAll('.xhs-code-dot').length,
+      dotCenters,
+      dotSizes,
+      toolbarBorder,
+      toolbarHeight,
+      codeFontSize,
+      codeLineHeight,
+      languageFontSize,
+    } : null;
+  });
+  assert.strictEqual(sourceCodeProbe?.language, 'JavaScript');
+  assert.strictEqual(sourceCodeProbe?.text, "const studio = 'rabbitQ';\nconsole.log(studio);");
+  assert.strictEqual(sourceCodeProbe?.editable, 'true');
+  assert.strictEqual(sourceCodeProbe?.dots, 3, 'fenced code should render three macOS dots');
+  assert.ok(Math.max(...sourceCodeProbe.dotCenters) - Math.min(...sourceCodeProbe.dotCenters) < 0.1, 'macOS dots should share one horizontal center line');
+  assert.deepStrictEqual(sourceCodeProbe.dotSizes, ['12px', '12px', '12px'], 'macOS dots should retain the original 12px size');
+  assert.strictEqual(sourceCodeProbe?.toolbarBorder, '1px', 'code toolbar should keep its horizontal divider');
+  assert.strictEqual(sourceCodeProbe?.toolbarHeight, '46px', 'code toolbar should retain its original height');
+  assert.strictEqual(sourceCodeProbe?.codeFontSize, '32px', 'code content should use 32px text');
+  assert.ok(Math.abs(parseFloat(sourceCodeProbe?.codeLineHeight) - 49.6) < 0.2, '32px code text should use a 1.55 line height');
+  assert.strictEqual(sourceCodeProbe?.languageFontSize, '19px', 'code language label should retain its original size');
+
+  const codeSelectionGuard = await page.evaluate(() => {
+    const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+    let frame = null;
+    let paragraphs = [];
+    for (const tab of tabs) {
+      tab.click();
+      const candidate = document.querySelector('#stageScale .xhs-body-frame');
+      const prose = Array.from(candidate?.querySelectorAll(':scope > .xhs-p:not(.xhs-caret-anchor), :scope > .xhs-rich') || [])
+        .filter((node) => cleanText(node.textContent));
+      if (candidate && prose.length >= 2) {
+        frame = candidate;
+        paragraphs = prose;
+        break;
+      }
+    }
+    if (!frame || paragraphs.length < 2) throw new Error('missing two prose blocks for code selection guard');
+    clearSelectedFlowBlock();
+    const beforeText = frame.textContent;
+    const beforeCodeCount = frame.querySelectorAll('.xhs-code-block').length;
+    const firstText = paragraphs[0].firstChild || paragraphs[0];
+    const secondText = paragraphs[1].lastChild || paragraphs[1];
+    const range = document.createRange();
+    range.setStart(firstText, 0);
+    range.setEnd(secondText, secondText.nodeType === Node.TEXT_NODE ? secondText.textContent.length : secondText.childNodes.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+    const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer.parentElement;
+    const startProse = startElement?.closest?.('.xhs-p, .xhs-rich') || null;
+    const endProse = endElement?.closest?.('.xhs-p, .xhs-rich') || null;
+    const selectionProbe = {
+      collapsed: range.collapsed,
+      sameProse: startProse === endProse,
+      helperFoundProse: Boolean(proseBlockForRange(range)),
+      startText: cleanText(startProse?.textContent || ''),
+      endText: cleanText(endProse?.textContent || ''),
+    };
+    let alertText = '';
+    const originalAlert = window.alert;
+    window.alert = (message) => { alertText = String(message || ''); };
+    document.getElementById('codeBtn').click();
+    window.alert = originalAlert;
+    return {
+      alertText,
+      textUnchanged: frame.textContent === beforeText,
+      codeCountUnchanged: frame.querySelectorAll('.xhs-code-block').length === beforeCodeCount,
+      selectionProbe,
+    };
+  });
+  assert.match(codeSelectionGuard.alertText, /跨段或整页/, `multi-block code conversion should explain why it was rejected: ${JSON.stringify(codeSelectionGuard)}`);
+  assert.strictEqual(codeSelectionGuard.textUnchanged, true, 'multi-block code conversion must preserve the whole page text');
+  assert.strictEqual(codeSelectionGuard.codeCountUnchanged, true, 'multi-block code conversion must not create a page-sized code block');
 
     const pageEndSpacingProbe = await page.evaluate(() => {
       const image = document.createElement('section');
@@ -822,6 +1467,78 @@ async function main() {
     assert.ok(listImageFitProbe.continuedMargin < listImageFitProbe.terminalMargin, 'continued list items should keep their compact item gap while measuring pagination');
     assert.strictEqual(listImageFitProbe.pageCount, 1, 'list item gaps must not be over-counted and push a fitting image to the next page');
 
+    const flowingListProbe = await page.evaluate(() => {
+      const lines = Array.from({ length: 4 }, (_, index) => {
+        const line = document.createElement('p');
+        line.className = 'xhs-p xhs-block xhs-list-line';
+        line.dataset.listType = 'ordered';
+        line.innerHTML = '<span class="xhs-list-marker xhs-list-marker-ordered">' + (index + 1) + '.</span><span class="xhs-list-body">整组换页测试 ' + (index + 1) + '</span>';
+        return line;
+      });
+      const firstHeight = measureBlockMetrics(lines[0], lines[1]).outer;
+      const secondHeight = measureBlockMetrics(lines[1], lines[2]).outer;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - firstHeight - secondHeight - 10) + 'px';
+      const result = paginateBlocks([lead, ...lines]);
+      return result.map((item) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = item.html;
+        return holder.querySelectorAll('.xhs-list-line').length;
+      });
+    });
+    assert.deepStrictEqual(flowingListProbe, [2, 2], 'a sequence should flow across pages between complete list items');
+
+    const atomicCalloutProbe = await page.evaluate(() => {
+      const callout = document.createElement('section');
+      callout.className = 'xhs-callout xhs-block';
+      callout.innerHTML = '<div class="xhs-callout-label">划重点</div><div class="xhs-callout-body">' +
+        '卡片内容保持完整，空间不足时整块进入下一页。'.repeat(7) + '</div>';
+      const fit = measureBlockMetrics(callout).fit;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - fit + 20) + 'px';
+      const result = paginateBlocks([lead, callout]);
+      return result.map((item) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = item.html;
+        return {
+          callouts: holder.querySelectorAll('.xhs-callout').length,
+          splitCallouts: holder.querySelectorAll('.xhs-callout[data-split]').length,
+        };
+      });
+    });
+    assert.deepStrictEqual(atomicCalloutProbe, [
+      { callouts: 0, splitCallouts: 0 },
+      { callouts: 1, splitCallouts: 0 },
+    ], 'a card must never be split to fill the previous page remainder');
+
+    const atomicShortTableProbe = await page.evaluate(() => {
+      const table = document.createElement('section');
+      table.className = 'xhs-table-block xhs-block';
+      table.innerHTML = '<table class="xhs-table"><thead><tr><th>项目</th><th>说明</th></tr></thead><tbody>' +
+        Array.from({ length: 4 }, (_, index) => '<tr><td>' + (index + 1) + '</td><td>短表整块换页</td></tr>').join('') +
+        '</tbody></table>';
+      const fit = measureBlockMetrics(table).fit;
+      const lead = document.createElement('section');
+      lead.className = 'xhs-block';
+      lead.style.height = Math.max(1, config.pageLimit - fit + 20) + 'px';
+      const result = paginateBlocks([lead, table]);
+      return result.map((item) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = item.html;
+        return {
+          tables: holder.querySelectorAll('.xhs-table-block').length,
+          rows: holder.querySelectorAll('.xhs-table-block tbody > tr').length,
+          splitTables: holder.querySelectorAll('.xhs-table-block[data-split]').length,
+        };
+      });
+    });
+    assert.deepStrictEqual(atomicShortTableProbe, [
+      { tables: 0, rows: 0, splitTables: 0 },
+      { tables: 1, rows: 4, splitTables: 0 },
+    ], 'a short table must move whole; only a table taller than a full page may split by rows');
+
     const headingKeepWithNextProbe = await page.evaluate(() => {
       const sourceBlocks = extractBlocksFromTemplate();
       const sourceHeading = sourceBlocks.find((node) => node.classList?.contains('xhs-heading'));
@@ -870,31 +1587,53 @@ async function main() {
     assert.strictEqual(savedOrphanHeadingProbe, true, 'saved drafts with a heading at the page end should trigger one corrective reflow on load');
 
     const emptyParagraphPaginationProbe = await page.evaluate(() => {
-      const lead = document.createElement('section');
-      lead.className = 'xhs-block';
-      lead.style.height = Math.max(1, config.pageLimit - 10) + 'px';
       const blank = makeEmptyParagraph();
       const following = document.createElement('p');
       following.className = 'xhs-p xhs-block';
       following.textContent = '空行后的正文';
-      const result = paginateBlocks([lead, blank, following]);
+      const boundaryLead = document.createElement('section');
+      boundaryLead.className = 'xhs-block';
+      boundaryLead.style.height = Math.max(1, config.pageLimit - 10) + 'px';
+      const result = paginateBlocks([boundaryLead, blank, following]);
+      const refillLead = document.createElement('section');
+      refillLead.className = 'xhs-block';
+      refillLead.style.height = Math.max(1, config.pageLimit - measureBlockMetrics(following).fit - 8) + 'px';
+      const refillWithBlank = paginateBlocks([refillLead, blank, following]);
+      const afterDelete = paginateBlocks([refillLead, following]);
       const first = document.createElement('div');
       first.innerHTML = result[0]?.html || '';
       const second = document.createElement('div');
+      second.className = 'xhs-body-frame';
+      second.style.position = 'fixed';
+      second.style.left = '-10000px';
+      second.style.top = '0';
       second.innerHTML = result[1]?.html || '';
+      document.body.appendChild(second);
+      const firstBoundaryBlank = first.querySelector('.xhs-manual-blank');
+      const secondFirst = second.firstElementChild;
+      const secondFirstOffset = secondFirst ? secondFirst.getBoundingClientRect().top - second.getBoundingClientRect().top : -1;
+      second.remove();
       return {
         pageCount: result.length,
-        firstHasBlank: Boolean(first.querySelector('.xhs-manual-blank')),
-        secondStartsWithBlank: Boolean(second.firstElementChild?.classList.contains('xhs-manual-blank')),
+        firstHasBlank: Boolean(firstBoundaryBlank),
+        firstBlankAtEnd: Boolean(firstBoundaryBlank?.classList.contains('xhs-page-end')),
+        secondStartsWithBlank: Boolean(secondFirst?.classList.contains('xhs-manual-blank')),
         secondText: second.textContent?.trim() || '',
-        secondHasLeadingBlank: Boolean(second.firstElementChild?.classList.contains('xhs-manual-blank')),
+        secondFirstOffset,
+        refillPageCountWithBlank: refillWithBlank.length,
+        pageCountAfterDelete: afterDelete.length,
+        firstPageTextAfterDelete: afterDelete[0]?.html || '',
       };
     });
     assert.strictEqual(emptyParagraphPaginationProbe.pageCount, 2, 'an empty paragraph near a page edge should continue in normal document flow');
-    assert.strictEqual(emptyParagraphPaginationProbe.firstHasBlank, false, 'an empty paragraph that does not fit must move forward instead of being hidden on the previous page');
-    assert.strictEqual(emptyParagraphPaginationProbe.secondStartsWithBlank, true, 'the empty paragraph must remain immediately before its following paragraph');
+    assert.strictEqual(emptyParagraphPaginationProbe.firstHasBlank, true, 'a boundary blank belongs to the preceding page position');
+    assert.strictEqual(emptyParagraphPaginationProbe.firstBlankAtEnd, true, 'the boundary blank should close the preceding page');
+    assert.strictEqual(emptyParagraphPaginationProbe.secondStartsWithBlank, false, 'the next visible page must start with real content, not a hidden blank');
     assert.strictEqual(emptyParagraphPaginationProbe.secondText, '空行后的正文');
-    assert.strictEqual(emptyParagraphPaginationProbe.secondHasLeadingBlank, true, 'page boundaries must not delete an intentional empty paragraph');
+    assert.ok(emptyParagraphPaginationProbe.secondFirstOffset <= 0.1, 'text after a boundary blank should start at the first visible line');
+    assert.strictEqual(emptyParagraphPaginationProbe.refillPageCountWithBlank, 2, 'an intentional blank may push the following paragraph to a new page');
+    assert.strictEqual(emptyParagraphPaginationProbe.pageCountAfterDelete, 1, 'deleting the boundary blank should let the following paragraph flow back to the previous page');
+    assert.match(emptyParagraphPaginationProbe.firstPageTextAfterDelete, /空行后的正文/);
 
     const paragraphInteractionProbe = await page.evaluate(() => {
       const frame = document.createElement('div');
@@ -969,7 +1708,7 @@ async function main() {
       text: '甲乙',
     }, 'Shift+Enter semantics should keep a soft line break inside the same paragraph block');
 
-    await page.locator('#pageTabs button').nth(1).click();
+    await activateStudioPage(page, 1);
     await page.waitForTimeout(100);
     const plainParagraphBlankDeleteProbe = await page.evaluate(() => {
       const frame = document.querySelector('#stageScale .xhs-body-frame');
@@ -1000,7 +1739,7 @@ async function main() {
       const count = await page.locator("#pageTabs button").count();
       const order = [];
       for (let index = 1; index < count; index += 1) {
-        await page.locator("#pageTabs button").nth(index).click();
+        await activateStudioPage(page, index);
         await page.waitForTimeout(50);
         const blocks = await page.locator("#stageScale .xhs-body-frame > :not(.xhs-caret-anchor)").evaluateAll((nodes) => nodes.flatMap((node) => {
           if (node.classList.contains("xhs-table-block")) {
@@ -1022,7 +1761,7 @@ async function main() {
     }
 
     const flowOrderBeforeCoverToggle = await collectFlowOrder();
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     assert.strictEqual(await page.locator("#coverThemeTools").isVisible(), true);
     await page.click("#coverImageOffBtn");
     await page.waitForTimeout(500);
@@ -1030,6 +1769,17 @@ async function main() {
     assert.match(await page.locator("#pageInfo").innerText(), /正文已接入封面下半区/);
     assert.ok(await page.locator("#stageScale .xhs-cover-tail-frame").count());
     assert.ok(await page.locator("#stageScale .xhs-cover-tail-frame").evaluate((node) => node.children.length >= 2));
+    const coverTailRepaginationState = await page.evaluate(() => {
+      const before = studioFlowIntegritySignature(pages);
+      const beforeTailText = (document.querySelector('#stageScale .xhs-cover-tail-frame')?.textContent || '').replace(/\s+/g, '');
+      const holder = collectBodyFlowHolder();
+      repaginateBodyBlocks(Array.from(holder.children));
+      const after = studioFlowIntegritySignature(pages);
+      const afterTailText = (document.querySelector('#stageScale .xhs-cover-tail-frame')?.textContent || '').replace(/\s+/g, '');
+      return { before, after, beforeTailText, afterTailText };
+    });
+    assert.strictEqual(coverTailRepaginationState.after, coverTailRepaginationState.before, 'image/block repagination with the cover disabled must preserve the complete continuous flow');
+    assert.strictEqual(coverTailRepaginationState.afterTailText, coverTailRepaginationState.beforeTailText, 'cover-tail content must survive image/block repagination');
     await page.click("#coverImageOnBtn");
     await page.waitForTimeout(500);
     const flowOrderAfterCoverToggle = await collectFlowOrder();
@@ -1038,7 +1788,7 @@ async function main() {
     // Regression: deleting a leading manual-blank line inside the cover's
     // tail frame (shown when the cover image is off) must actually remove
     // it instead of leaving behind a phantom empty caret-anchor paragraph.
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     await page.click("#coverImageOffBtn");
     await page.waitForTimeout(500);
     const tailFrameHeadingCount = await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").count();
@@ -1073,9 +1823,9 @@ async function main() {
     assert.strictEqual(tailFrameBlankState.caretAnchorCount, 0);
     assert.strictEqual(tailFrameBlankState.firstChildIsHeading, tailFrameBaseline.firstChildIsHeading);
     // Persisted state (survives switching pages away and back) must stay clean too.
-    await page.locator("#pageTabs button").nth(1).click();
+    await activateStudioPage(page, 1);
     await page.waitForTimeout(100);
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     await page.waitForTimeout(100);
     assert.strictEqual(await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => (
       frame.querySelectorAll(".xhs-caret-anchor").length
@@ -1088,7 +1838,7 @@ async function main() {
 
     // Regression: deleting a leading manual-blank on body page 2 must not leave a phantom blank below.
     if (await page.locator("#pageTabs button").count() > 2) {
-      await page.locator("#pageTabs button").nth(2).click();
+      await activateStudioPage(page, 2);
       await page.waitForTimeout(100);
       const bodyPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
       const bodyPageBaseline = await bodyPageFrame.evaluate((frame) => ({
@@ -1132,7 +1882,7 @@ async function main() {
     }
 
     // Regression: deleting a mid-page manual-blank must not resurrect phantom blanks after reflow.
-    await page.locator("#pageTabs button").nth(1).click();
+    await activateStudioPage(page, 1);
     await page.waitForTimeout(100);
     const midPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
     const midPageBaseline = await midPageFrame.evaluate((frame) => ({
@@ -1180,7 +1930,7 @@ async function main() {
     let multiCalloutPageIndex = -1;
     let headingPageIndex = -1;
     for (let index = 0; index < pageCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(80);
       const pageContent = await page.evaluate(() => ({
         quotes: Array.from(document.querySelectorAll("#stageScale .xhs-quote")).map((node) => node.textContent.trim()),
@@ -1210,6 +1960,165 @@ async function main() {
     assert.ok(["金句", "注意", "结论", "划重点"].every((label) => content.labels.includes(label)));
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
     assert.ok(!content.callouts.some((text) => text.includes("Alt + 拖动")));
+    // In overview mode, Alt-drag an image into the middle of prose on another
+    // page. The text caret under the pointer is the document insertion point:
+    // prose must split around the image instead of collapsing to a block edge.
+    const crossDragImagePageIndex = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+      for (let index = 1; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (document.querySelector('#stageScale .xhs-image-block')) return index;
+      }
+      return -1;
+    });
+    assert.ok(crossDragImagePageIndex > 0, 'expected an image on a body page for cross-page drag');
+    await activateStudioPage(page, crossDragImagePageIndex);
+    await page.waitForTimeout(160);
+    const crossPageTargetIndex = await page.evaluate((sourceIndex) => {
+      const target = Array.from(document.querySelectorAll('.overview-item')).find((item) => {
+        const index = Number(item.dataset.index);
+        const paragraph = Array.from(item.querySelectorAll('.xhs-p, .xhs-rich')).find((node) =>
+          !node.classList.contains('xhs-manual-blank') && (node.textContent || '').trim().length >= 6
+        );
+        return index > 0 && index !== sourceIndex && paragraph;
+      });
+      return Number(target?.dataset?.index ?? -1);
+    }, crossDragImagePageIndex);
+    assert.ok(crossPageTargetIndex > 0 && crossPageTargetIndex !== crossDragImagePageIndex, 'expected prose on another body page for image drag target');
+    const sourceImageFrame = page.locator('#stageScale .xhs-image-frame').first();
+    const targetOverviewCard = page.locator(`.overview-item[data-index="${crossPageTargetIndex}"] .overview-card-frame`);
+    await targetOverviewCard.scrollIntoViewIfNeeded();
+    const targetParagraph = targetOverviewCard.locator('.xhs-p:not(.xhs-manual-blank), .xhs-rich:not(.xhs-manual-blank)').filter({ hasText: /\S/ }).first();
+    const targetParagraphText = (await targetParagraph.textContent()).trim();
+    await sourceImageFrame.hover();
+    await page.waitForTimeout(80);
+    const sourceHandle = page.locator('#blockHalo .xhs-block-drag-handle');
+    assert.strictEqual(await sourceHandle.getAttribute('aria-label'), '拖动区块');
+    const handleStyle = await sourceHandle.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const dot = node.querySelector('.xhs-block-drag-handle-dot');
+      return {
+        width: parseFloat(style.width),
+        height: parseFloat(style.height),
+        dotCount: node.querySelectorAll('.xhs-block-drag-handle-dot').length,
+        dotWidth: parseFloat(getComputedStyle(dot).width),
+      };
+    });
+    assert.ok(handleStyle.width <= 18 && handleStyle.height <= 28, 'drag handle should stay compact and Feishu-like');
+    assert.strictEqual(handleStyle.dotCount, 6, 'drag handle should contain six subtle dots');
+    assert.ok(handleStyle.dotWidth <= 3, 'drag handle dots must stay visually light');
+    const sourceBox = await sourceHandle.boundingBox();
+    const targetBox = await targetOverviewCard.boundingBox();
+    const targetParagraphBox = await targetParagraph.boundingBox();
+    assert.ok(sourceBox && targetBox && targetParagraphBox, 'expected visible image handle and target prose');
+    const sourceDragImageId = await sourceImageFrame.evaluate((frame) => ensureImageId(frame.closest('.xhs-image-block')));
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      targetParagraphBox.x + Math.min(150, targetParagraphBox.width * 0.25),
+      targetParagraphBox.y + targetParagraphBox.height / 2,
+      { steps: 8 },
+    );
+    const dragFeedbackState = await page.evaluate((targetIndex) => {
+      const indicator = document.querySelector('.xhs-overview-drop-indicator');
+      const target = document.querySelector('.overview-item[data-index="' + targetIndex + '"] .overview-card-frame');
+      const indicatorRect = indicator?.getBoundingClientRect();
+      const targetRect = target?.getBoundingClientRect();
+      return {
+        previewExists: Boolean(document.querySelector('.xhs-block-drop-preview')),
+        indicatorVisible: Boolean(indicator && !indicator.hidden),
+        indicatorHeight: indicatorRect?.height || 0,
+        indicatorInsideTarget: Boolean(indicatorRect && targetRect && indicatorRect.top >= targetRect.top && indicatorRect.top <= targetRect.bottom),
+        textOffset: blockReorderDrag?.crossPage?.textOffset,
+      };
+    }, crossPageTargetIndex);
+    assert.strictEqual(dragFeedbackState.previewExists, false, 'dragging must not create a transparent destination clone');
+    assert.ok(dragFeedbackState.indicatorVisible, 'dragging should show the exact cross-page insertion line');
+    assert.ok(dragFeedbackState.indicatorHeight <= 3, 'cross-page feedback should stay a lightweight insertion line');
+    assert.ok(dragFeedbackState.indicatorInsideTarget, 'insertion line should stay inside the target page');
+    assert.ok(Number.isInteger(dragFeedbackState.textOffset) && dragFeedbackState.textOffset > 0 && dragFeedbackState.textOffset < targetParagraphText.length, 'cross-page prose drop should resolve to a character offset inside the paragraph: ' + JSON.stringify({ dragFeedbackState, targetParagraphText }));
+    await page.mouse.up();
+    await page.waitForTimeout(850);
+    const imageDragState = await page.evaluate(({ imageId }) => {
+      const holder = collectBodyFlowHolder();
+      const image = findImageBlockById(holder, imageId);
+      const previousText = (image?.previousElementSibling?.textContent || '').trim();
+      const nextText = (image?.nextElementSibling?.textContent || '').trim();
+      return {
+      activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
+      imagePageIndex: pageIndexForImageId(imageId),
+      selectedImageCount: document.querySelectorAll('#stageScale .xhs-image-block .selected-image-frame').length,
+      targetOutlineCount: document.querySelectorAll('.overview-item.reorder-drop-page').length,
+      draggingClassCount: document.querySelectorAll('#stageScale .reorder-dragging').length,
+      indicatorVisible: Boolean(document.querySelector('.xhs-overview-drop-indicator:not([hidden])')),
+      previousText,
+      nextText,
+      };
+    }, { imageId: sourceDragImageId });
+    assert.strictEqual(imageDragState.activeIndex, imageDragState.imagePageIndex, 'cross-page image drag should activate the image page after repagination');
+    assert.ok(imageDragState.previousText && imageDragState.nextText, 'the target paragraph should be split into text before and after the image');
+    assert.strictEqual(imageDragState.previousText + imageDragState.nextText, targetParagraphText, 'dropping inside prose must preserve every target-paragraph character');
+    assert.strictEqual(imageDragState.selectedImageCount, 1, 'moved image should remain selected after cross-page repagination');
+    assert.strictEqual(imageDragState.targetOutlineCount, 0, 'cross-page drop highlight should clear after drop');
+    assert.strictEqual(imageDragState.draggingClassCount, 0, 'cross-page image drag must not persist its temporary dragging style');
+    assert.strictEqual(imageDragState.indicatorVisible, false, 'cross-page insertion line should clear after drop');
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(450);
+    const paragraphRestoredAfterDragUndo = await page.evaluate((text) => {
+      const holder = collectBodyFlowHolder();
+      return Array.from(holder.querySelectorAll('.xhs-p, .xhs-rich')).some((node) => (node.textContent || '').trim() === text);
+    }, targetParagraphText);
+    assert.strictEqual(paragraphRestoredAfterDragUndo, true, 'undo after a prose drop should restore the original unsplit paragraph');
+    await page.waitForTimeout(100);
+
+    // Feishu treats headings, cards, quotes, code blocks and lists as movable
+    // blocks too. The Studio must not reserve cross-page drag for images only.
+    const structuralDragSourceIndex = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+      for (let index = 1; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (document.querySelector('#stageScale .xhs-callout')) return index;
+      }
+      return -1;
+    });
+    const structuralPageCount = await page.locator('#pageTabs button').count();
+    assert.ok(structuralDragSourceIndex > 0, 'expected a card on a body page for structural cross-page drag');
+    const structuralDragTargetIndex = structuralDragSourceIndex + 1 < structuralPageCount
+      ? structuralDragSourceIndex + 1
+      : structuralDragSourceIndex - 1;
+    assert.ok(structuralDragTargetIndex > 0 && structuralDragTargetIndex !== structuralDragSourceIndex, 'expected another body page for structural drag target');
+    await activateStudioPage(page, structuralDragSourceIndex);
+    const structuralFlowBefore = await page.evaluate(() => Array.from(studioFlowIntegritySignature(pages)).sort().join(''));
+    await page.waitForTimeout(160);
+    const sourceCallout = page.locator('#stageScale .xhs-callout').first();
+    const structuralTargetCard = page.locator(`.overview-item[data-index="${structuralDragTargetIndex}"] .overview-card-frame`);
+    await structuralTargetCard.scrollIntoViewIfNeeded();
+    const calloutBox = await sourceCallout.boundingBox();
+    const structuralTargetBox = await structuralTargetCard.boundingBox();
+    assert.ok(calloutBox && structuralTargetBox, 'expected visible card block and structural target page');
+    const structuralBlockId = await sourceCallout.evaluate((callout) => ensureFlowBlockId(callout));
+    await page.mouse.move(calloutBox.x + calloutBox.width / 2, calloutBox.y + calloutBox.height / 2);
+    await page.keyboard.down('Alt');
+    await page.mouse.down();
+    await page.mouse.move(structuralTargetBox.x + structuralTargetBox.width / 2, structuralTargetBox.y + Math.min(structuralTargetBox.height * 0.25, 110), { steps: 8 });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await page.waitForTimeout(850);
+    const structuralDragState = await page.evaluate((blockId) => ({
+      activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
+      blockPageIndex: pageIndexForFlowBlockId(blockId),
+      selectedCardCount: document.querySelectorAll('#stageScale .xhs-callout.selected-flow-block').length,
+      integrity: Array.from(studioFlowIntegritySignature(pages)).sort().join(''),
+      targetOutlineCount: document.querySelectorAll('.overview-item.reorder-drop-page').length,
+      draggingClassCount: document.querySelectorAll('#stageScale .reorder-dragging').length,
+    }), structuralBlockId);
+    assert.strictEqual(structuralDragState.activeIndex, structuralDragState.blockPageIndex, 'cross-page structural drag should activate the moved block page');
+    assert.strictEqual(structuralDragState.selectedCardCount, 1, 'moved card should remain selected after cross-page repagination');
+    assert.strictEqual(structuralDragState.integrity, structuralFlowBefore, 'cross-page structural drag must preserve all text, images, blanks and page breaks');
+    assert.strictEqual(structuralDragState.targetOutlineCount, 0, 'structural cross-page drop highlight should clear after drop');
+    assert.strictEqual(structuralDragState.draggingClassCount, 0, 'structural cross-page drag must not persist its temporary dragging style');
+    await page.waitForTimeout(100);
+
     // Regression: backspace at the start of a list line should unlist it into plain body text.
     const listPageIndex = await page.evaluate(() => {
       const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
@@ -1220,8 +2129,164 @@ async function main() {
       return -1;
     });
     assert.ok(listPageIndex >= 0, "expected at least one list line in studio output");
-    await page.locator("#pageTabs button").nth(listPageIndex).click();
+    await activateStudioPage(page, listPageIndex);
     await page.waitForTimeout(100);
+    const firstListLine = page.locator('#stageScale .xhs-list-line').first();
+    await firstListLine.scrollIntoViewIfNeeded();
+    const firstListBox = await firstListLine.boundingBox();
+    assert.ok(firstListBox, 'expected a visible list item for Alt-drag scope regression');
+    await page.mouse.move(firstListBox.x + firstListBox.width / 2, firstListBox.y + firstListBox.height / 2);
+    await page.keyboard.down('Alt');
+    await page.mouse.down();
+    const listDragStartState = await page.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      return {
+        count: document.querySelectorAll('#stageScale .xhs-list-line.reorder-dragging').length,
+        hit: hit ? [hit.tagName, hit.id, hit.className].join('.') : '',
+        dragging: Boolean(blockReorderDrag),
+        activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
+      };
+    }, { x: firstListBox.x + firstListBox.width / 2, y: firstListBox.y + firstListBox.height / 2 });
+    assert.strictEqual(listDragStartState.count, 1, `Alt-drag must select only the current list item: ${JSON.stringify(listDragStartState)}`);
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await page.waitForTimeout(100);
+    const listDragScope = await page.locator('#stageScale .xhs-list-line').first().evaluate((line) => ({
+      contiguous: collectContiguousListLines(line).length,
+      moving: reorderGroupNodes(line).length,
+    }));
+    assert.ok(listDragScope.contiguous > 1, 'expected a multi-item list for drag scope regression');
+    assert.strictEqual(listDragScope.moving, 1, 'Alt-dragging a list item must move only that item');
+    // Same-page movement must commit the new document order, not merely move
+    // a visual placeholder and then snap back during automatic repagination.
+    const samePageMove = await page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll('#stageScale .xhs-list-line'));
+      if (lines.length < 3) return null;
+      const anchor = lines[0];
+      const source = lines[lines.length - 1];
+      ensureFlowBlockId(anchor);
+      ensureFlowBlockId(source);
+      saveCurrentPage({ skipNormalize: true });
+      return {
+        sourceId: source.dataset.xhsBlockId,
+        anchorId: anchor.dataset.xhsBlockId,
+      };
+    });
+    assert.ok(samePageMove, 'expected at least three list items for same-page reorder');
+    const samePageSource = page.locator('#stageScale .xhs-list-line').last();
+    const samePageAnchor = page.locator('#stageScale .xhs-list-line').first();
+    const samePageSourceBox = await samePageSource.boundingBox();
+    const samePageAnchorBox = await samePageAnchor.boundingBox();
+    assert.ok(samePageSourceBox && samePageAnchorBox, 'expected visible source and anchor list items');
+    await page.mouse.move(2, 2);
+    await page.waitForTimeout(140);
+    await samePageSource.evaluate((node) => {
+      node.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await page.waitForTimeout(80);
+    const samePageHandleBox = await page.locator('#blockHalo .xhs-block-drag-handle').boundingBox();
+    assert.ok(samePageHandleBox, 'expected the compact drag handle for the source list item');
+    await page.mouse.move(samePageHandleBox.x + samePageHandleBox.width / 2, samePageHandleBox.y + samePageHandleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      samePageAnchorBox.x + samePageAnchorBox.width / 2,
+      samePageAnchorBox.y + 1,
+      { steps: 8 },
+    );
+    const samePageFeedback = await page.evaluate(() => ({
+      lineVisible: Boolean(document.querySelector('.xhs-drop-indicator:not([hidden])')),
+      previewExists: Boolean(document.querySelector('.xhs-block-drop-preview')),
+      dragActive: Boolean(blockReorderDrag),
+      hasDropTarget: Boolean(blockReorderDrag?.hasDropTarget),
+      indicatorExists: Boolean(document.querySelector('.xhs-drop-indicator')),
+      indicatorHidden: document.querySelector('.xhs-drop-indicator')?.hidden,
+      overviewLineVisible: Boolean(document.querySelector('.xhs-overview-drop-indicator:not([hidden])')),
+      viewMode,
+      insertBeforeId: blockReorderDrag?.insertBefore?.dataset?.xhsBlockId || '',
+      sourceId: blockReorderDrag?.node?.dataset?.xhsBlockId || '',
+    }));
+    assert.strictEqual(samePageFeedback.lineVisible, true, 'same-page drag should expose its exact insertion line: ' + JSON.stringify(samePageFeedback));
+    assert.strictEqual(samePageFeedback.previewExists, false, 'same-page drag must not create a transparent destination clone');
+    await page.mouse.up();
+    await page.waitForTimeout(350);
+    const samePageCommitted = await page.evaluate(({ sourceId, anchorId }) => {
+      const ids = [];
+      pages.forEach((savedPage) => {
+        const html = savedPage.type === 'cover' ? (savedPage.tailHtml || '') : (savedPage.html || '');
+        if (!html) return;
+        const holder = document.createElement('div');
+        holder.innerHTML = html;
+        Array.from(holder.children).forEach((node) => {
+          if (node.dataset?.xhsBlockId) ids.push(node.dataset.xhsBlockId);
+        });
+      });
+      return {
+        sourceIndex: ids.indexOf(sourceId),
+        anchorIndex: ids.indexOf(anchorId),
+        selectedListCount: document.querySelectorAll('#stageScale .xhs-list-line.selected-flow-block').length,
+        lineVisible: Boolean(document.querySelector('.xhs-drop-indicator:not([hidden])')),
+      };
+    }, samePageMove);
+    assert.ok(samePageCommitted.sourceIndex >= 0 && samePageCommitted.anchorIndex >= 0, 'moved list item and anchor must survive repagination');
+    assert.ok(samePageCommitted.sourceIndex < samePageCommitted.anchorIndex, `same-page drop must commit the new list-item order: ${JSON.stringify({ samePageFeedback, samePageCommitted })}`);
+    assert.strictEqual(samePageCommitted.selectedListCount, 1, 'same-page moved list item should remain selected');
+    assert.strictEqual(samePageCommitted.lineVisible, false, 'same-page insertion line should clear after drop');
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(350);
+    const restoredListPageIndex = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (Array.from(document.querySelectorAll('#stageScale .xhs-list-body')).some((node) => (node.textContent || '').includes('重新分页'))) return index;
+      }
+      return -1;
+    });
+    assert.ok(restoredListPageIndex >= 0, 'undo after drag should restore the original list for later editing regressions');
+    await activateStudioPage(page, restoredListPageIndex);
+    await page.waitForTimeout(100);
+    // Feishu interaction: unlist the second item, then Backspace again. The
+    // plain paragraph must merge into the first item's body, not become a new
+    // list item or remain behind an invisible list boundary.
+    const secondListBody = page.locator("#stageScale .xhs-list-line .xhs-list-body").filter({ hasText: "重新分页" }).first();
+    await secondListBody.evaluate((body) => {
+      body.closest('[contenteditable="true"]')?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(120);
+    const secondUnlistedState = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const start = range?.startContainer?.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range?.startContainer?.parentElement;
+      const paragraph = start?.closest?.('.xhs-p');
+      return {
+        paragraphText: paragraph?.textContent || '',
+        listLineCount: document.querySelectorAll('#stageScale .xhs-list-line').length,
+      };
+    });
+    assert.ok(secondUnlistedState.paragraphText.includes("重新分页"), "second list item should first become plain prose");
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(700);
+    const secondMergedIntoFirst = await page.evaluate(() => {
+      const bodies = Array.from(document.querySelectorAll('#stageScale .xhs-list-body'));
+      const merged = bodies.find((body) => (body.textContent || '').includes('Alt + 拖动'));
+      return {
+        mergedText: merged?.textContent || '',
+        listLineCount: document.querySelectorAll('#stageScale .xhs-list-line').length,
+        leftoverParagraphs: Array.from(document.querySelectorAll('#stageScale .xhs-p:not(.xhs-list-line)')).filter((node) => (node.textContent || '').includes('重新分页')).length,
+      };
+    });
+    assert.ok(secondMergedIntoFirst.mergedText.includes("Alt + 拖动：卡片和图片整块移动重新分页：改完内容一键重排"), "second Backspace should merge unlisted text into the previous list item");
+    assert.strictEqual(secondMergedIntoFirst.listLineCount, 2, "merging into the previous item should not create another bullet");
+    assert.strictEqual(secondMergedIntoFirst.leftoverParagraphs, 0, "merged list text should not remain as a plain paragraph");
+
     const unlistState = await page.locator("#stageScale .xhs-list-line .xhs-list-body").first().evaluate((body) => {
       const line = body.closest(".xhs-list-line");
       const sample = body.textContent || "";
@@ -1236,20 +2301,64 @@ async function main() {
       return { sample, lineClass: line?.className || "" };
     });
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(500);
-    const afterUnlist = await page.locator("#stageScale .xhs-body-card .xhs-body-frame").first().evaluate((frame, sample) => ({
-      listLineCount: frame.querySelectorAll(".xhs-list-line").length,
-      plainCount: Array.from(frame.querySelectorAll(".xhs-p")).filter((node) => (
-        !node.classList.contains("xhs-manual-blank") &&
-        !node.classList.contains("xhs-caret-anchor") &&
-        (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
-      )).length,
-    }), unlistState.sample);
+    await page.waitForTimeout(120);
+    const afterUnlist = await page.evaluate((sample) => {
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const startElement = range?.startContainer?.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range?.startContainer?.parentElement;
+      const paragraph = startElement?.closest?.(".xhs-p");
+      const before = document.createRange();
+      if (paragraph && range) {
+        before.selectNodeContents(paragraph);
+        before.setEnd(range.startContainer, range.startOffset);
+      }
+      return {
+        listLineCount: document.querySelectorAll("#stageScale .xhs-list-line").length,
+        plainCount: Array.from(document.querySelectorAll("#stageScale .xhs-p")).filter((node) => (
+          !node.classList.contains("xhs-manual-blank") &&
+          !node.classList.contains("xhs-caret-anchor") &&
+          (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
+        )).length,
+        caretParagraphText: paragraph?.textContent || "",
+        caretPrefix: paragraph && range ? before.toString() : "missing",
+      };
+    }, unlistState.sample);
     assert.ok(afterUnlist.plainCount >= 1, "list line should become plain paragraph after backspace at line start");
+    assert.ok(afterUnlist.caretParagraphText.includes(unlistState.sample.slice(0, 6)), "caret should stay in the unlisted paragraph after immediate reflow: " + JSON.stringify(afterUnlist));
+    assert.strictEqual(afterUnlist.caretPrefix, "", "caret should remain at the start of the unlisted paragraph");
 
-    await page.locator("#pageTabs button").nth(listPageIndex).click();
+    // Regression: a second Backspace must use normal prose flow instead of
+    // leaving an invisible list boundary behind.
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(700);
+    const afterSecondBackspace = await page.evaluate((sample) => {
+      const paragraphs = Array.from(document.querySelectorAll("#stageScale .xhs-p"));
+      const merged = paragraphs.find((node) => (
+        (node.textContent || "").includes("序列前的普通正文。") &&
+        (node.textContent || "").includes(sample.slice(0, Math.min(6, sample.length)))
+      ));
+      return {
+        mergedText: merged?.textContent || "",
+        plainSampleCount: paragraphs.filter((node) => (node.textContent || "").includes(sample.slice(0, 6))).length,
+      };
+    }, unlistState.sample);
+    assert.ok(afterSecondBackspace.mergedText.includes("序列前的普通正文。" + unlistState.sample), "second Backspace should merge the unlisted paragraph into preceding prose");
+    assert.strictEqual(afterSecondBackspace.plainSampleCount, 1, "unlisted prose should not retain a duplicate or hidden list boundary");
+
+    const remainingListPageIndex = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (Array.from(document.querySelectorAll("#stageScale .xhs-list-body")).some((node) => (node.textContent || "").includes("序列续写测试"))) return index;
+      }
+      return -1;
+    });
+    assert.ok(remainingListPageIndex >= 0, "expected remaining list item after unlisting the first item");
+    await activateStudioPage(page, remainingListPageIndex);
     await page.waitForTimeout(100);
-    const listBodyWithContent = page.locator("#stageScale .xhs-list-line .xhs-list-body").filter({ hasText: "重新分页" });
+    const listBodyWithContent = page.locator("#stageScale .xhs-list-line .xhs-list-body").filter({ hasText: "序列续写测试" });
     await listBodyWithContent.first().evaluate((body) => {
       const editable = body.closest('[contenteditable="true"]');
       editable?.focus();
@@ -1273,9 +2382,59 @@ async function main() {
       };
     }, listLineCountBeforeEnter);
     assert.strictEqual(listEnterState.lineCount, listLineCountBeforeEnter + 1);
-    assert.ok(listEnterState.currentBody.includes("重新分页"));
+    assert.ok(listEnterState.currentBody.includes("序列续写测试"));
     assert.strictEqual(listEnterState.previousBody, "");
-    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    const emptyListExitState = await page.evaluate(() => ({
+      listLineCount: document.querySelectorAll("#stageScale .xhs-list-line").length,
+      manualBlankCount: document.querySelectorAll("#stageScale .xhs-manual-blank").length,
+    }));
+    assert.strictEqual(emptyListExitState.listLineCount, listLineCountBeforeEnter, "Enter on an empty list item should exit the list instead of creating another bullet");
+    assert.ok(emptyListExitState.manualBlankCount >= 1, "exiting an empty list item should leave an editable plain paragraph");
+
+    // A paragraph immediately after a card should merge into the card body at
+    // its caret boundary. The browser must not object-select/delete the card.
+    const cardPageForMerge = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        if (document.querySelector('#stageScale .xhs-callout')) return index;
+      }
+      return -1;
+    });
+    assert.ok(cardPageForMerge >= 0, "expected a card for paragraph continuation regression");
+    await activateStudioPage(page, cardPageForMerge);
+    await page.waitForTimeout(100);
+    const cardMergeSetup = await page.evaluate(() => {
+      const card = document.querySelector('#stageScale .xhs-callout');
+      const body = card?.querySelector('.xhs-callout-body');
+      const paragraph = document.createElement('p');
+      paragraph.className = 'xhs-p xhs-block';
+      paragraph.dataset.cardMergeProbe = '1';
+      paragraph.textContent = '并入卡片的正文';
+      card.after(paragraph);
+      body?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      paragraph.closest('[contenteditable="true"]')?.focus();
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return { before: body?.textContent || '' };
+    });
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(700);
+    const cardMergeState = await page.evaluate(() => {
+      const card = Array.from(document.querySelectorAll('#stageScale .xhs-callout')).find((node) => (node.textContent || '').includes('并入卡片的正文'));
+      return {
+        cardText: card?.querySelector('.xhs-callout-body')?.textContent || '',
+        probeCount: document.querySelectorAll('[data-card-merge-probe="1"]').length,
+      };
+    });
+    assert.ok(cardMergeState.cardText.includes(cardMergeSetup.before + '并入卡片的正文'), "paragraph after a card should merge into the card body");
+    assert.strictEqual(cardMergeState.probeCount, 0, "card continuation paragraph should be consumed instead of deleting the card");
 
     const paragraphHaloState = await page.locator("#stageScale .xhs-p").first().evaluate((paragraph) => {
       paragraph.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
@@ -1290,7 +2449,7 @@ async function main() {
     let enterTestPageIndex = -1;
     const enterPageTabCount = await page.locator("#pageTabs button").count();
     for (let index = 0; index < enterPageTabCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(50);
       if (await page.locator("#stageScale .xhs-p").filter({ hasText: "这件事花的时间" }).count() > 0) {
         enterTestPageIndex = index;
@@ -1348,7 +2507,7 @@ async function main() {
     assert.strictEqual(content.tables.reduce((total, table) => total + table.rows, 0), 21);
     assert.ok(content.tables.some((table) => table.text.includes("无封面图")));
     assert.ok(headingPageIndex >= 0);
-    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await activateStudioPage(page, headingPageIndex);
     await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
       for (let index = 0; index < 3; index += 1) {
         const blank = document.createElement("p");
@@ -1371,7 +2530,7 @@ async function main() {
       await page.waitForTimeout(120);
     }
     await page.waitForTimeout(800);
-    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await activateStudioPage(page, headingPageIndex);
     await page.waitForTimeout(100);
     const leadingBlankState = await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => ({
       hasManualBlankBefore: heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false,
@@ -1506,7 +2665,7 @@ async function main() {
 
     assert.ok(multiCalloutPageIndex >= 0 || pageCount > 0);
     for (let index = 0; index < pageCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(80);
       const calloutCount = await page.locator("#stageScale .xhs-callout").count();
       if (calloutCount >= 2) {
@@ -1515,7 +2674,7 @@ async function main() {
       }
     }
     assert.ok(multiCalloutPageIndex >= 0, "expected a page with at least two callouts after reflow");
-    await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
+    await activateStudioPage(page, multiCalloutPageIndex);
     const styleTestCallouts = page.locator("#stageScale .xhs-callout");
     const styleTestCalloutCount = await styleTestCallouts.count();
     assert.ok(styleTestCalloutCount >= 2);
@@ -1523,15 +2682,15 @@ async function main() {
     await page.click('[data-card-style="frame"]');
     assert.strictEqual(await styleTestCallouts.nth(0).evaluate((node) => node.classList.contains("xhs-card-frame")), true);
     assert.strictEqual(await styleTestCallouts.nth(1).evaluate((node) => node.classList.contains("xhs-card-frame")), false);
-    await page.locator("#pageTabs button").nth(0).click();
-    await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
+    await activateStudioPage(page, 0);
+    await activateStudioPage(page, multiCalloutPageIndex);
     const restoredStyleCallouts = page.locator("#stageScale .xhs-callout");
     assert.strictEqual(await restoredStyleCallouts.nth(0).evaluate((node) => node.classList.contains("xhs-card-frame")), true);
     assert.strictEqual(await restoredStyleCallouts.nth(1).evaluate((node) => node.classList.contains("xhs-card-frame")), false);
 
     assert.ok(calloutPageIndex >= 0 || pageCount > 0);
     for (let index = 0; index < pageCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(80);
       const hasTargetCallout = await page.locator("#stageScale .xhs-callout-body").filter({ hasText: "这是明确的卡片" }).count();
       if (hasTargetCallout > 0) {
@@ -1540,9 +2699,9 @@ async function main() {
       }
     }
     assert.ok(calloutPageIndex >= 0, "expected a page with the target callout after reflow");
-    await page.locator("#pageTabs button").nth(calloutPageIndex).click();
+    await activateStudioPage(page, calloutPageIndex);
     const calloutCountBeforeToggle = await page.locator("#stageScale .xhs-callout").count();
-    await page.locator("#stageScale .xhs-callout-body").first().click();
+    await page.locator("#stageScale .xhs-callout-body").filter({ hasText: "这是明确的卡片" }).first().click();
     await page.click("#keypointBtn");
     const calloutCountAfterToggle = await page.locator("#stageScale .xhs-callout").count();
     assert.strictEqual(calloutCountAfterToggle, calloutCountBeforeToggle - 1);
@@ -1562,7 +2721,16 @@ async function main() {
     const caretText = "连续输入".repeat(180) + "光标终点";
     await page.evaluate((text) => document.execCommand("insertText", false, text), caretText);
     await page.waitForTimeout(2200);
-    assert.ok(await page.locator("#stageScale .xhs-p").filter({ hasText: "光标终点" }).count() >= 1, "typed paragraph should survive reflow");
+    const typedParagraphCount = await page.locator("#stageScale .xhs-p").filter({ hasText: "光标终点" }).count();
+    const typedParagraphDebug = await page.evaluate(() => ({
+      pageIndex,
+      matchingPages: pages.map((savedPage, index) => ({
+        index,
+        hasText: String(savedPage.html || savedPage.tailHtml || '').includes('光标终点'),
+      })).filter((item) => item.hasText),
+      notice: document.querySelector('#runtimeNotice')?.textContent || '',
+    }));
+    assert.ok(typedParagraphCount >= 1, `typed paragraph should survive reflow: ${JSON.stringify(typedParagraphDebug)}`);
     assert.strictEqual(await page.locator('[data-xhs-caret-marker]').count(), 0);
     const restoredCaret = await page.evaluate(() => {
       const selection = window.getSelection();
@@ -1590,7 +2758,7 @@ async function main() {
     // Image double-click / Backspace deletion also live here, after page-index
     // dependent assertions, because these mutations can reflow content.
     assert.ok(headingPageIndex >= 0);
-    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await activateStudioPage(page, headingPageIndex);
     const level1Heading = page.locator('#stageScale .xhs-heading').filter({ hasText: "结构识别" }).first();
     const level1Gap = await level1Heading.evaluate((heading) => {
       const number = heading.querySelector('.xhs-heading-number')?.getBoundingClientRect();
@@ -1629,7 +2797,16 @@ async function main() {
     });
     await page.waitForTimeout(200);
     const level2Count = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).count();
-    assert.strictEqual(level2Count, 1, "二级标题 button should create a level-2 heading");
+    const level2Debug = await page.evaluate(() => ({
+      pageIndex,
+      stageHasText: document.querySelector('#stageScale')?.innerText.includes('临时二级标题') || false,
+      matchingPages: pages.map((savedPage, index) => ({
+        index,
+        hasText: String(savedPage.html || savedPage.tailHtml || '').includes('临时二级标题'),
+        hasLevel2: String(savedPage.html || savedPage.tailHtml || '').includes('data-level="2"'),
+      })).filter((item) => item.hasText),
+    }));
+    assert.strictEqual(level2Count, 1, `二级标题 button should create a level-2 heading: ${JSON.stringify(level2Debug)}`);
     const level2Style = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
       const title = heading.querySelector(".xhs-heading-title");
       const styles = getComputedStyle(title);
@@ -1720,7 +2897,7 @@ async function main() {
     const pageTabCount = await page.locator("#pageTabs button").count();
     let imagePageIndex = -1;
     for (let index = 0; index < pageTabCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       if (await page.locator("#stageScale .xhs-image-frame").count()) {
         imagePageIndex = index;
         break;
@@ -1737,7 +2914,7 @@ async function main() {
     await page.waitForTimeout(300);
     assert.strictEqual(await page.locator("#stageScale .xhs-image-frame").count(), 0, "Backspace should delete the selected image block");
 
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     const coverSubtitle = page.locator("#stageScale .cover-subtitle");
     await coverSubtitle.fill("");
     await coverSubtitle.click();
@@ -1834,15 +3011,13 @@ async function main() {
       sessionStorage.setItem("rabbitq-flow-test-initialized", "1");
     });
     await flowPage.goto(`file://${flowHtmlPath}`);
-    await flowPage.click('#editModeBtn');
     await flowPage.waitForTimeout(500);
 
     async function collectAllBodyTextFrom(targetPage) {
-      await targetPage.locator('#editModeBtn').click();
       const count = await targetPage.locator("#pageTabs button").count();
       const chunks = [];
       for (let index = 0; index < count; index += 1) {
-        await targetPage.locator("#pageTabs button").nth(index).click();
+        await activateStudioPage(targetPage, index);
         await targetPage.waitForTimeout(40);
         const bodyLocator = targetPage.locator("#stageScale .xhs-body-frame");
         const coverTailLocator = targetPage.locator("#stageScale .xhs-cover-tail-frame");
@@ -1868,7 +3043,7 @@ async function main() {
       return -1;
     });
     assert.ok(flowSentencePageIndex >= 0, "expected the long flow paragraph for punctuation Enter regression");
-    await flowPage.locator("#pageTabs button").nth(flowSentencePageIndex).click();
+    await activateStudioPage(flowPage, flowSentencePageIndex);
     await flowPage.waitForTimeout(100);
     const flowSentenceParagraph = flowPage.locator("#stageScale .xhs-p").filter({ hasText: "此工具为本兔自用工具" }).first();
     await flowSentenceParagraph.evaluate((paragraph) => {
@@ -1898,7 +3073,7 @@ async function main() {
     const flowAfterExplicitReflow = (await collectAllBodyTextFrom(flowPage)).replace(/\s+/g, "");
     assert.ok(flowAfterExplicitReflow.includes(flowSentence.replace(/\s+/g, "")), "paragraph tail after 、 must survive explicit reflow");
 
-    await flowPage.locator("#pageTabs button").first().click();
+    await activateStudioPage(flowPage, 0);
     await flowPage.waitForTimeout(120);
     await flowPage.click("#coverImageOffBtn");
     await flowPage.waitForTimeout(300);
@@ -1954,7 +3129,6 @@ async function main() {
     const embeddedPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await embeddedPage.addInitScript(() => localStorage.clear());
     await embeddedPage.goto(`file://${embeddedHtmlPath}`);
-    await embeddedPage.click('#editModeBtn');
     await embeddedPage.waitForTimeout(600);
     const healedEmbeddedText = await collectAllBodyTextFrom(embeddedPage);
     assert.match(healedEmbeddedText, /持续debug/, "corrupted embeddedState should fall back to the source template");

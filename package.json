@@ -1,11 +1,12 @@
 {
   "name": "rabbitQ-skill-lark-xhs",
-  "version": "0.8.59",
+  "version": "0.9.1",
   "private": true,
   "description": "小兔Q彬 · 飞书 Markdown + 附件转可编辑小红书 3:4 图文 Studio",
   "type": "commonjs",
   "scripts": {
     "convert": "node scripts/convert.js",
+    "ensure-font": "node scripts/ensure-font.js",
     "test": "node scripts/smoke-test.js"
   },
   "dependencies": {

@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.59";
+const VERSION = "0.9.1";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -385,31 +385,8 @@ function autoDecorateInlineHtml(html) {
     .join("");
 }
 
-function plainEscapedHtmlText(html) {
-  return String(html || "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-}
-
-function shouldAutoUnderlineBold(content) {
-  const compact = plainEscapedHtmlText(content).replace(/\s+/g, "");
-  if (!compact) return false;
-  if (compact.length > 18) return false;
-  if (/[。！？!?；;：:]/.test(compact)) return false;
-  return true;
-}
-
 function boldMarkdownHtml(content) {
-  const tag = shouldAutoUnderlineBold(content)
-    ? '<strong class="xhs-green-underline" data-xhs-auto-underline="1">'
-    : "<strong>";
-  return `${tag}${content}</strong>`;
+  return `<strong>${content}</strong>`;
 }
 
 function inlineMarkdownToHtml(text, markdownFile) {
@@ -505,17 +482,36 @@ function renderMarkdownTable(header, rows, markdownFile) {
   return `<section data-xhs-block-type="table"><table>${head}<tbody>${body}</tbody></table></section>`;
 }
 
+function stripTrailingAiGeneratedDisclaimer(markdownBody) {
+  const lines = String(markdownBody || "").replace(/\r\n/g, "\n").split("\n");
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length || !/^>\s?/.test(lines[lines.length - 1].trim())) return lines.join("\n");
+  let start = lines.length - 1;
+  while (start > 0 && /^>\s?/.test(lines[start - 1].trim())) start -= 1;
+  const quoteText = lines.slice(start)
+    .map((line) => line.trim().replace(/^>\s?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const isAiDisclaimer = /(?:部分|本文|本内容).{0,12}(?:AI|人工智能).{0,12}(?:生成|辅助)/i.test(quoteText) ||
+    /(?:AI|人工智能).{0,12}(?:生成|辅助).{0,12}(?:内容|文本)/i.test(quoteText);
+  if (!isAiDisclaimer) return lines.join("\n");
+  return lines.slice(0, start).join("\n").replace(/\s+$/, "");
+}
+
 function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) {
   const { body } = prepareMarkdownBody(markdown);
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  const cleanedBody = stripTrailingAiGeneratedDisclaimer(body);
+  const lines = cleanedBody.replace(/\r\n/g, "\n").split("\n");
   const blocks = [];
   let paragraph = [];
   let list = [];
   let quote = [];
   let code = [];
+  let codeLanguage = "";
   let inCode = false;
   let headingIndex = 0;
-  const headingRanks = resolveHeadingRanks(body, title, options);
+  const headingRanks = resolveHeadingRanks(cleanedBody, title, options);
 
   function pushParagraph() {
     if (!paragraph.length) return;
@@ -562,9 +558,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     quote = [];
   }
   function pushCode() {
-    if (!code.length) return;
-    blocks.push(`<blockquote data-xhs-block-type="quote" style="border-left:4px solid #d5ded3;"><em>${escapeHtml(code.join("\n"))}</em></blockquote>`);
+    if (!code.length && !codeLanguage) return;
+    const language = codeLanguage || "Code";
+    blocks.push(`<section data-xhs-block-type="code" data-code-language="${escapeHtml(language)}"><pre><code>${escapeHtml(code.join("\n"))}</code></pre></section>`);
     code = [];
+    codeLanguage = "";
   }
   function flushAll() {
     pushParagraph();
@@ -590,6 +588,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (last.includes("<img")) return "image";
     if (last.includes("data-xhs-block-type=\"callout\"")) return "callout";
     if (last.includes("data-xhs-block-type=\"quote\"")) return "quote";
+    if (last.includes("data-xhs-block-type=\"code\"")) return "code";
     if (last.startsWith("<p>")) return "prose";
     if (/<section[^>]*><strong>/.test(last)) return "prose";
     return "other";
@@ -640,6 +639,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
       } else {
         flushAll();
         inCode = true;
+        codeLanguage = line.replace(/^```+\s*/, "").trim();
       }
       continue;
     }
@@ -867,6 +867,9 @@ function studioHtmlV2(payload, libs) {
   const quoteBodySize = Math.max(28, Math.round(34 * width / DEFAULT_WIDTH));
   const calloutLabelSize = Math.max(22, Math.round(bodyFontSize - 10));
   const bodyParagraphGap = Math.max(20, Math.round(BODY_PARAGRAPH_GAP * width / DEFAULT_WIDTH));
+  const headingNumberSlotWidth = Math.round(headingNumberSize * 1.48);
+  const headingNumberTitleGap = Math.max(16, Math.round(width * 0.017));
+  const codeBodySize = Math.max(28, Math.round(32 * width / DEFAULT_WIDTH));
   const imageGridGap = Math.round(width * 0.018);
   const songtiFont = `"Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", serif`;
 
@@ -889,8 +892,9 @@ function studioHtmlV2(payload, libs) {
       --body-line-px: ${Math.round(bodyFontSize * bodyLineHeight * 100) / 100}px;
       --body-paragraph-gap: ${bodyParagraphGap}px;
       --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
-      --body-regular-weight: 700;
+      --body-regular-weight: 720;
       --body-bold-weight: 720;
+      --body-unbold-weight: 700;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
@@ -925,7 +929,6 @@ function studioHtmlV2(payload, libs) {
     .page-tabs button { min-width: 42px; padding: 8px 10px; }
     .stage-wrap { width: min(70vw, 620px); aspect-ratio: ${width} / ${height}; position: relative; margin: 0 auto 24px; }
     .stage-scale { position: absolute; left: 0; top: 0; transform-origin: top left; width: ${width}px; height: ${height}px; }
-    .view-switch { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
     .overview-rail { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 32px) / 3); gap: 16px; width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-gutter: stable; padding: 2px 4px 18px; margin: 0 auto 20px; }
     .overview-item { min-width: 0; scroll-snap-align: start; cursor: pointer; }
     .overview-page-label { margin: 0 0 7px; color: #667085; font-family: var(--xhs-font); font-size: 13px; font-weight: 700; text-align: center; }
@@ -959,10 +962,16 @@ function studioHtmlV2(payload, libs) {
     .xhs-body-frame > div { min-height: 1.9em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
     .xhs-p { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
+    .xhs-body-frame > .xhs-page-start.xhs-manual-blank,
+    .xhs-body-frame > .xhs-page-end.xhs-manual-blank:not(.xhs-boundary-blank) { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    .xhs-body-frame > .xhs-page-end.xhs-boundary-blank { min-height: var(--xhs-boundary-blank-height, 1px) !important; height: var(--xhs-boundary-blank-height, 1px) !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank { min-height: var(--body-line-px) !important; height: auto !important; margin: 0 0 var(--body-paragraph-gap) !important; padding: 0 !important; overflow: visible !important; }
+    .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank:last-child { margin-bottom: 0 !important; }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
     .xhs-caret-anchor { height: 1px !important; min-height: 1px !important; margin: -0.5px 0 !important; padding: 0 !important; font-size: 0 !important; line-height: 0 !important; overflow: visible; opacity: 0; cursor: text; transition: opacity 0.15s; position: relative; }
     .xhs-body-frame > .xhs-page-end { margin-bottom: 0 !important; }
     .xhs-caret-anchor:hover { opacity: 1; }
+    .xhs-caret-anchor.xhs-gap-cursor { opacity: 1; }
     .xhs-caret-anchor::before { content: ''; position: absolute; left: 10%; right: 10%; top: -8px; height: 16px; border-top: 1.5px dashed var(--xhs-accent, #5fa66a); opacity: 0.55; pointer-events: auto; }
     .xhs-block-halo { position: absolute; pointer-events: none; z-index: 200; }
     .xhs-block-halo-btn { position: absolute; left: 50%; transform: translateX(-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--xhs-accent, #5fa66a); color: #fff; border: none; cursor: pointer; font-size: 16px; line-height: 22px; text-align: center; padding: 0; pointer-events: all; opacity: 0.82; box-shadow: 0 2px 6px rgba(0,0,0,.18); transition: opacity 0.15s, transform 0.1s; }
@@ -970,11 +979,15 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-halo-btn.halo-before { top: -11px; }
     .xhs-block-halo-btn.halo-after { bottom: -11px; }
     .xhs-block-halo-btn.halo-remove { display: none; background: #738078; }
-    .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; letter-spacing: 0 !important; }
+    .xhs-block-drag-handle { position: absolute; left: -8px; top: 50%; transform: translate(-100%, -50%); width: 18px; height: 28px; display: grid; grid-template-columns: repeat(2, 2.5px); grid-template-rows: repeat(3, 2.5px); place-content: center; gap: 3px; padding: 0; border: 0; border-radius: 5px; background: rgba(255,255,255,.72); color: #9aa0a8; cursor: grab; pointer-events: all; opacity: .68; box-shadow: none; touch-action: none; transition: opacity .14s, color .14s, background .14s; }
+    .xhs-block-drag-handle:hover { opacity: 1; color: #6b7280; background: #f3f4f6; }
+    .xhs-block-drag-handle:active { cursor: grabbing; color: var(--xhs-accent-strong); background: #edf2fb; }
+    .xhs-block-drag-handle-dot { width: 2.5px; height: 2.5px; border-radius: 50%; background: currentColor; pointer-events: none; }
+    .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span, .xhs-table span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit !important; letter-spacing: 0 !important; }
     .xhs-card code { font-family: inherit !important; font-size: inherit !important; font-weight: inherit; font-style: inherit; line-height: inherit !important; letter-spacing: inherit !important; color: inherit; background: none; }
-    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: ${Math.round(width * 0.013)}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: ${headingNumberSlotWidth}px minmax(0, 1fr); column-gap: ${headingNumberTitleGap}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
-    .xhs-heading-number { width: auto; min-width: 0; display: flex; align-items: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; }
+    .xhs-heading-number { width: 100%; min-width: 100%; display: flex; align-items: center; justify-content: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
     .xhs-heading-space { display: none; }
     .xhs-heading-title { min-width: 0; margin-left: 0; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; min-height: var(--body-line-px) !important; height: var(--body-line-px); margin: 0 0 ${HEADING_LEVEL2_MARGIN_PX}px; padding: 0; border-bottom: 0; }
@@ -987,6 +1000,15 @@ function studioHtmlV2(payload, libs) {
     .xhs-callout.xhs-card-frame .xhs-callout-label { color: var(--xhs-accent-strong); }
     .xhs-callout.xhs-card-frame .xhs-callout-body { color: #000; font-weight: var(--body-regular-weight); }
     .xhs-quote { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); padding: 0.16em 0 0.16em 0.72em; border-left: ${Math.max(4, Math.round(width * 0.005))}px solid #9a9a9a; background: transparent; color: #777; font-size: ${quoteBodySize}px; line-height: var(--body-line); font-style: normal; font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-code-block { margin: 0 0 var(--body-paragraph-gap); width: 100%; max-width: var(--body-text-width); overflow: hidden; border: 1px solid #343842; border-radius: 14px; background: #17191f; color: #f4f6fb; box-shadow: 0 10px 26px rgba(16, 20, 28, .16); break-inside: avoid; page-break-inside: avoid; }
+    .xhs-code-toolbar { height: ${Math.max(42, Math.round(width * 0.043))}px; padding: 0 ${Math.round(width * 0.017)}px; display: flex; align-items: center; gap: ${Math.max(8, Math.round(width * 0.009))}px; background: #262934; border-bottom: 1px solid rgba(255,255,255,.08); user-select: none; }
+    .xhs-code-dot { width: ${Math.max(10, Math.round(width * 0.011))}px; height: ${Math.max(10, Math.round(width * 0.011))}px; border-radius: 50%; flex: 0 0 auto; }
+    .xhs-code-dot.red { background: #ff5f57; }
+    .xhs-code-dot.yellow { background: #febc2e; }
+    .xhs-code-dot.green { background: #28c840; }
+    .xhs-code-language { margin-left: auto; color: #aeb4c2; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; font-size: ${Math.max(16, Math.round(width * 0.018))}px; line-height: 1; font-weight: 650; }
+    .xhs-code-content { margin: 0; padding: ${Math.round(width * 0.021)}px ${Math.round(width * 0.023)}px ${Math.round(width * 0.024)}px; min-height: 1.6em; outline: none; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; tab-size: 2; color: #f4f6fb; font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace !important; font-size: ${codeBodySize}px !important; line-height: 1.55 !important; font-weight: 650; letter-spacing: 0 !important; }
+    .xhs-code-content code { color: inherit; font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit; white-space: inherit; }
     .xhs-image-block { margin: 0 auto var(--body-paragraph-gap); width: 100%; max-width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-frame { position: relative; width: 100%; min-height: 80px; height: ${imageFrameHeight}px; overflow: hidden; resize: none; border: 1px solid #e1e8df; border-radius: 0; background: #fff; cursor: grab; touch-action: none; }
     .xhs-resize-handle { position: absolute; z-index: 8; display: none; background: #2563eb; border: 3px solid #fff; box-shadow: 0 2px 9px rgba(37, 99, 235, .34); opacity: .96; }
@@ -1000,9 +1022,10 @@ function studioHtmlV2(payload, libs) {
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid .xhs-image-block { margin: 0 auto; }
     .selectable-image.dragging { cursor: grabbing; }
-    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging { opacity: .72; outline: 3px dashed var(--xhs-accent); outline-offset: 4px; }
+    .xhs-image-block.reorder-dragging, .xhs-image-grid.reorder-dragging, .xhs-heading.reorder-dragging, .xhs-callout.reorder-dragging, .xhs-quote.reorder-dragging, .xhs-list-line.reorder-dragging, .xhs-table-block.reorder-dragging, .xhs-code-block.reorder-dragging { outline: 2px solid color-mix(in srgb, var(--xhs-accent) 42%, transparent); outline-offset: 2px; }
     .selected-flow-block { outline: 4px solid rgba(37, 99, 235, .58); outline-offset: 4px; }
-    .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 4px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 2px rgba(255,255,255,.9); }
+    .xhs-drop-indicator { position: absolute; left: var(--body-pad-x); width: var(--body-content-width); height: 2px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 220; box-shadow: 0 0 0 1px rgba(255,255,255,.92); }
+    .xhs-overview-drop-indicator { position: fixed; height: 2px; background: var(--xhs-accent); border-radius: 999px; pointer-events: none; z-index: 680; box-shadow: 0 0 0 1px rgba(255,255,255,.92); }
     .xhs-list-line { display: flex; flex-direction: row; align-items: flex-start; gap: 0.25em; margin: 0 0 var(--body-list-item-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); overflow: visible; }
     .xhs-list-line:not(:has(+ .xhs-list-line)) { margin-bottom: var(--body-paragraph-gap); }
     .xhs-list-line .xhs-list-marker { flex: 0 0 0.72em; width: 0.72em; flex-shrink: 0; user-select: none; pointer-events: none; line-height: inherit; font-size: 0.8em !important; }
@@ -1020,6 +1043,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-table em { font-style: italic; }
     .xhs-rich { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font); line-height: var(--body-line); font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
     .xhs-p strong, .xhs-p b, .xhs-rich strong, .xhs-rich b, .xhs-list-body strong, .xhs-list-body b, .xhs-callout-body strong, .xhs-callout-body b, .xhs-quote strong, .xhs-quote b { font-weight: var(--body-bold-weight) !important; }
+    .xhs-card .xhs-text-regular, .xhs-card .xhs-text-regular * { font-weight: var(--body-unbold-weight) !important; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-split-head { margin-bottom: 0 !important; }
@@ -1056,30 +1080,28 @@ function studioHtmlV2(payload, libs) {
       ${warnings.length ? `<div class="notice">原稿里有 ${warnings.length} 个视频链接。小红书图文卡片这里只放图片，视频已跳过；需要视频请在小红书发布页单独上传，或先截帧/转图片再放入卡片。</div>` : ""}
       <div id="runtimeNotice" class="notice runtime-notice" hidden></div>
       <div class="toolbar">
-        <button id="boldBtn" title="加粗" aria-label="加粗">B</button>
+        <button id="boldBtn" title="切换加粗 / 不加粗" aria-label="切换加粗 / 不加粗">B</button>
         <button id="headingBtn1" title="一级标题" aria-label="一级标题">H1</button>
         <button id="headingBtn2" title="二级标题" aria-label="二级标题">H2</button>
         <button id="italicBtn" title="引用" aria-label="引用">❝</button>
         <button id="greenTextBtn" title="有色字" aria-label="有色字">A</button>
         <button id="greenUnderlineBtn" title="下划线" aria-label="下划线"><u>U</u></button>
         <button id="keypointBtn" title="卡片" aria-label="卡片">▣</button>
+        <button id="codeBtn" title="macOS 代码块" aria-label="代码块">&lt;/&gt;</button>
         <button id="listUnorderedBtn" class="icon-button" title="无序列表" aria-label="无序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
         <button id="listOrderedBtn" class="icon-button" title="有序列表" aria-label="有序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
+        <button id="insertImageBtn" class="icon-button" title="在光标位置插入图片" aria-label="插入图片"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 4.5-4.5 3.5 3 2.5-2.5L20 18"/></svg></button>
         <button id="saveHtmlBtn">保存编辑 HTML</button>
         <button id="exportBtn" class="primary">批量导出 PNG ZIP</button>
         <button id="resetBtn" title="清除当前编辑，恢复生成时的初始内容">一键复原</button>
       </div>
-      <div class="view-switch" role="group" aria-label="预览模式">
-        <button id="overviewModeBtn" class="active">总览编辑</button>
-        <button id="editModeBtn">单页编辑</button>
-      </div>
       <div id="overviewRail" class="overview-rail"></div>
-      <div id="pageTabs" class="page-tabs"></div>
+      <div id="pageTabs" class="page-tabs" hidden></div>
       <div id="stageWrap" class="stage-wrap" hidden><div id="stageScale" class="stage-scale"></div></div>
     </main>
     <aside class="panel">
       <h2>小兔Q彬 · 飞书转小红书</h2>
-      <p class="hint">飞书导出的 Markdown 与附件自动分页为 3:4 图文。图纸 / 背景色 / 强调色可自由组合。按住 Alt 拖动可移动卡片、引用块、序列、图片等块。</p>
+      <p class="hint">飞书导出的 Markdown 与附件自动分页为 3:4 图文。悬浮区块可拖动左侧小手柄，也可按住 Alt 直接拖动；蓝色横线就是松手后的实际落点。</p>
       <div id="pageInfo" class="hint"></div>
       <div id="coverTools" class="tool-group" hidden>
         <p class="tool-title">封面图</p>
@@ -1162,7 +1184,7 @@ function studioHtmlV2(payload, libs) {
         <label class="tool-label">图片缩放 <input id="imageZoomRange" type="range" min="10" max="1000" value="100" /></label>
         <label class="tool-label">左右裁剪中心 <input id="imageXRange" type="range" min="-1000" max="1100" value="50" /></label>
         <label class="tool-label">上下裁剪中心 <input id="imageYRange" type="range" min="-1000" max="1100" value="50" /></label>
-        <p class="hint">图片框内拖动是裁剪位置；按住 Alt 再拖动可上下移动各类块。</p>
+        <p class="hint">图片框内拖动是裁剪位置；拖左侧小手柄或按住 Alt 拖动可移动整块。</p>
       </div>
       <div id="imageList" class="image-list"></div>
     </aside>
@@ -1206,6 +1228,7 @@ function studioHtmlV2(payload, libs) {
       sourceFingerprint: payload.sourceFingerprint || "",
       sourcePath: payload.sourcePath || "",
     })};
+    const EXPORT_RENDER_SCALE = 2;
     const initialLayout = Object.freeze({
       coverTitleSize: config.coverTitleSize,
       bodyFontSize: config.bodyFontSize,
@@ -1215,13 +1238,15 @@ function studioHtmlV2(payload, libs) {
     });
     const embeddedState = /* XHS_EMBEDDED_STATE */ null;
     let pages = [];
+    let continuousFlowHtml = '';
     let pageIndex = 0;
-    let viewMode = 'overview';
+    const viewMode = 'overview';
     let selectedFrame = null;
     let selectedFlowBlock = null;
     let coverImageEnabled = true;
     let blockReorderDrag = null;
     let blockDropIndicator = null;
+    let overviewBlockDropIndicator = null;
     let reflowTimer = null;
     let reflowForcePending = false;
     let lightSaveTimer = null;
@@ -1239,6 +1264,7 @@ function studioHtmlV2(payload, libs) {
     let imageReflowTimer = null;
     let splitFlowCounter = 0;
     let imageIdCounter = 0;
+    let blockIdCounter = 0;
     let caretMarkerCounter = 0;
     let reflowCaretFallback = null;
     let manualBlankDeleteKeydownHandled = false;
@@ -1265,14 +1291,15 @@ function studioHtmlV2(payload, libs) {
     const stageWrap = document.getElementById('stageWrap');
     const stageScale = document.getElementById('stageScale');
     const overviewRail = document.getElementById('overviewRail');
-    const overviewModeBtn = document.getElementById('overviewModeBtn');
-    const editModeBtn = document.getElementById('editModeBtn');
     const pageTabs = document.getElementById('pageTabs');
     const pageInfo = document.getElementById('pageInfo');
     const runtimeNotice = document.getElementById('runtimeNotice');
     const imageList = document.getElementById('imageList');
     const imageTools = document.getElementById('imageTools');
     const imageInput = document.getElementById('imageInput');
+    let imageInputAction = 'replace';
+    let pendingImageInsertRange = null;
+    let pendingImageInsertEditable = null;
     const exportRoot = document.getElementById('exportRoot');
     const fitContainBtn = document.getElementById('fitContainBtn');
     const fitCoverBtn = document.getElementById('fitCoverBtn');
@@ -1282,8 +1309,10 @@ function studioHtmlV2(payload, libs) {
     const greenTextBtn = document.getElementById('greenTextBtn');
     const greenUnderlineBtn = document.getElementById('greenUnderlineBtn');
     const keypointBtn = document.getElementById('keypointBtn');
+    const codeBtn = document.getElementById('codeBtn');
     const listUnorderedBtn = document.getElementById('listUnorderedBtn');
     const listOrderedBtn = document.getElementById('listOrderedBtn');
+    const insertImageBtn = document.getElementById('insertImageBtn');
     const coverTools = document.getElementById('coverTools');
     const coverThemeTools = document.getElementById('coverThemeTools');
     const cardStyleTools = document.getElementById('cardStyleTools');
@@ -1478,13 +1507,6 @@ function studioHtmlV2(payload, libs) {
       node.style.boxDecorationBreak = '';
       node.style.webkitBoxDecorationBreak = '';
     }
-    function shouldKeepAutoUnderlineText(text) {
-      const compact = cleanText(text || '').replace(/\\s+/g, '');
-      if (!compact) return false;
-      if (compact.length > 18) return false;
-      if (/[。！？!?；;：:]/.test(compact)) return false;
-      return true;
-    }
     function isBlockUnderlineNode(node) {
       const tag = (node?.tagName || '').toLowerCase();
       return node?.classList?.contains('xhs-block') ||
@@ -1496,16 +1518,11 @@ function studioHtmlV2(payload, libs) {
     function normalizeUnderlineDecorations(root = stageScale) {
       root?.querySelectorAll?.('.xhs-green-underline').forEach((node) => {
         const tag = (node.tagName || '').toLowerCase();
-        if (isBlockUnderlineNode(node)) {
+        if (node.dataset?.xhsAutoUnderline === '1' || isBlockUnderlineNode(node)) {
           node.classList.remove('xhs-green-underline');
           delete node.dataset.xhsAutoUnderline;
           clearUnderlineInlineStyles(node);
           return;
-        }
-        if ((tag === 'strong' || tag === 'b') && !shouldKeepAutoUnderlineText(node.textContent || '')) {
-          node.classList.remove('xhs-green-underline');
-          delete node.dataset.xhsAutoUnderline;
-          clearUnderlineInlineStyles(node);
         }
       });
     }
@@ -2087,6 +2104,42 @@ function studioHtmlV2(payload, libs) {
       block.appendChild(table);
       return block;
     }
+    function codeBlockFromElement(el) {
+      const source = el.matches?.('pre') ? el : (el.querySelector?.('pre > code') || el.querySelector?.('pre') || el);
+      const language = cleanText(el.dataset?.codeLanguage || el.dataset?.language || 'Code') || 'Code';
+      const block = document.createElement('section');
+      block.className = 'xhs-code-block xhs-block';
+      block.dataset.codeLanguage = language;
+      block.setAttribute('contenteditable', 'false');
+      const toolbar = document.createElement('div');
+      toolbar.className = 'xhs-code-toolbar';
+      ['red', 'yellow', 'green'].forEach((color) => {
+        const dot = document.createElement('span');
+        dot.className = 'xhs-code-dot ' + color;
+        toolbar.appendChild(dot);
+      });
+      const label = document.createElement('span');
+      label.className = 'xhs-code-language';
+      label.textContent = language;
+      toolbar.appendChild(label);
+      const pre = document.createElement('pre');
+      pre.className = 'xhs-code-content';
+      pre.contentEditable = 'true';
+      pre.spellcheck = false;
+      const codeNode = document.createElement('code');
+      codeNode.textContent = source.textContent || '';
+      pre.appendChild(codeNode);
+      block.append(toolbar, pre);
+      return block;
+    }
+    function makeNewCodeBlock(text = '', language = 'Code') {
+      const source = document.createElement('section');
+      source.dataset.codeLanguage = cleanText(language) || 'Code';
+      const pre = document.createElement('pre');
+      pre.textContent = String(text || '');
+      source.appendChild(pre);
+      return codeBlockFromElement(source);
+    }
     function isQuoteBlock(el) {
       if (el.querySelector('img')) return false;
       const explicitType = el.dataset?.xhsBlockType || '';
@@ -2179,22 +2232,56 @@ function studioHtmlV2(payload, libs) {
       return Array.from(root.querySelectorAll('.xhs-image-block')).find((block) => block.dataset.imageId === id) || null;
     }
     function collectBodyFlowHolder() {
-      saveCurrentPage();
+      return collectBodyFlowHolderWithPageNodes().holder;
+    }
+    function collectBodyFlowHolderWithPageNodes() {
+      saveCurrentPage({ skipNormalize: true });
       const holder = document.createElement('div');
-      pages.filter((page) => page.type === 'body').forEach((page) => {
+      const pageNodes = new Map();
+      pages.forEach((page, index) => {
+        const html = page.type === 'cover'
+          ? (!coverImageEnabled ? (page.tailHtml || '') : '')
+          : (page.html || '');
+        if (!html) return;
         const pageHolder = document.createElement('div');
-        pageHolder.innerHTML = page.html;
+        pageHolder.innerHTML = html;
         removeAutoLineBreaks(pageHolder);
-        Array.from(pageHolder.children).forEach((node) => holder.appendChild(node));
+        const nodes = Array.from(pageHolder.children);
+        pageNodes.set(index, nodes);
+        nodes.forEach((node) => holder.appendChild(node));
       });
       holder.querySelectorAll('.xhs-image-block').forEach(ensureImageId);
-      return holder;
+      return { holder, pageNodes };
     }
     function pageIndexForImageId(id) {
       if (!id) return -1;
-      return pages.findIndex((page) => page.type === 'body' && page.html.includes('data-image-id="' + id + '"'));
+      return pages.findIndex((page) => String(page.html || '').includes('data-image-id="' + id + '"') ||
+        String(page.tailHtml || '').includes('data-image-id="' + id + '"'));
     }
-    function repaginateBodyBlocks(blocks, selectedImageId = '') {
+    function ensureFlowBlockId(block) {
+      if (!block) return '';
+      if (!block.dataset.xhsBlockId) {
+        let nextId = '';
+        do {
+          nextId = 'block-' + (++blockIdCounter);
+        } while (findFlowBlockById(stageScale, nextId) || pages.some((page) =>
+          String(page.html || '').includes('data-xhs-block-id="' + nextId + '"') ||
+          String(page.tailHtml || '').includes('data-xhs-block-id="' + nextId + '"')
+        ));
+        block.dataset.xhsBlockId = nextId;
+      }
+      return block.dataset.xhsBlockId;
+    }
+    function findFlowBlockById(root, id) {
+      if (!root || !id) return null;
+      return Array.from(root.querySelectorAll('[data-xhs-block-id]')).find((block) => block.dataset.xhsBlockId === id) || null;
+    }
+    function pageIndexForFlowBlockId(id) {
+      if (!id) return -1;
+      const token = 'data-xhs-block-id="' + id + '"';
+      return pages.findIndex((page) => String(page.html || '').includes(token) || String(page.tailHtml || '').includes(token));
+    }
+    function repaginateBodyBlocks(blocks, selectedImageId = '', selectedBlockId = '') {
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml() };
       let normalizedBlocks = blocks;
       if (blocks.length) {
@@ -2205,15 +2292,22 @@ function studioHtmlV2(payload, libs) {
         normalizedBlocks = Array.from(holder.children);
       }
       const baseBlocks = normalizedBlocks.length ? mergeSplitBlocks(normalizedBlocks) : extractBlocksFromTemplate();
+      continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
-      pages = [cover].concat(paginateBlocks(flowBlocks));
-      const nextIndex = pageIndexForImageId(selectedImageId);
+      pages = coverImageEnabled
+        ? [cover].concat(paginateBlocks(flowBlocks))
+        : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+      const nextIndex = selectedImageId
+        ? pageIndexForImageId(selectedImageId)
+        : pageIndexForFlowBlockId(selectedBlockId);
       pageIndex = nextIndex >= 0 ? nextIndex : Math.min(pageIndex, Math.max(0, pages.length - 1));
       selectedFrame = null;
       renderAll();
-      const selectedBlock = findImageBlockById(stageScale, selectedImageId);
-      const frame = selectedBlock?.querySelector('.xhs-image-frame');
+      const selectedImageBlock = findImageBlockById(stageScale, selectedImageId);
+      const frame = selectedImageBlock?.querySelector('.xhs-image-frame');
       if (frame) selectFrame(frame);
+      const selectedBlock = findFlowBlockById(stageScale, selectedBlockId);
+      if (selectedBlock) selectFlowBlock(selectedBlock);
     }
     function imageGroupFromImgs(imgs) {
       if (imgs.length === 1) return [imageBlockFromImg(imgs[0])];
@@ -2321,15 +2415,32 @@ function studioHtmlV2(payload, libs) {
         const previous = merged[merged.length - 1];
         if (canMergeSplitBlock(previous, block)) {
           appendSplitContent(previous, block);
-          stripSplitState(previous);
+          previous.classList.remove('xhs-split-head', 'xhs-split-tail');
+          delete previous.dataset.split;
         } else {
           merged.push(block);
         }
       }
       return merged.map((block) => {
-        if (!block.dataset?.split) return block;
+        if (!block.dataset?.split && !block.dataset?.flowId) return block;
         return stripSplitState(block);
       });
+    }
+    function serializeContinuousFlowBlocks(blocks) {
+      const holder = document.createElement('div');
+      (blocks || []).forEach((block) => holder.appendChild(block.cloneNode(true)));
+      stripReflowArtifacts(holder);
+      holder.querySelectorAll('.reorder-dragging, .selected-flow-block').forEach((node) => {
+        node.classList.remove('reorder-dragging', 'selected-flow-block');
+      });
+      return holder.innerHTML;
+    }
+    function continuousFlowBlocksFromHtml(html = continuousFlowHtml) {
+      const holder = document.createElement('div');
+      holder.innerHTML = String(html || '');
+      stripReflowArtifacts(holder);
+      const blocks = sanitizeMergedFlowBlocks(Array.from(holder.children));
+      return blocks.length ? mergeSplitBlocks(blocks) : [];
     }
     function isStructuredFlowBlock(node) {
       return node?.nodeType === Node.ELEMENT_NODE && (
@@ -2340,6 +2451,7 @@ function studioHtmlV2(payload, libs) {
         node.classList.contains('xhs-quote') ||
         node.classList.contains('xhs-list-line') ||
         node.classList.contains('xhs-table-block') ||
+        node.classList.contains('xhs-code-block') ||
         node.classList.contains('xhs-image-block') ||
         node.classList.contains('xhs-image-grid') ||
         node.classList.contains('xhs-page-break') ||
@@ -2495,6 +2607,9 @@ function studioHtmlV2(payload, libs) {
         return [makeManualBlank()];
       }
       if (isHeroBlock(el, index)) return [];
+      if (el.dataset?.xhsBlockType === 'code' || el.matches?.('pre') || el.querySelector?.('pre > code')) {
+        return [codeBlockFromElement(el)];
+      }
       const text = cleanText(el.textContent);
       const imgs = Array.from(el.querySelectorAll('img')).filter((img) => img.getAttribute('src'));
       if (!text && !imgs.length) return [];
@@ -2556,8 +2671,8 @@ function studioHtmlV2(payload, libs) {
       const metrics = measureBlockMetrics(probe);
       const lineHeight = config.bodyFontSize * config.bodyLineHeight;
       if (isSplittableTextBlock(probe)) return Math.min(metrics.fit, lineHeight);
-      if (probe.classList.contains('xhs-callout') || probe.classList.contains('xhs-table-block')) {
-        return Math.min(metrics.fit, lineHeight * 2);
+      if (probe.classList.contains('xhs-table-block') && metrics.fit > config.pageLimit) {
+        return lineHeight * 2;
       }
       return metrics.fit;
     }
@@ -2631,9 +2746,11 @@ function studioHtmlV2(payload, libs) {
       return block.classList.contains('xhs-heading') ||
         block.classList.contains('xhs-callout') ||
         block.classList.contains('xhs-quote') ||
+        block.classList.contains('xhs-list-line') ||
         block.classList.contains('xhs-image-block') ||
         block.classList.contains('xhs-image-grid') ||
         block.classList.contains('xhs-table-block') ||
+        block.classList.contains('xhs-code-block') ||
         block.classList.contains('xhs-manual-blank');
     }
     function isSplittableTextBlock(block) {
@@ -2695,49 +2812,6 @@ function studioHtmlV2(payload, libs) {
       const tail = markSplitPart(cloneTextRangeElement(block, best, total), id, 'tail');
       return cleanText(head.textContent) && cleanText(tail.textContent) ? { head, tail } : null;
     }
-    function splitCalloutBlock(block, available) {
-      const body = block.querySelector('.xhs-callout-body');
-      if (!body) return null;
-      const total = textLengthDeep(body);
-      if (total < 10 || available < Math.max(118, config.bodyFontSize * config.bodyLineHeight * 2)) return null;
-      const id = flowIdFor(block);
-      let lo = 1;
-      let hi = total - 1;
-      let best = 0;
-      function makePart(end) {
-        const part = block.cloneNode(true);
-        const partBody = part.querySelector('.xhs-callout-body');
-        partBody.innerHTML = '';
-        const piece = cloneTextRangeElement(body, 0, end);
-        Array.from(piece.childNodes).forEach((node) => partBody.appendChild(node));
-        return markSplitPart(part, id, 'head');
-      }
-      while (lo <= hi) {
-        const mid = Math.floor((lo + hi) / 2);
-        const head = makePart(mid);
-        if (!cleanText(head.textContent)) {
-          lo = mid + 1;
-          continue;
-        }
-        const h = measureBlock(head, true);
-        if (h <= available) {
-          best = mid;
-          lo = mid + 1;
-        } else {
-          hi = mid - 1;
-        }
-      }
-      if (best < 2 || best >= total - 1) return null;
-      const head = makePart(best);
-      const tail = block.cloneNode(true);
-      tail.querySelector('.xhs-callout-label')?.remove();
-      const tailBody = tail.querySelector('.xhs-callout-body');
-      tailBody.innerHTML = '';
-      const tailPiece = cloneTextRangeElement(body, best, total);
-      Array.from(tailPiece.childNodes).forEach((node) => tailBody.appendChild(node));
-      markSplitPart(tail, id, 'tail');
-      return cleanText(head.textContent) && cleanText(tail.textContent) ? { head, tail } : null;
-    }
     function splitTableBlock(block, available) {
       const rows = Array.from(block.querySelectorAll('tbody > tr'));
       if (rows.length < 2 || available < 120) return null;
@@ -2774,7 +2848,6 @@ function studioHtmlV2(payload, libs) {
     }
     function isSplittableBlock(block) {
       if (isSplittableTextBlock(block)) return true;
-      if (block.classList.contains('xhs-callout')) return true;
       if (block.classList.contains('xhs-table-block')) {
         return block.querySelectorAll('tbody > tr').length >= 2;
       }
@@ -2782,7 +2855,6 @@ function studioHtmlV2(payload, libs) {
     }
     function splitBlockToFit(block, available) {
       if (isSplittableTextBlock(block)) return splitPlainTextBlock(block, available);
-      if (block.classList.contains('xhs-callout')) return splitCalloutBlock(block, available);
       if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
       return null;
     }
@@ -2814,8 +2886,20 @@ function studioHtmlV2(payload, libs) {
             pushPage();
             remaining = config.pageLimit;
           }
+          if (current.length && fitHeight > remaining && block.classList.contains('xhs-manual-blank')) {
+            // A blank typed at the physical page edge belongs to the document
+            // boundary before the following content. Keep it at the end of the
+            // current page so the next visible character starts on the first
+            // line of the next page; never carry a hidden blank into that page.
+            block.classList.add('xhs-boundary-blank');
+            block.style.setProperty('--xhs-boundary-blank-height', Math.max(1, remaining) + 'px');
+            current.push(block);
+            pushPage();
+            pending = null;
+            continue;
+          }
           if (current.length && fitHeight > remaining) {
-            if (isSplittableBlock(block)) {
+            if (isSplittableTextBlock(block)) {
               const split = splitBlockToFit(block, remaining);
               if (split) {
                 current.push(split.head);
@@ -2846,8 +2930,9 @@ function studioHtmlV2(payload, libs) {
             h = metrics.outer;
             fitHeight = metrics.fit;
           }
+          const collapsesAtPageStart = !current.length && block.classList.contains('xhs-manual-blank');
           current.push(block);
-          used += h;
+          used += collapsesAtPageStart ? 0 : h;
           pending = null;
         }
       }
@@ -2880,13 +2965,16 @@ function studioHtmlV2(payload, libs) {
           const metrics = measureBlockMetrics(block, nextSourceBlock);
           const h = metrics.outer;
           const fitHeight = metrics.fit;
+          const collapsesAtPageStart = !tailNodes.length && block.classList.contains('xhs-manual-blank');
+          const effectiveHeight = collapsesAtPageStart ? 0 : h;
+          const effectiveFitHeight = collapsesAtPageStart ? 0 : fitHeight;
           const remaining = tailLimit - used;
           if (tailNodes.length && headingShouldMoveWithNext(block, nextSourceBlock, remaining, tailLimit)) {
             pending = null;
             continue;
           }
-          if (fitHeight > remaining && isSplittableBlock(block)) {
-            const split = splitBlockToFit(block, Math.max(remaining, tailLimit));
+          if (effectiveFitHeight > remaining && isSplittableTextBlock(block)) {
+            const split = splitBlockToFit(block, remaining);
             if (split) {
               tailNodes.push(split.head);
               rest.push(split.tail);
@@ -2897,21 +2985,10 @@ function studioHtmlV2(payload, libs) {
               continue;
             }
           }
-          if (!tailNodes.length && fitHeight > tailLimit && isSplittableBlock(block)) {
-            const split = splitBlockToFit(block, tailLimit);
-            if (split) {
-              tailNodes.push(split.head);
-              rest.push(split.tail);
-              used = tailLimit;
-              tailClosed = true;
-              pending = null;
-              placed = true;
-              continue;
-            }
-          }
-          if (fitHeight <= remaining || (!tailNodes.length && fitHeight <= tailLimit + 40)) {
+          if (effectiveFitHeight <= remaining ||
+            (!tailNodes.length && isSplittableTextBlock(block) && effectiveFitHeight <= tailLimit + 40)) {
             tailNodes.push(block);
-            used += h;
+            used += effectiveHeight;
             pending = null;
             placed = true;
           } else {
@@ -2934,6 +3011,7 @@ function studioHtmlV2(payload, libs) {
     }
     function paginate() {
       const blocks = pairAdjacentPortraitImages(extractBlocksFromTemplate());
+      continuousFlowHtml = serializeContinuousFlowBlocks(blocks);
       const cover = { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       pages = [cover].concat(
         coverImageEnabled ? paginateBlocks(blocks) : paginateBlocksWithCoverTail(blocks, cover)
@@ -2976,12 +3054,11 @@ function studioHtmlV2(payload, libs) {
       ).join('');
       overviewRail.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
       overviewRail.querySelectorAll('.xhs-caret-marker, .xhs-caret-anchor, .xhs-block-halo').forEach((node) => node.remove());
-      const openPage = (item, edit = false) => {
+      const openPage = (item) => {
         saveCurrentPage({ skipNormalize: true });
         persistDraftCheckpoint();
         pageIndex = Number(item.dataset.index);
         selectedFrame = null;
-        if (edit) viewMode = 'edit';
         renderAll();
       };
       const targetsOverviewEditor = (event) => {
@@ -2993,21 +3070,16 @@ function studioHtmlV2(payload, libs) {
       };
       let overviewSelectTimer = null;
       overviewRail.querySelectorAll('.overview-item').forEach((item) => {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (event) => {
+          if (targetsOverviewEditor(event)) return;
           if (Number(item.dataset.index) === pageIndex) return;
           window.clearTimeout(overviewSelectTimer);
-          overviewSelectTimer = window.setTimeout(() => openPage(item, false), 220);
-        });
-        item.addEventListener('dblclick', (event) => {
-          if (targetsOverviewEditor(event)) return;
-          window.clearTimeout(overviewSelectTimer);
-          event.preventDefault();
-          openPage(item, true);
+          overviewSelectTimer = window.setTimeout(() => openPage(item), 0);
         });
         item.addEventListener('keydown', (event) => {
           if (event.key !== 'Enter' || targetsOverviewEditor(event)) return;
           event.preventDefault();
-          openPage(item, true);
+          openPage(item);
         });
       });
       requestAnimationFrame(() => {
@@ -3016,27 +3088,12 @@ function studioHtmlV2(payload, libs) {
       });
     }
     function syncViewMode() {
-      const overview = viewMode === 'overview';
-      overviewRail.hidden = !overview;
-      stageWrap.hidden = overview;
-      pageTabs.hidden = overview;
-      overviewModeBtn.classList.toggle('active', overview);
-      editModeBtn.classList.toggle('active', !overview);
-      if (overview) {
-        const activeFrame = overviewRail.querySelector('.overview-item.active .overview-card-frame');
-        if (activeFrame && stageScale.parentElement !== activeFrame) activeFrame.appendChild(stageScale);
-        requestAnimationFrame(fitOverviewCards);
-      } else {
-        if (stageScale.parentElement !== stageWrap) stageWrap.appendChild(stageScale);
-        requestAnimationFrame(fitStage);
-      }
-    }
-    function setViewMode(mode) {
-      const next = mode === 'edit' ? 'edit' : 'overview';
-      if (viewMode === next) return;
-      saveCurrentPage({ skipNormalize: true });
-      viewMode = next;
-      renderAll();
+      overviewRail.hidden = false;
+      stageWrap.hidden = true;
+      pageTabs.hidden = true;
+      const activeFrame = overviewRail.querySelector('.overview-item.active .overview-card-frame');
+      if (activeFrame && stageScale.parentElement !== activeFrame) activeFrame.appendChild(stageScale);
+      requestAnimationFrame(fitOverviewCards);
     }
     function renderTabs() {
       pageTabs.innerHTML = pages.map((_, i) => '<button class="' + (i === pageIndex ? 'active' : '') + '" data-index="' + i + '">' + String(i + 1).padStart(2, '0') + '</button>').join('');
@@ -3165,7 +3222,8 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-image-grid') ||
         node?.classList?.contains('xhs-callout') ||
         node?.classList?.contains('xhs-quote') ||
-        node?.classList?.contains('xhs-table-block');
+        node?.classList?.contains('xhs-table-block') ||
+        node?.classList?.contains('xhs-code-block');
     }
     function makeCaretAnchor() {
       const p = document.createElement('p');
@@ -3179,6 +3237,25 @@ function studioHtmlV2(payload, libs) {
       p.dataset.xhsManualBlank = '1';
       p.innerHTML = '<br>';
       return p;
+    }
+    function syncEmptyFlowFrame(frame, focusInsertedLine = false) {
+      if (!frame?.classList?.contains('xhs-body-frame') && !frame?.classList?.contains('xhs-cover-tail-frame')) return null;
+      let flowChildren = Array.from(frame.children).filter((node) => !node.classList?.contains('xhs-caret-anchor'));
+      let inserted = null;
+      if (!flowChildren.length) {
+        inserted = makeManualBlank();
+        frame.appendChild(inserted);
+        flowChildren = [inserted];
+      }
+      const blankOnly = flowChildren.every((node) =>
+        node.classList?.contains('xhs-manual-blank') || node.dataset?.xhsManualBlank === '1'
+      );
+      frame.classList.toggle('xhs-empty-flow-frame', blankOnly);
+      if (inserted && focusInsertedLine) {
+        frame.focus({ preventScroll: true });
+        setCaretInside(inserted);
+      }
+      return inserted;
     }
     function ensureEditorCaretAnchors(root = stageScale) {
       const frames = Array.from(root.querySelectorAll('.xhs-body-frame, .xhs-cover-tail-frame'));
@@ -3194,12 +3271,20 @@ function studioHtmlV2(payload, libs) {
             node.after(makeCaretAnchor());
           }
         });
+        syncEmptyFlowFrame(frame);
       });
     }
     function stripCaretAnchors(root) {
       root.querySelectorAll('.xhs-caret-anchor').forEach((node) => {
         if (isEmptyCaretAnchor(node)) node.remove();
         else node.classList.remove('xhs-caret-anchor');
+      });
+    }
+    function normalizeFilledCaretAnchors(root) {
+      root?.querySelectorAll?.('.xhs-caret-anchor').forEach((node) => {
+        if (!cleanText(node.textContent || '')) return;
+        node.classList.remove('xhs-caret-anchor', 'xhs-gap-cursor');
+        delete node.dataset.xhsGapCursor;
       });
     }
     function renderStage() {
@@ -3332,6 +3417,7 @@ function studioHtmlV2(payload, libs) {
       stripCaretAnchors(clone);
       clone.querySelectorAll('.selected-image-frame').forEach((node) => node.classList.remove('selected-image-frame'));
       clone.querySelectorAll('.selected-flow-block').forEach((node) => node.classList.remove('selected-flow-block'));
+      clone.querySelectorAll('.reorder-dragging').forEach((node) => node.classList.remove('reorder-dragging'));
       clone.querySelectorAll('.resizing-image-frame').forEach((node) => node.classList.remove('resizing-image-frame'));
       clone.querySelectorAll('.xhs-resize-handle').forEach((node) => node.remove());
       if (page.type === 'cover') {
@@ -3361,7 +3447,11 @@ function studioHtmlV2(payload, libs) {
       }
       window.clearTimeout(reflowTimer);
       if (force) reflowForcePending = true;
-      const delay = force ? 520 : 1400;
+      // Structural input must follow the caret immediately. Delaying Enter or
+      // Backspace until the user pauses lets several real paragraphs collect
+      // inside one clipped page, then makes them appear on the next page as a
+      // batch. Text typing can still use a short overflow debounce.
+      const delay = force ? 0 : 240;
       reflowTimer = window.setTimeout(() => {
         if (isComposingText) {
           compositionNeedsReflow = compositionNeedsReflow || force || reflowForcePending;
@@ -3403,6 +3493,7 @@ function studioHtmlV2(payload, libs) {
       const marker = document.createElement('span');
       marker.className = 'xhs-caret-marker';
       marker.dataset.xhsCaretMarker = id;
+      if (element?.closest?.('.xhs-gap-cursor')) marker.dataset.xhsGapCursor = '1';
       marker.textContent = '\u200B';
       range.insertNode(marker);
       range.setStartAfter(marker);
@@ -3420,6 +3511,7 @@ function studioHtmlV2(payload, libs) {
       if (!id) return false;
       const marker = stageScale.querySelector('[data-xhs-caret-marker="' + id + '"]');
       if (!marker) return false;
+      const restoreGapCursor = marker.dataset?.xhsGapCursor === '1';
       const parent = marker.parentNode;
       const next = marker.nextSibling;
       const previous = marker.previousSibling;
@@ -3429,7 +3521,20 @@ function studioHtmlV2(payload, libs) {
       const selection = window.getSelection();
       if (!selection || !parent) return false;
       const range = document.createRange();
-      const emptyMarkerParagraph = parent.matches?.('.xhs-p, .xhs-rich') && !cleanText(parent.textContent);
+      if (restoreGapCursor) {
+        parent.classList?.add('xhs-caret-anchor', 'xhs-gap-cursor');
+        parent.dataset.xhsGapCursor = '1';
+        if (!parent.querySelector?.('br')) parent.appendChild(document.createElement('br'));
+        editable?.focus?.({ preventScroll: true });
+        range.selectNodeContents(parent);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        saveCurrentPage({ skipNormalize: true });
+        return true;
+      }
+      const isManualBlank = parent.classList?.contains('xhs-manual-blank') || parent.dataset?.xhsManualBlank === '1';
+      const emptyMarkerParagraph = parent.matches?.('.xhs-p, .xhs-rich') && !isManualBlank && !cleanText(parent.textContent);
       const previousBlock = emptyMarkerParagraph ? parent.previousElementSibling : null;
       if (previousBlock) {
         const walker = document.createTreeWalker(previousBlock, NodeFilter.SHOW_TEXT);
@@ -3453,7 +3558,10 @@ function studioHtmlV2(payload, libs) {
       range.collapse(true);
       selection.removeAllRanges();
       selection.addRange(range);
-      saveCurrentPage();
+      // The page was normalized during pagination already. Running the full
+      // normalizer here can replace the paragraph node that now owns the
+      // restored Range, which leaves Chromium with no live caret.
+      saveCurrentPage({ skipNormalize: true });
       return true;
     }
     function restoreReflowCaretFallback() {
@@ -3472,7 +3580,7 @@ function studioHtmlV2(payload, libs) {
       if (!selection) return false;
       selection.removeAllRanges();
       selection.addRange(range);
-      saveCurrentPage();
+      saveCurrentPage({ skipNormalize: true });
       return true;
     }
     function setCaretInside(node) {
@@ -3519,7 +3627,7 @@ function studioHtmlV2(payload, libs) {
       setCaretInside(p);
       markParagraphEnterHandled();
       saveCurrentPage();
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
       return true;
     }
     function handleHeadingEnter(event) {
@@ -3640,31 +3748,44 @@ function studioHtmlV2(payload, libs) {
       line.replaceWith(p);
       return p;
     }
-    function removeEmptyListLine(line) {
+    function exitEmptyListLineToParagraph(line) {
       const frame = line?.closest?.('[contenteditable="true"]');
-      let previousList = line.previousElementSibling;
-      while (previousList?.classList?.contains('xhs-caret-anchor')) previousList = previousList.previousElementSibling;
-      if (previousList?.classList?.contains('xhs-list-line') && previousList.dataset.listType === line.dataset.listType) {
-        line.remove();
-        renumberContiguousListLines(previousList);
-        if (frame) {
-          frame.focus({ preventScroll: true });
-          setCaretAtFieldEnd(previousList.querySelector('.xhs-list-body'));
-        }
-        return previousList;
-      }
-      let nextFocus = line.nextElementSibling;
-      while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.nextElementSibling;
-      if (!nextFocus) {
-        nextFocus = line.previousElementSibling;
-        while (nextFocus?.classList?.contains('xhs-caret-anchor')) nextFocus = nextFocus.previousElementSibling;
-      }
-      line.remove();
-      if (nextFocus && frame) {
-        frame.focus({ preventScroll: true });
-        setCaretInside(nearestCaretTarget(nextFocus));
-      }
-      return nextFocus;
+      const previous = line?.previousElementSibling;
+      const next = line?.nextElementSibling;
+      const paragraph = makeEmptyParagraph();
+      line?.replaceWith(paragraph);
+      if (previous?.classList?.contains('xhs-list-line')) renumberContiguousListLines(previous);
+      if (next?.classList?.contains('xhs-list-line')) renumberContiguousListLines(next);
+      frame?.focus({ preventScroll: true });
+      setCaretInside(paragraph);
+      return paragraph;
+    }
+    function continuationFieldForBlock(block) {
+      if (!block?.classList) return null;
+      if (block.classList.contains('xhs-list-line')) return block.querySelector('.xhs-list-body');
+      if (block.classList.contains('xhs-callout')) return block.querySelector('.xhs-callout-body');
+      if (block.classList.contains('xhs-code-block')) return block.querySelector('.xhs-code-content');
+      if (block.classList.contains('xhs-quote')) return block;
+      return null;
+    }
+    function mergeParagraphIntoContinuationField(paragraph, previousBlock) {
+      const field = continuationFieldForBlock(previousBlock);
+      if (!field || !isEditableParagraphBlock(paragraph)) return null;
+      if (!cleanText(field.textContent)) field.innerHTML = '';
+      const insertionOffset = field.childNodes.length;
+      Array.from(paragraph.childNodes).forEach((node) => field.appendChild(node));
+      paragraph.remove();
+      return { field, insertionOffset };
+    }
+    function restoreCaretAtChildOffset(field, offset, frame, selection) {
+      if (!field?.isConnected || !selection) return false;
+      frame?.focus?.({ preventScroll: true });
+      const range = document.createRange();
+      range.setStart(field, Math.max(0, Math.min(Number(offset) || 0, field.childNodes.length)));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
     }
     function handleParagraphBackspace(event) {
       const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
@@ -3677,30 +3798,11 @@ function studioHtmlV2(payload, libs) {
       if (!isEditableParagraphBlock(block)) return false;
       if (!isCaretAtFieldStart(range, block)) return false;
       event.preventDefault();
-      const prev = block.previousElementSibling;
+      let prev = block.previousElementSibling;
       while (prev?.classList?.contains('xhs-caret-anchor')) prev = prev.previousElementSibling;
-      const previousListBody = prev?.classList?.contains('xhs-list-line')
-        ? prev.querySelector('.xhs-list-body')
-        : null;
-      if (previousListBody) {
-        const currentHtml = normalizeInlineHtml(block.innerHTML || '<br>') || '<br>';
-        if (!cleanText(previousListBody.textContent)) {
-          previousListBody.innerHTML = currentHtml;
-          block.remove();
-          frame.focus({ preventScroll: true });
-          setCaretAtFieldEnd(previousListBody);
-        } else {
-          const continuation = buildListLine(
-            { html: currentHtml, plain: cleanText(block.textContent) },
-            prev.dataset.listType,
-            1,
-            { preserveBodyHtml: true },
-          );
-          block.replaceWith(continuation);
-          renumberContiguousListLines(continuation);
-          frame.focus({ preventScroll: true });
-          setCaretAtFieldEnd(continuation.querySelector('.xhs-list-body'));
-        }
+      const mergedIntoBlock = mergeParagraphIntoContinuationField(block, prev);
+      if (mergedIntoBlock) {
+        restoreCaretAtChildOffset(mergedIntoBlock.field, mergedIntoBlock.insertionOffset, frame, selection);
       } else if (!cleanText(block.textContent)) {
         block.remove();
         if (prev) {
@@ -3726,15 +3828,27 @@ function studioHtmlV2(payload, libs) {
         return false;
       }
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
       return true;
     }
     function performParagraphEnter(frame, range) {
       const block = directFlowChild(frame, range.startContainer, range.startOffset);
       const isManualBlank = Boolean(block?.classList?.contains('xhs-manual-blank') || block?.dataset?.xhsManualBlank === '1');
-      if (!isManualBlank && !isEditableParagraphBlock(block)) return false;
+      const isGapCursor = Boolean(block?.classList?.contains('xhs-gap-cursor') || block?.dataset?.xhsGapCursor === '1');
+      if (!isGapCursor && !isManualBlank && !isEditableParagraphBlock(block)) return false;
       saveCurrentPage({ skipNormalize: true });
       persistDraftCheckpoint();
+      if (isGapCursor) {
+        markParagraphEnterHandled();
+        block.classList.remove('xhs-caret-anchor', 'xhs-gap-cursor');
+        block.classList.add('xhs-manual-blank');
+        delete block.dataset.xhsGapCursor;
+        block.dataset.xhsManualBlank = '1';
+        block.innerHTML = '<br>';
+        frame.focus({ preventScroll: true });
+        setCaretInside(block);
+        return true;
+      }
       if (isManualBlank) {
         markParagraphEnterHandled();
         const nextP = makeEmptyParagraph();
@@ -3827,7 +3941,7 @@ function studioHtmlV2(payload, libs) {
       event.preventDefault();
       const frame = line.closest('[contenteditable="true"]');
       if (!cleanText(textEl.textContent)) {
-        removeEmptyListLine(line);
+        exitEmptyListLineToParagraph(line);
       } else {
         const p = convertListLineToParagraph(line);
         if (p && frame) {
@@ -3836,7 +3950,17 @@ function studioHtmlV2(payload, libs) {
         }
       }
       saveCurrentPage({ skipNormalize: true });
-      scheduleOverflowReflow(false);
+      // Unlisting changes an atomic list row into splittable prose. Reflow it
+      // before the next physical key event so a second Backspace sees the
+      // paragraph in its real continuous-flow position (including across a
+      // page boundary). The zero-delay task is intentional: rebuilding the
+      // contenteditable inside its own keydown dispatch makes Chromium discard
+      // the selection after this handler returns.
+      cancelPendingReflow();
+      reflowTimer = window.setTimeout(() => {
+        reflow();
+        reflowForcePending = false;
+      }, 0);
       return true;
     }
     function handleListEnter(event) {
@@ -3854,13 +3978,21 @@ function studioHtmlV2(payload, libs) {
       const listType = line.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
       saveCurrentPage({ skipNormalize: true });
       persistDraftCheckpoint();
+      if (!cleanText(textEl.textContent)) {
+        event.preventDefault();
+        exitEmptyListLineToParagraph(line);
+        markParagraphEnterHandled();
+        saveCurrentPage({ skipNormalize: true });
+        scheduleParagraphOverflowCheck(frame);
+        return true;
+      }
       if (isCaretAtFieldStart(range, textEl)) {
         event.preventDefault();
         const newLine = buildListLine({ html: '<br>', plain: '' }, listType, 1, { preserveBodyHtml: true });
         line.before(newLine);
         renumberContiguousListLines(line);
         frame?.focus({ preventScroll: true });
-        setCaretInside(textEl);
+        setCaretInside(newLine.querySelector('.xhs-list-body'));
         markParagraphEnterHandled();
         saveCurrentPage({ skipNormalize: true });
         scheduleParagraphOverflowCheck(frame);
@@ -3901,7 +4033,7 @@ function studioHtmlV2(payload, libs) {
     function caretFieldForBlock(block, node) {
       const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       return element?.closest?.('.xhs-heading-title, .xhs-heading-number') ||
-        block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body') ||
+        block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content') ||
         block;
     }
     function isCaretAtFieldStart(range, field) {
@@ -3929,6 +4061,165 @@ function studioHtmlV2(payload, libs) {
       } finally {
         probe.detach?.();
       }
+    }
+    function firstContinuousBlockInFrame(frame) {
+      return Array.from(frame?.children || []).find((node) =>
+        !node.classList?.contains('xhs-caret-anchor') && node.dataset?.xhsPageBreak !== '1'
+      ) || null;
+    }
+    function topLevelFlowChild(root, node) {
+      let element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      while (element && element.parentElement !== root) element = element.parentElement;
+      return element?.parentElement === root ? element : null;
+    }
+    function previousFlowSibling(block) {
+      let previous = block?.previousElementSibling;
+      while (previous?.classList?.contains('xhs-caret-anchor')) previous = previous.previousElementSibling;
+      return previous || null;
+    }
+    function previousTextNodeBeforeMarker(root, marker) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let previous = null;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (marker.contains(node)) return previous;
+        previous = node;
+      }
+      return previous;
+    }
+    function removePreviousCodePoint(root, marker) {
+      const node = previousTextNodeBeforeMarker(root, marker);
+      if (!node) return false;
+      const chars = Array.from(node.nodeValue || '');
+      if (!chars.length) return false;
+      chars.pop();
+      node.nodeValue = chars.join('');
+      return true;
+    }
+    function mergedContinuousFlowHolder(preserveCaretMarkerId = '') {
+      const merged = document.createElement('div');
+      const cover = pages.find((page) => page.type === 'cover');
+      if (cover?.tailHtml) {
+        const tailHolder = document.createElement('div');
+        tailHolder.innerHTML = '<div class="xhs-body-frame">' + cover.tailHtml + '</div>';
+        stripReflowArtifacts(tailHolder, preserveCaretMarkerId);
+        Array.from(tailHolder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
+      }
+      pages.filter((page) => page.type === 'body').forEach((page) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = '<div class="xhs-body-frame">' + (page.html || '') + '</div>';
+        stripReflowArtifacts(holder, preserveCaretMarkerId);
+        Array.from(holder.querySelector('.xhs-body-frame')?.children || []).forEach((node) => merged.appendChild(node));
+      });
+      const blocks = sanitizeMergedFlowBlocks(Array.from(merged.children));
+      const normalized = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
+      merged.replaceChildren(...normalized);
+      return merged;
+    }
+    function repaginateContinuousHolder(holder, caretMarkerId, previousPages, previousPageIndex) {
+      const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
+      const baseBlocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(holder.children)));
+      continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
+      const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
+      pages = coverImageEnabled
+        ? [cover].concat(paginateBlocks(flowBlocks))
+        : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+      const caretPageIndex = pageIndexForCaretMarker(caretMarkerId);
+      if (caretMarkerId && caretPageIndex < 0) {
+        pages = previousPages;
+        pageIndex = Math.min(previousPageIndex, Math.max(0, pages.length - 1));
+        renderAll();
+        showRuntimeNotice('跨页编辑时未能恢复光标，已撤回本次操作并保留原内容。');
+        return false;
+      }
+      pageIndex = caretPageIndex >= 0
+        ? caretPageIndex
+        : Math.min(previousPageIndex, Math.max(0, pages.length - 1));
+      selectedFrame = null;
+      renderAll();
+      restoreReflowCaretMarker(caretMarkerId);
+      persistDraft();
+      return true;
+    }
+    function discardTemporaryCaretMarker(id) {
+      if (!id) return;
+      stageScale.querySelector('[data-xhs-caret-marker="' + id + '"]')?.remove();
+      saveCurrentPage({ skipNormalize: true });
+    }
+    function handleContinuousBoundaryBackspace(event) {
+      const key = event.key || (event.inputType === 'deleteContentBackward' ? 'Backspace' : '');
+      if (key !== 'Backspace' || isHistoryShortcut(event)) return false;
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed || pageIndex <= 0) return false;
+      const range = selection.getRangeAt(0);
+      const frame = event.currentTarget;
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
+      if (!block || firstContinuousBlockInFrame(frame) !== block) return false;
+      const field = caretFieldForBlock(block, range.startContainer);
+      if (!isCaretAtFieldStart(range, field) && !isCaretAtFlowBlockStart(range, block)) return false;
+      const wasSplitTail = block.dataset?.split === 'tail';
+      const markerId = insertReflowCaretMarker();
+      if (!markerId) return false;
+      saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
+      const previousPages = pages.map((page) => ({ ...page }));
+      const previousPageIndex = pageIndex;
+      const holder = mergedContinuousFlowHolder(markerId);
+      const marker = holder.querySelector('[data-xhs-caret-marker="' + markerId + '"]');
+      const current = topLevelFlowChild(holder, marker);
+      const previous = previousFlowSibling(current);
+      let changed = false;
+      if (wasSplitTail && current) {
+        changed = removePreviousCodePoint(current, marker);
+      } else if (previous?.classList?.contains('xhs-manual-blank')) {
+        previous.remove();
+        changed = true;
+      } else if (isEditableParagraphBlock(current) && continuationFieldForBlock(previous)) {
+        changed = Boolean(mergeParagraphIntoContinuationField(current, previous));
+      } else if (isEditableParagraphBlock(previous) && isEditableParagraphBlock(current)) {
+        const nodes = Array.from(current.childNodes);
+        nodes.forEach((node) => previous.appendChild(node));
+        current.remove();
+        changed = true;
+      }
+      if (!changed) {
+        discardTemporaryCaretMarker(markerId);
+        return false;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return repaginateContinuousHolder(holder, markerId, previousPages, previousPageIndex);
+    }
+    function performStructuralStartEnter(frame, range) {
+      const block = directFlowChild(frame, range.startContainer, range.startOffset);
+      if (!isStructuralHaloBlock(block)) return false;
+      const field = caretFieldForBlock(block, range.startContainer);
+      if (!isCaretAtFieldStart(range, field) && !isCaretAtFlowBlockStart(range, block)) return false;
+      saveCurrentPage({ skipNormalize: true });
+      persistDraftCheckpoint();
+      const blank = makeEmptyParagraph();
+      block.before(blank);
+      frame.focus({ preventScroll: true });
+      setCaretInside(blank);
+      markParagraphEnterHandled();
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(true);
+      return true;
+    }
+    function handleStructuralStartEnter(event) {
+      const key = event.key || (event.inputType === 'insertParagraph' ? 'Enter' : '');
+      if (key !== 'Enter' || event.shiftKey || isHistoryShortcut(event)) return false;
+      if (event.type === 'beforeinput' && paragraphEnterKeydownHandled) {
+        event.preventDefault();
+        return true;
+      }
+      const range = event.type === 'beforeinput'
+        ? rangeFromBeforeInputEvent(event)
+        : window.getSelection()?.getRangeAt(0);
+      if (!range?.collapsed || !performStructuralStartEnter(event.currentTarget, range)) return false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return true;
     }
     function isHistoryShortcut(event) {
       const key = String(event.key || '').toLowerCase();
@@ -3981,11 +4272,12 @@ function studioHtmlV2(payload, libs) {
         node?.classList?.contains('xhs-callout') ||
         node?.classList?.contains('xhs-quote') ||
         node?.classList?.contains('xhs-table-block') ||
+        node?.classList?.contains('xhs-code-block') ||
         node?.classList?.contains('xhs-image-block') ||
         node?.classList?.contains('xhs-image-grid');
     }
     function isHaloTargetBlock(node) {
-      return isStructuralHaloBlock(node);
+      return isStructuralHaloBlock(node) || node?.classList?.contains('xhs-list-line');
     }
     function isEditableParagraphBlock(block) {
       return Boolean(block?.classList &&
@@ -4075,7 +4367,7 @@ function studioHtmlV2(payload, libs) {
       return { blanks, firstContent };
     }
     function nearestCaretTarget(block) {
-      return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body') || block;
+      return block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content') || block;
     }
     function markManualBlankDeleteHandled() {
       manualBlankDeleteKeydownHandled = true;
@@ -4092,7 +4384,7 @@ function studioHtmlV2(payload, libs) {
       }, 0);
     }
     function scheduleParagraphOverflowCheck(frame) {
-      scheduleOverflowReflow(false);
+      scheduleOverflowReflow(true);
     }
     function scheduleReflowAfterBlankRemoval() {
       cancelPendingReflow();
@@ -4198,10 +4490,21 @@ function studioHtmlV2(payload, libs) {
       btnAfterRemove.className = 'xhs-block-halo-btn halo-after halo-remove';
       btnAfterRemove.title = '减少下方空行';
       btnAfterRemove.textContent = '−';
+      const dragHandle = document.createElement('button');
+      dragHandle.type = 'button';
+      dragHandle.className = 'xhs-block-drag-handle';
+      dragHandle.title = '拖动区块（也可按住 Alt 拖动）';
+      dragHandle.setAttribute('aria-label', '拖动区块');
+      for (let index = 0; index < 6; index += 1) {
+        const dot = document.createElement('span');
+        dot.className = 'xhs-block-drag-handle-dot';
+        dragHandle.appendChild(dot);
+      }
       halo.appendChild(btnBefore);
       halo.appendChild(btnBeforeRemove);
       halo.appendChild(btnAfter);
       halo.appendChild(btnAfterRemove);
+      halo.appendChild(dragHandle);
       let targetBlock = null;
       let haloHideTimer = null;
       function adjacentManualBlank(block, direction) {
@@ -4226,6 +4529,7 @@ function studioHtmlV2(payload, libs) {
       }
       function showHalo(block) {
         if (!block || !stageScale.contains(block)) return;
+        block = reorderableFlowNode(block) || block;
         targetBlock = block;
         clearTimeout(haloHideTimer);
         const wrapRect = stageHost.getBoundingClientRect();
@@ -4244,12 +4548,31 @@ function studioHtmlV2(payload, libs) {
       }
       function hideHalo() {
         haloHideTimer = setTimeout(() => {
+          if (blockReorderDrag) return;
           halo.style.display = 'none';
           targetBlock = null;
         }, 120);
       }
+      halo.addEventListener('pointerdown', (event) => {
+        if (!event.altKey || event.target?.closest?.('.xhs-block-drag-handle') || !targetBlock) return;
+        const frame = targetBlock.closest?.('[contenteditable="true"]');
+        if (!frame) return;
+        beginFlowBlockReorder(event, targetBlock, frame, halo);
+      }, true);
+      halo.addEventListener('pointermove', continueFlowBlockReorder);
+      halo.addEventListener('pointerup', endFlowBlockReorder);
+      halo.addEventListener('pointercancel', endFlowBlockReorder);
       halo.addEventListener('mouseenter', () => clearTimeout(haloHideTimer));
       halo.addEventListener('mouseleave', hideHalo);
+      dragHandle.addEventListener('pointerdown', (event) => {
+        if (!targetBlock) return;
+        const frame = targetBlock.closest?.('[contenteditable="true"]');
+        if (!frame) return;
+        beginFlowBlockReorder(event, targetBlock, frame, dragHandle);
+      });
+      dragHandle.addEventListener('pointermove', continueFlowBlockReorder);
+      dragHandle.addEventListener('pointerup', endFlowBlockReorder);
+      dragHandle.addEventListener('pointercancel', endFlowBlockReorder);
       function insertAndFocusBlank(blank) {
         const frame = blank.closest?.('[contenteditable="true"]') || stageScale.querySelector('.xhs-body-frame');
         if (frame) frame.focus({ preventScroll: true });
@@ -4274,7 +4597,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(true);
       });
       btnAfter.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -4285,7 +4608,7 @@ function studioHtmlV2(payload, libs) {
         insertAndFocusBlank(blank);
         saveCurrentPage();
         showHalo(targetBlock);
-        scheduleOverflowReflow(false);
+        scheduleOverflowReflow(true);
       });
       function removeAdjacentBlank(e, direction) {
         e.preventDefault();
@@ -4312,11 +4635,16 @@ function studioHtmlV2(payload, libs) {
         const blank = e.target.closest?.('.xhs-manual-blank');
         if (blank && frame.contains(blank)) {
           e.preventDefault();
+          frame.focus({ preventScroll: true });
           setCaretInside(blank);
+          return;
+        }
+        if (e.target === frame && focusBodyGapCursor(frame, e.clientY)) {
+          e.preventDefault();
         }
       });
       frame.addEventListener('mouseover', (e) => {
-        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-table-block, .xhs-heading');
+        const hard = e.target.closest?.('.xhs-callout, .xhs-image-block, .xhs-image-grid, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-code-block, .xhs-heading');
         if (hard && frame.contains(hard) && isHaloTargetBlock(hard)) showHalo(hard);
       });
       frame.addEventListener('mouseleave', hideHalo);
@@ -4327,6 +4655,8 @@ function studioHtmlV2(payload, libs) {
         editable.addEventListener('compositionend', () => finishTextComposition(editable));
         editable.addEventListener('beforeinput', recordHistoryBeforeInput);
         if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+          editable.addEventListener('keydown', handleStructuralStartEnter, true);
+          editable.addEventListener('keydown', handleContinuousBoundaryBackspace, true);
           editable.addEventListener('keydown', handleParagraphEnter, true);
           editable.addEventListener('keydown', handleListEnter, true);
           editable.addEventListener('beforeinput', (event) => {
@@ -4336,8 +4666,9 @@ function studioHtmlV2(payload, libs) {
               return;
             }
             if (/^deleteContent(?:Backward|Forward)$/.test(event.inputType || '')) {
-              if (handleListBackspace(event) || handleParagraphBackspace(event) || handleManualBlankDelete(event)) return;
+              if (handleContinuousBoundaryBackspace(event) || handleListBackspace(event) || handleParagraphBackspace(event) || handleManualBlankDelete(event)) return;
             }
+            if (handleStructuralStartEnter(event)) return;
             handleBodyParagraphBeforeInput(event);
             if (event.inputType === 'insertParagraph' && paragraphEnterKeydownHandled) {
               event.preventDefault();
@@ -4372,7 +4703,9 @@ function studioHtmlV2(payload, libs) {
             balanceCoverSubtitle();
           }
           if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
+            normalizeFilledCaretAnchors(editable);
             normalizeFilledManualBlanks(editable);
+            syncEmptyFlowFrame(editable, /^deleteContent(?:Backward|Forward)$/.test(inputType));
             if (isHistoryInputType(inputType)) {
               cancelPendingReflow();
               scheduleLightSave();
@@ -4602,6 +4935,18 @@ function studioHtmlV2(payload, libs) {
       });
       ctx.restore();
     }
+    function downsampleExportCanvas(sourceCanvas) {
+      if (!sourceCanvas || sourceCanvas.width === config.width) return sourceCanvas;
+      const output = document.createElement('canvas');
+      output.width = config.width;
+      output.height = config.height;
+      const ctx = output.getContext('2d');
+      if (!ctx) return sourceCanvas;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(sourceCanvas, 0, 0, output.width, output.height);
+      return output;
+    }
     function fitHeadingTitles(root = stageScale) {
       const base = Number(config.headingTitleSize || 48);
       const lv2Size = Number(config.bodyFontSize || 36);
@@ -4716,9 +5061,10 @@ function studioHtmlV2(payload, libs) {
         const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
         if (!el) return false;
         if (!bold) return Boolean(el.closest('.' + className));
+        if (el.closest('.xhs-text-regular')) return false;
         if (el.closest('strong, b, .xhs-cover-bold')) return true;
         const weight = getComputedStyle(el).fontWeight;
-        return weight === 'bold' || (Number.parseInt(weight, 10) || 0) >= 700;
+        return weight === 'bold' || (Number.parseInt(weight, 10) || 0) >= 720;
       };
       if (range.collapsed) return styled(range.startContainer) ? 'on' : 'off';
       const textNodes = [];
@@ -4750,6 +5096,7 @@ function studioHtmlV2(payload, libs) {
       setToolbarButtonState(headingBtn2, info?.type === 'heading' && info.level === '2' ? 'on' : 'off');
       setToolbarButtonState(italicBtn, info?.type === 'quote' ? 'on' : 'off');
       setToolbarButtonState(keypointBtn, info?.type === 'card' ? 'on' : 'off');
+      setToolbarButtonState(codeBtn, info?.type === 'code' ? 'on' : 'off');
       setToolbarButtonState(listUnorderedBtn, info?.type === 'list' && info.listType !== 'ordered' ? 'on' : 'off');
       setToolbarButtonState(listOrderedBtn, info?.type === 'list' && info.listType === 'ordered' ? 'on' : 'off');
     }
@@ -4787,7 +5134,9 @@ function studioHtmlV2(payload, libs) {
       if (shouldSave) saveCurrentPage();
     }
     function reorderableFlowNode(target) {
-      return target?.closest?.('.xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-image-grid, .xhs-image-block');
+      const matched = target?.closest?.('.xhs-heading, .xhs-callout, .xhs-quote, .xhs-list-line, .xhs-table-block, .xhs-code-block, .xhs-image-grid, .xhs-image-block');
+      if (matched?.classList?.contains('xhs-image-block')) return matched.closest('.xhs-image-grid') || matched;
+      return matched;
     }
     function flowBlocksInBody(bodyFrame) {
       return Array.from(bodyFrame.children).filter((node) => {
@@ -4800,11 +5149,51 @@ function studioHtmlV2(payload, libs) {
           node.classList?.contains('xhs-quote') ||
           node.classList?.contains('xhs-list-line') ||
           node.classList?.contains('xhs-table-block') ||
+          node.classList?.contains('xhs-code-block') ||
           node.classList?.contains('xhs-rich');
       });
     }
+    function tailGapPosition(frame, blocks, clientY) {
+      if (!frame) return null;
+      const frameRect = frame.getBoundingClientRect();
+      const contentBlocks = Array.from(blocks || []);
+      const baseTop = dropInsertionTop(frame, contentBlocks, contentBlocks.length);
+      const lastRect = contentBlocks[contentBlocks.length - 1]?.getBoundingClientRect();
+      const tailStart = lastRect?.bottom ?? frameRect.top;
+      if (clientY < tailStart || clientY > frameRect.bottom) return null;
+      return {
+        baseTop,
+        contentBlocks,
+        insertionTop: baseTop,
+        availableHeight: Math.max(0, (frameRect.bottom - baseTop) / Math.max(0.1, stageLocalScale(frame))),
+      };
+    }
+    function focusBodyGapCursor(frame, clientY) {
+      const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
+      const target = tailGapPosition(frame, blocks, clientY);
+      if (!target) return false;
+      const blankOnly = blocks.length && blocks.every((node) => node.classList.contains('xhs-manual-blank'));
+      if (blankOnly) {
+        frame.focus({ preventScroll: true });
+        setCaretInside(blocks[blocks.length - 1]);
+        return true;
+      }
+      frame.querySelectorAll('.xhs-gap-cursor').forEach((node) => {
+        if (isEmptyCaretAnchor(node)) node.remove();
+      });
+      const gap = makeCaretAnchor();
+      gap.classList.add('xhs-gap-cursor');
+      gap.dataset.xhsGapCursor = '1';
+      const last = target.contentBlocks[target.contentBlocks.length - 1] || null;
+      if (last) last.after(gap);
+      else frame.appendChild(gap);
+      frame.focus({ preventScroll: true });
+      setCaretInside(gap);
+      return true;
+    }
     function ensureBlockDropIndicator() {
-      if (blockDropIndicator) return blockDropIndicator;
+      if (blockDropIndicator?.isConnected && blockDropIndicator.parentNode === stageScale) return blockDropIndicator;
+      blockDropIndicator = null;
       blockDropIndicator = document.createElement('div');
       blockDropIndicator.className = 'xhs-drop-indicator';
       blockDropIndicator.hidden = true;
@@ -4814,78 +5203,445 @@ function studioHtmlV2(payload, libs) {
     function hideBlockDropIndicator() {
       if (blockDropIndicator) blockDropIndicator.hidden = true;
     }
-    function updateBlockDropIndicator(clientY, bodyFrame) {
+    function ensureOverviewBlockDropIndicator() {
+      if (overviewBlockDropIndicator?.isConnected) return overviewBlockDropIndicator;
+      overviewBlockDropIndicator = null;
+      overviewBlockDropIndicator = document.createElement('div');
+      overviewBlockDropIndicator.className = 'xhs-overview-drop-indicator';
+      overviewBlockDropIndicator.hidden = true;
+      document.body.appendChild(overviewBlockDropIndicator);
+      return overviewBlockDropIndicator;
+    }
+    function hideOverviewBlockDropIndicator() {
+      if (overviewBlockDropIndicator) overviewBlockDropIndicator.hidden = true;
+    }
+    function showOverviewBlockDropIndicator(frame, insertionTop) {
+      const frameRect = frame.getBoundingClientRect();
+      const indicator = ensureOverviewBlockDropIndicator();
+      indicator.style.left = frameRect.left + 'px';
+      indicator.style.top = insertionTop + 'px';
+      indicator.style.width = frameRect.width + 'px';
+      indicator.hidden = false;
+    }
+    function dropInsertionTop(frame, blocks, index) {
+      const frameRect = frame.getBoundingClientRect();
+      if (!blocks.length) return frameRect.top;
+      if (index < blocks.length) return blocks[index].getBoundingClientRect().top;
+      const lastRect = blocks[blocks.length - 1].getBoundingClientRect();
+      return Math.min(frameRect.bottom, lastRect.bottom + ${bodyParagraphGap} * stageLocalScale(frame));
+    }
+    function caretRangeAtPoint(clientX, clientY) {
+      const position = document.caretPositionFromPoint?.(clientX, clientY);
+      if (position?.offsetNode) {
+        const range = document.createRange();
+        range.setStart(position.offsetNode, position.offset);
+        range.collapse(true);
+        return range;
+      }
+      return document.caretRangeFromPoint?.(clientX, clientY) || null;
+    }
+    function caretProbeRect(range) {
+      if (!range) return null;
+      const direct = range.getBoundingClientRect();
+      if (direct?.height) return direct;
+      const node = range.startContainer;
+      if (node?.nodeType !== Node.TEXT_NODE || !node.textContent?.length) return direct;
+      const offset = range.startOffset;
+      const probe = document.createRange();
+      if (offset < node.textContent.length) {
+        probe.setStart(node, offset);
+        probe.setEnd(node, offset + 1);
+      } else {
+        probe.setStart(node, Math.max(0, offset - 1));
+        probe.setEnd(node, offset);
+      }
+      return probe.getBoundingClientRect();
+    }
+    function geometricTextCaret(block, clientX, clientY) {
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      let absolute = 0;
+      let best = null;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent || '';
+        for (let offset = 0; offset < text.length; offset += 1) {
+          const probe = document.createRange();
+          probe.setStart(node, offset);
+          probe.setEnd(node, offset + 1);
+          const rect = Array.from(probe.getClientRects()).find((candidate) => candidate.height > 0);
+          if (!rect) continue;
+          const dy = clientY < rect.top ? rect.top - clientY : (clientY > rect.bottom ? clientY - rect.bottom : 0);
+          const dx = clientX < rect.left ? rect.left - clientX : (clientX > rect.right ? clientX - rect.right : 0);
+          const score = dy * 10000 + dx;
+          const candidate = {
+            offset: absolute + offset + (clientX >= rect.left + rect.width / 2 ? 1 : 0),
+            rect,
+            score,
+          };
+          if (!best || candidate.score < best.score) best = candidate;
+        }
+        absolute += text.length;
+      }
+      return best;
+    }
+    function textDropPosition(frame, blocks, clientX, clientY) {
+      const index = blocks.findIndex((block) => {
+        if (!isPlainSplittable(block)) return false;
+        const rect = block.getBoundingClientRect();
+        return clientY >= rect.top && clientY <= rect.bottom;
+      });
+      if (index < 0) return null;
+      const block = blocks[index];
+      const range = caretRangeAtPoint(clientX, clientY);
+      const container = range?.startContainer?.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range?.startContainer?.parentElement;
+      let offset = -1;
+      let caretRect = null;
+      if (range && container && block.contains(container)) {
+        const before = document.createRange();
+        before.selectNodeContents(block);
+        before.setEnd(range.startContainer, range.startOffset);
+        offset = before.toString().length;
+        caretRect = caretProbeRect(range);
+      } else {
+        const geometric = geometricTextCaret(block, clientX, clientY);
+        offset = geometric?.offset ?? -1;
+        caretRect = geometric?.rect || null;
+      }
+      if (offset < 0) return null;
+      const total = textLengthDeep(block);
+      const blockRect = block.getBoundingClientRect();
+      if (offset <= 0) return { block, blockIndex: index, insertionTop: blockRect.top };
+      if (offset >= total) return { block, blockIndex: index + 1, insertionTop: blockRect.bottom };
+      return {
+        block,
+        blockIndex: index,
+        textOffset: offset,
+        insertionTop: Math.min(blockRect.bottom, Math.max(blockRect.top, caretRect?.bottom || clientY)),
+      };
+    }
+    function splitTextBlockForDrop(block, offset) {
+      if (!isPlainSplittable(block)) return block;
+      const total = textLengthDeep(block);
+      if (!Number.isInteger(offset) || offset <= 0) return block;
+      if (offset >= total) return block.nextSibling;
+      const head = cloneTextRangeElement(block, 0, offset);
+      const tail = cloneTextRangeElement(block, offset, total);
+      if (!cleanText(head.textContent) || !cleanText(tail.textContent)) return block;
+      head.classList.remove('xhs-page-start', 'xhs-page-end');
+      tail.classList.remove('xhs-page-start', 'xhs-page-end');
+      delete tail.dataset.xhsBlockId;
+      block.replaceWith(head, tail);
+      return tail;
+    }
+    function clearBlockDropFeedback() {
+      hideBlockDropIndicator();
+      hideOverviewBlockDropIndicator();
+    }
+    function clearOverviewDropPage() {
+      overviewRail.querySelectorAll('.overview-item.reorder-drop-page').forEach((item) => item.classList.remove('reorder-drop-page'));
+    }
+    function isImageReorderNode(node) {
+      return Boolean(node?.classList?.contains('xhs-image-block') || node?.classList?.contains('xhs-image-grid'));
+    }
+    function reorderGroupNodes(node) {
+      if (!node) return [];
+      return [node];
+    }
+    function overviewPageDropTarget(clientX, clientY) {
+      if (viewMode !== 'overview' || !blockReorderDrag || blockReorderDrag.node?.dataset?.split) return null;
+      const item = Array.from(overviewRail.querySelectorAll('.overview-item')).find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+      });
+      const targetPageIndex = Number(item?.dataset?.index);
+      const targetPage = pages[targetPageIndex];
+      const acceptsBodyFlow = targetPage?.type === 'body' || (targetPage?.type === 'cover' && !coverImageEnabled);
+      if (!item || !Number.isInteger(targetPageIndex) || targetPageIndex === pageIndex || !acceptsBodyFlow) return null;
+      const frame = item.querySelector('.xhs-cover-tail-frame, .xhs-body-frame');
+      if (!frame) return null;
+      const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
+      const tailTarget = tailGapPosition(frame, blocks, clientY);
+      if (tailTarget) {
+        return {
+          item,
+          frame,
+          insertionTop: tailTarget.insertionTop,
+          pageIndex: targetPageIndex,
+          blockIndex: tailTarget.contentBlocks.length,
+          tailDrop: true,
+          availableHeight: tailTarget.availableHeight,
+        };
+      }
+      const textTarget = textDropPosition(frame, blocks, clientX, clientY);
+      if (textTarget) {
+        return {
+          item,
+          frame,
+          insertionTop: textTarget.insertionTop,
+          pageIndex: targetPageIndex,
+          blockIndex: textTarget.blockIndex,
+          textOffset: textTarget.textOffset,
+        };
+      }
+      let targetBlockIndex = blocks.length;
+      for (let index = 0; index < blocks.length; index += 1) {
+        const rect = blocks[index].getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          targetBlockIndex = index;
+          break;
+        }
+      }
+      return {
+        item,
+        frame,
+        insertionTop: dropInsertionTop(frame, blocks, targetBlockIndex),
+        pageIndex: targetPageIndex,
+        blockIndex: targetBlockIndex,
+      };
+    }
+    function updateFlowBlockDropTarget(clientX, clientY, bodyFrame) {
+      const crossPage = overviewPageDropTarget(clientX, clientY);
+      clearOverviewDropPage();
+      hideOverviewBlockDropIndicator();
+      if (crossPage) {
+        blockReorderDrag.crossPage = crossPage;
+        blockReorderDrag.hasDropTarget = true;
+        hideBlockDropIndicator();
+        showOverviewBlockDropIndicator(crossPage.frame, crossPage.insertionTop);
+        return;
+      }
+      blockReorderDrag.crossPage = null;
+      const frameRect = bodyFrame?.getBoundingClientRect();
+      const insideSourceFrame = frameRect && clientX >= frameRect.left && clientX <= frameRect.right && clientY >= frameRect.top && clientY <= frameRect.bottom;
+      if (insideSourceFrame) {
+        blockReorderDrag.hasDropTarget = true;
+        updateBlockDropIndicator(clientX, clientY, bodyFrame);
+      } else {
+        blockReorderDrag.hasDropTarget = false;
+        blockReorderDrag.insertBefore = null;
+        blockReorderDrag.textDrop = null;
+        clearBlockDropFeedback();
+      }
+    }
+    function updateBlockDropIndicator(clientX, clientY, bodyFrame) {
       const flowNode = blockReorderDrag?.node;
       if (!bodyFrame || !flowNode) return hideBlockDropIndicator();
-      const blocks = flowBlocksInBody(bodyFrame).filter((node) => node !== flowNode);
+      const movingNodes = new Set(reorderGroupNodes(flowNode));
+      const blocks = flowBlocksInBody(bodyFrame).filter((node) => !movingNodes.has(node));
       const indicator = ensureBlockDropIndicator();
       const cardRect = stageScale.getBoundingClientRect();
       const scale = stageLocalScale(bodyFrame);
+      const tailTarget = tailGapPosition(bodyFrame, blocks, clientY);
+      if (tailTarget) {
+        indicator.hidden = false;
+        indicator.style.top = ((tailTarget.insertionTop - cardRect.top) / scale) + 'px';
+        blockReorderDrag.insertBefore = null;
+        blockReorderDrag.textDrop = null;
+        return;
+      }
+      const textTarget = textDropPosition(bodyFrame, blocks, clientX, clientY);
+      if (textTarget) {
+        indicator.hidden = false;
+        indicator.style.top = ((textTarget.insertionTop - cardRect.top) / scale) + 'px';
+        blockReorderDrag.insertBefore = null;
+        blockReorderDrag.textDrop = Number.isInteger(textTarget.textOffset)
+          ? { block: textTarget.block, offset: textTarget.textOffset }
+          : null;
+        if (!blockReorderDrag.textDrop) blockReorderDrag.insertBefore = blocks[textTarget.blockIndex] || null;
+        return;
+      }
+      blockReorderDrag.textDrop = null;
       let target = null;
-      let top = bodyFrame.getBoundingClientRect().top;
+      let targetIndex = blocks.length;
       for (const block of blocks) {
         const rect = block.getBoundingClientRect();
         const mid = rect.top + rect.height / 2;
         if (clientY < mid) {
-          target = block;
-          top = rect.top;
+          targetIndex = blocks.indexOf(block);
           break;
         }
-        top = rect.bottom;
       }
+      target = blocks[targetIndex] || null;
+      const top = dropInsertionTop(bodyFrame, blocks, targetIndex);
       indicator.hidden = false;
       indicator.style.top = ((top - cardRect.top) / scale) + 'px';
       blockReorderDrag.insertBefore = target;
+    }
+    function fitImageBlockIntoTailSpace(block, availableHeight) {
+      if (!isImageReorderNode(block) || !Number.isFinite(availableHeight) || availableHeight <= 0) return false;
+      const frames = Array.from(block.querySelectorAll('.xhs-image-frame'));
+      if (!frames.length) return false;
+      const original = frames.map((frame) => ({
+        frame,
+        height: frame.style.height,
+        userHeight: frame.dataset.userHeight,
+      }));
+      let metrics = measureBlockMetrics(block);
+      if (metrics.fit <= availableHeight + 1) return false;
+      const rowCount = block.classList.contains('xhs-image-grid') ? Math.ceil(frames.length / 2) : 1;
+      for (let attempt = 0; attempt < 4 && metrics.fit > availableHeight + 1; attempt += 1) {
+        const reduction = Math.ceil((metrics.fit - availableHeight) / rowCount) + 2;
+        let changed = false;
+        frames.forEach((frame) => {
+          const current = parseFloat(frame.style.height || '') || config.imageFrameHeight;
+          const next = Math.max(90, current - reduction);
+          if (next < current) {
+            frame.style.height = Math.floor(next) + 'px';
+            changed = true;
+          }
+        });
+        if (!changed) break;
+        metrics = measureBlockMetrics(block);
+      }
+      if (metrics.fit > availableHeight + 1) {
+        original.forEach(({ frame, height, userHeight }) => {
+          frame.style.height = height;
+          if (userHeight === undefined) delete frame.dataset.userHeight;
+          else frame.dataset.userHeight = userHeight;
+        });
+        return false;
+      }
+      frames.forEach((frame) => {
+        frame.dataset.userHeight = '1';
+      });
+      return true;
     }
     function finishFlowBlockReorder() {
       const bodyFrame = blockReorderDrag?.bodyFrame;
       const flowNode = blockReorderDrag?.node;
       if (!bodyFrame || !flowNode) return;
+      if (!blockReorderDrag.moved) {
+        reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
+      if (!blockReorderDrag.hasDropTarget) {
+        reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
+      const crossPage = blockReorderDrag.crossPage;
+      if (crossPage) {
+        const selectedImageId = blockReorderDrag.imageId || '';
+        const selectedBlockId = blockReorderDrag.blockId || ensureFlowBlockId(flowNode);
+        const { holder, pageNodes } = collectBodyFlowHolderWithPageNodes();
+        const selectedBlock = findFlowBlockById(holder, selectedBlockId);
+        const fittedToTail = Boolean(crossPage.tailDrop && selectedBlock &&
+          fitImageBlockIntoTailSpace(selectedBlock, Number(crossPage.availableHeight)));
+        const movingNodes = reorderGroupNodes(selectedBlock);
+        const movingSet = new Set(movingNodes);
+        const targetNodes = (pageNodes.get(crossPage.pageIndex) || []).filter((node) =>
+          !node.classList?.contains('xhs-caret-anchor') && !movingSet.has(node)
+        );
+        let anchor = null;
+        if (Number.isInteger(crossPage.textOffset)) {
+          anchor = splitTextBlockForDrop(targetNodes[crossPage.blockIndex], crossPage.textOffset);
+        } else {
+          anchor = targetNodes[Math.max(0, Math.min(crossPage.blockIndex, targetNodes.length))] || null;
+        }
+        if (movingNodes.length) {
+          if (!anchor) {
+            const last = targetNodes[targetNodes.length - 1];
+            anchor = last?.nextSibling || null;
+          }
+          movingNodes.forEach((node) => holder.insertBefore(node, anchor));
+          reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+          clearOverviewDropPage();
+          clearBlockDropFeedback();
+          repaginateBodyBlocks(Array.from(holder.children), selectedImageId, selectedBlockId);
+          if (fittedToTail) showRuntimeNotice('图片已按目标页剩余空间自动调整高度，可继续拖动控制点修改。');
+          return;
+        }
+        reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
       const parent = flowNode.parentNode;
-      if (!parent) return;
-      if (blockReorderDrag.insertBefore) parent.insertBefore(flowNode, blockReorderDrag.insertBefore);
-      else parent.appendChild(flowNode);
-      flowNode.classList.remove('reorder-dragging');
-      hideBlockDropIndicator();
-      saveCurrentPage();
-      scheduleOverflowReflow(true);
+      if (!parent) {
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
+      const movingNodes = reorderGroupNodes(flowNode);
+      let samePageAnchor = blockReorderDrag.insertBefore;
+      if (blockReorderDrag.textDrop?.block?.isConnected) {
+        samePageAnchor = splitTextBlockForDrop(blockReorderDrag.textDrop.block, blockReorderDrag.textDrop.offset);
+      }
+      if (samePageAnchor) movingNodes.forEach((node) => parent.insertBefore(node, samePageAnchor));
+      else movingNodes.forEach((node) => parent.appendChild(node));
+      movingNodes.forEach((node) => node.classList.remove('reorder-dragging'));
+      clearOverviewDropPage();
+      clearBlockDropFeedback();
+      const selectedImageId = blockReorderDrag.imageId || '';
+      const selectedBlockId = blockReorderDrag.blockId || ensureFlowBlockId(flowNode);
+      const { holder } = collectBodyFlowHolderWithPageNodes();
+      repaginateBodyBlocks(Array.from(holder.children), selectedImageId, selectedBlockId);
+    }
+    function beginFlowBlockReorder(event, candidate, bodyFrame, captureTarget) {
+      if (blockReorderDrag || event.button !== 0) return false;
+      const flowNode = reorderableFlowNode(candidate);
+      if (!flowNode || !bodyFrame?.contains(flowNode)) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      recordEditorHistory();
+      selectFlowBlock(flowNode);
+      const imgFrame = flowNode.querySelector?.('.xhs-image-frame');
+      if (imgFrame) selectFrame(imgFrame);
+      const blockId = ensureFlowBlockId(flowNode);
+      blockReorderDrag = {
+        id: event.pointerId,
+        node: flowNode,
+        insertBefore: null,
+        bodyFrame,
+        captureTarget: captureTarget || event.currentTarget,
+        crossPage: null,
+        hasDropTarget: false,
+        textDrop: null,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        blockId,
+        imageId: isImageReorderNode(flowNode)
+          ? ensureImageId(flowNode.querySelector?.('.xhs-image-block') || flowNode)
+          : '',
+      };
+      reorderGroupNodes(flowNode).forEach((node) => node.classList.add('reorder-dragging'));
+      blockReorderDrag.captureTarget?.setPointerCapture?.(event.pointerId);
+      return true;
+    }
+    function continueFlowBlockReorder(event) {
+      if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return false;
+      event.preventDefault();
+      if (!blockReorderDrag.moved) {
+        const distance = Math.hypot(event.clientX - blockReorderDrag.startX, event.clientY - blockReorderDrag.startY);
+        if (distance < 4) return true;
+        blockReorderDrag.moved = true;
+      }
+      updateFlowBlockDropTarget(event.clientX, event.clientY, blockReorderDrag.bodyFrame);
+      return true;
+    }
+    function endFlowBlockReorder(event) {
+      if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return false;
+      const drag = blockReorderDrag;
+      drag.captureTarget?.releasePointerCapture?.(event.pointerId);
+      finishFlowBlockReorder();
+      blockReorderDrag = null;
+      return true;
     }
     function bindBodyFrameReorder(bodyFrame) {
       if (!bodyFrame || bodyFrame.dataset.reorderBound === '1') return;
       bodyFrame.dataset.reorderBound = '1';
       bodyFrame.addEventListener('pointerdown', (event) => {
-        if (!event.altKey) return;
-        if (event.target?.closest?.('.xhs-resize-handle')) return;
-        const flowNode = reorderableFlowNode(event.target);
-        if (!flowNode || !bodyFrame.contains(flowNode)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        selectFlowBlock(flowNode);
-        const imgFrame = flowNode.querySelector?.('.xhs-image-frame');
-        if (imgFrame) selectFrame(imgFrame);
-        blockReorderDrag = {
-          id: event.pointerId,
-          node: flowNode,
-          insertBefore: null,
-          bodyFrame,
-        };
-        flowNode.classList.add('reorder-dragging');
-        bodyFrame.setPointerCapture?.(event.pointerId);
-        updateBlockDropIndicator(event.clientY, bodyFrame);
+        if (!event.altKey || event.target?.closest?.('.xhs-resize-handle')) return;
+        beginFlowBlockReorder(event, event.target, bodyFrame, bodyFrame);
       }, true);
-      bodyFrame.addEventListener('pointermove', (event) => {
-        if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return;
-        event.preventDefault();
-        updateBlockDropIndicator(event.clientY, blockReorderDrag.bodyFrame);
-      });
-      function endBlockReorder(event) {
-        if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return;
-        blockReorderDrag.bodyFrame.releasePointerCapture?.(event.pointerId);
-        finishFlowBlockReorder();
-        blockReorderDrag = null;
-      }
-      bodyFrame.addEventListener('pointerup', endBlockReorder);
-      bodyFrame.addEventListener('pointercancel', endBlockReorder);
+      bodyFrame.addEventListener('pointermove', continueFlowBlockReorder);
+      bodyFrame.addEventListener('pointerup', endFlowBlockReorder);
+      bodyFrame.addEventListener('pointercancel', endFlowBlockReorder);
       bodyFrame.addEventListener('mousedown', (event) => {
         if (event.altKey) return;
         const block = reorderableFlowNode(event.target);
@@ -5144,6 +5900,17 @@ function studioHtmlV2(payload, libs) {
         : range.commonAncestorContainer.parentElement;
       if (!parent || !stageScale.contains(parent)) return null;
       return { selection, range };
+    }
+    function proseBlockForRange(range) {
+      if (!range) return null;
+      const closestProse = (node) => {
+        const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        return element?.closest?.('.xhs-p, .xhs-rich') || null;
+      };
+      const startBlock = closestProse(range.startContainer);
+      const endBlock = closestProse(range.endContainer);
+      if (!startBlock || startBlock !== endBlock || !stageScale.contains(startBlock)) return null;
+      return startBlock;
     }
     function unwrapElement(el) {
       const parent = el.parentNode;
@@ -5489,12 +6256,16 @@ function studioHtmlV2(payload, libs) {
         alert('请先选中要处理的文字，或把光标放在已应用该样式的文字里再点一次取消。');
         return;
       }
+      const offsets = inlineRangeTextOffsets(item.range);
       const span = toggleInlineMarkInRange(item.range, className);
       item.selection.removeAllRanges();
       if (span) {
         const styledRange = document.createRange();
         styledRange.selectNodeContents(span);
         item.selection.addRange(styledRange);
+      } else {
+        const restoredRange = restoreInlineRange(offsets);
+        if (restoredRange) item.selection.addRange(restoredRange);
       }
       normalizeNestedFlowBlocks(stageScale);
       normalizeListLinesInFrame(stageScale.querySelector('.xhs-body-frame'));
@@ -5546,14 +6317,14 @@ function studioHtmlV2(payload, libs) {
       toggleInlineClass('xhs-green-underline', 'box-shadow');
     }
     function blockNestHost(node) {
-      return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-list-body');
+      return node?.closest?.('.xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content');
     }
     function nextAutoHeadingNumber() {
       const existingLevel1 = stageScale.querySelectorAll('.xhs-heading[data-level="1"], .xhs-heading:not([data-level])');
       return String(existingLevel1.length + 1).padStart(2, '0');
     }
-    // Shared cross-switch model for the four flow-block style buttons
-    // (一级标题 / 二级标题 / 引用块 / 卡片 / 序列): placing the caret inside
+    // Shared cross-switch model for the flow-block style buttons
+    // (一级标题 / 二级标题 / 引用块 / 卡片 / 代码块 / 序列): placing the caret inside
     // any one of them and clicking a different button's style converts the
     // block in place; clicking the same style again converts it back to
     // plain paragraph(s).
@@ -5566,6 +6337,8 @@ function studioHtmlV2(payload, libs) {
       if (quote) return { type: 'quote', el: quote };
       const callout = el.closest('.xhs-callout');
       if (callout) return { type: 'card', el: callout };
+      const code = el.closest('.xhs-code-block');
+      if (code) return { type: 'code', el: code };
       const list = el.closest('.xhs-list-line');
       if (list) {
         return {
@@ -5597,6 +6370,7 @@ function studioHtmlV2(payload, libs) {
           .map((body) => normalizeInlineHtml(body.innerHTML))
           .join('<br>');
       }
+      if (info.type === 'code') return escWithBreaks(flowBlockPlainText(info));
       return info.el.innerHTML;
     }
     function flowBlockPlainText(info) {
@@ -5612,6 +6386,7 @@ function studioHtmlV2(payload, libs) {
       if (info.type === 'list') {
         return flowBlockListBodies(info).map((body) => textWithBreaks(body)).join('\\n');
       }
+      if (info.type === 'code') return info.el.querySelector('.xhs-code-content')?.textContent || '';
       return textWithBreaks(info.el);
     }
     function buildFlowBlocksFromContent(targetType, targetLevel, info) {
@@ -5633,6 +6408,9 @@ function studioHtmlV2(payload, libs) {
         block.innerHTML = '<div class="xhs-callout-label">' + esc(label) + '</div><div class="xhs-callout-body">' +
           cleanCalloutBodyHtml(flowBlockContentHtml(info)) + '</div>';
         return [block];
+      }
+      if (targetType === 'code') {
+        return [makeNewCodeBlock(flowBlockPlainText(info), info.el?.dataset?.codeLanguage || 'Code')];
       }
       if (targetType === 'list') {
         const listType = targetLevel === 'ordered' ? 'ordered' : 'unordered';
@@ -5673,11 +6451,17 @@ function studioHtmlV2(payload, libs) {
       return nextBlocks[0];
     }
     function focusFlowBlock(block) {
-      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body') || block;
+      const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body, .xhs-code-content') || block;
       if (target) setCaretInside(target);
     }
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
       const selection = window.getSelection();
+      if (selection?.rangeCount && !selection.isCollapsed) {
+        const range = selection.getRangeAt(0);
+        const startInfo = activeFlowBlockAt(range.startContainer);
+        const endInfo = activeFlowBlockAt(range.endContainer);
+        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) return false;
+      }
       const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
       const sameType = info.type === targetType &&
@@ -5708,8 +6492,8 @@ function studioHtmlV2(payload, libs) {
       if (activeFlowBlockAt(replacement)) selectFlowBlock(replacement);
       else clearSelectedFlowBlock();
       normalizeNestedFlowBlocks(stageScale);
-      saveCurrentPage();
-      scheduleOverflowReflow(true);
+      saveCurrentPage({ skipNormalize: true });
+      reflow();
       return true;
     }
     function makeHeadingBlock(level = '1') {
@@ -5742,8 +6526,8 @@ function studioHtmlV2(payload, libs) {
       ensureEditorCaretAnchors(stageScale);
       const title = heading.querySelector('.xhs-heading-title');
       if (title) setCaretInside(title);
-      saveCurrentPage();
-      scheduleOverflowReflow(true);
+      saveCurrentPage({ skipNormalize: true });
+      reflow();
     }
     function makeKeypointBlock() {
       if (tryToggleOrSwitchFlowBlock('card')) return;
@@ -5778,6 +6562,45 @@ function studioHtmlV2(payload, libs) {
       saveCurrentPage();
       scheduleOverflowReflow(true);
     }
+    function makeCodeBlock() {
+      if (tryToggleOrSwitchFlowBlock('code')) return;
+      const item = getStageSelection();
+      if (!item) {
+        alert('请先选中要放进代码块的文字。');
+        return;
+      }
+      const parent = item.range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? item.range.commonAncestorContainer
+        : item.range.commonAncestorContainer.parentElement;
+      if (blockNestHost(parent)) {
+        alert('这里已经是卡片/引用/序列/代码块内容，请用块样式按钮直接互切，不要再嵌套代码块。');
+        return;
+      }
+      const sourceBlock = proseBlockForRange(item.range);
+      if (!sourceBlock) {
+        alert('代码块一次只转换一个正文段落，请不要跨段或整页选择。');
+        return;
+      }
+      const preview = document.createElement('div');
+      preview.appendChild(item.range.cloneContents());
+      if (!cleanText(preview.textContent)) {
+        alert('请先选中有效文字。');
+        return;
+      }
+      const coversEntireBlock = rangeCoversEntireBlock(item.range, sourceBlock);
+      const fragment = item.range.extractContents();
+      const holder = document.createElement('div');
+      holder.appendChild(fragment);
+      const block = makeNewCodeBlock(textWithBreaks(holder), 'Code');
+      if (coversEntireBlock) sourceBlock.replaceWith(block);
+      else item.range.insertNode(block);
+      item.selection.removeAllRanges();
+      focusFlowBlock(block);
+      selectFlowBlock(block);
+      normalizeNestedFlowBlocks(stageScale);
+      saveCurrentPage();
+      scheduleOverflowReflow(true);
+    }
     function boldSelection() {
       const selection = window.getSelection();
       if (selection && selection.rangeCount) {
@@ -5796,8 +6619,11 @@ function studioHtmlV2(payload, libs) {
           return;
         }
       }
-      document.execCommand('bold', false, null);
-      saveCurrentPage();
+      if (selection && selection.rangeCount && !selection.getRangeAt(0).collapsed) {
+        const range = restrictRangeToInlineHost(selection.getRangeAt(0));
+        if (applyFormattingMultiBlock(range, 'xhs-text-regular')) return;
+      }
+      toggleInlineClass('xhs-text-regular', 'font-weight:700');
     }
     function italicSelection() {
       if (tryToggleOrSwitchFlowBlock('quote')) return;
@@ -5934,7 +6760,72 @@ function studioHtmlV2(payload, libs) {
         alert('请先点选封面图或正文图片。');
         return;
       }
+      imageInputAction = 'replace';
+      pendingImageInsertRange = null;
+      pendingImageInsertEditable = null;
       imageInput.click();
+    }
+    function requestImageInsert() {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) {
+        alert('请先把光标放到正文中，再插入图片。');
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const element = range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement;
+      const editable = element?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      if (!editable || !stageScale.contains(editable)) {
+        alert('请先把光标放到正文中，再插入图片。');
+        return;
+      }
+      imageInputAction = 'insert';
+      pendingImageInsertRange = range.cloneRange();
+      pendingImageInsertEditable = editable;
+      imageInput.click();
+    }
+    function insertImageBlockAtSavedRange(block) {
+      const editable = pendingImageInsertEditable;
+      const range = pendingImageInsertRange;
+      if (!editable?.isConnected || !range) return false;
+      const flowBlock = directFlowChild(editable, range.startContainer, range.startOffset);
+      if (!flowBlock) {
+        if (range.startContainer === editable) {
+          editable.insertBefore(block, editable.childNodes[range.startOffset] || null);
+        } else {
+          editable.appendChild(block);
+        }
+        return true;
+      }
+      if (isPlainSplittable(flowBlock)) {
+        const before = document.createRange();
+        before.selectNodeContents(flowBlock);
+        try {
+          before.setEnd(range.startContainer, range.startOffset);
+        } catch (_) {
+          flowBlock.after(block);
+          return true;
+        }
+        const offset = before.toString().length;
+        const total = textLengthDeep(flowBlock);
+        if (offset <= 0) {
+          flowBlock.before(block);
+        } else if (offset >= total) {
+          flowBlock.after(block);
+        } else {
+          const anchor = splitTextBlockForDrop(flowBlock, offset);
+          editable.insertBefore(block, anchor || null);
+        }
+        return true;
+      }
+      const field = caretFieldForBlock(flowBlock, range.startContainer);
+      if (isCaretAtFieldStart(range, field) || isCaretAtFlowBlockStart(range, flowBlock)) {
+        flowBlock.before(block);
+      } else {
+        flowBlock.after(block);
+      }
+      return true;
     }
     function deleteImage() {
       if (!selectedFrame) {
@@ -6030,10 +6921,34 @@ function studioHtmlV2(payload, libs) {
     }
     imageInput.addEventListener('change', () => {
       const file = imageInput.files && imageInput.files[0];
-      if (!file || !selectedFrame) return;
+      if (!file) return;
+      const action = imageInputAction;
       const reader = new FileReader();
       reader.onload = () => {
         const nextSrc = String(reader.result || '');
+        if (action === 'insert') {
+          const block = imageBlockFromSrc(nextSrc, file.name || '');
+          if (!insertImageBlockAtSavedRange(block)) {
+            showRuntimeNotice('没有找到原来的正文光标位置，请重新放置光标后插入图片。');
+          } else {
+            const frame = block.querySelector('.xhs-image-frame');
+            const imageId = ensureImageId(block);
+            stageScale.querySelectorAll('.selectable-image').forEach(bindSelectableFrame);
+            saveCurrentPage({ skipNormalize: true });
+            reflow(imageId);
+            const restored = imageId ? findImageBlockById(stageScale, imageId)?.querySelector('.xhs-image-frame') : null;
+            if (restored || frame?.isConnected) selectFrame(restored || frame);
+          }
+          imageInputAction = 'replace';
+          pendingImageInsertRange = null;
+          pendingImageInsertEditable = null;
+          imageInput.value = '';
+          return;
+        }
+        if (!selectedFrame) {
+          imageInput.value = '';
+          return;
+        }
         let img = selectedImage();
         if (!img) {
           img = document.createElement('img');
@@ -6117,13 +7032,21 @@ function studioHtmlV2(payload, libs) {
     function draftCheckpointKey() {
       return draftStorageKey() + ':checkpoint';
     }
+    function refreshContinuousFlowHtmlFromPages() {
+      if (!pages.length) return continuousFlowHtml;
+      const holder = mergedContinuousFlowHolder();
+      continuousFlowHtml = serializeContinuousFlowBlocks(Array.from(holder.children));
+      return continuousFlowHtml;
+    }
     function serializeStudioState() {
+      refreshContinuousFlowHtmlFromPages();
       return {
         generator: 'rabbitQ-skill-lark-xhs',
         version: config.version,
         savedAt: new Date().toISOString(),
         sourceFingerprint: config.sourceFingerprint || '',
         pageIndex,
+        flowHtml: continuousFlowHtml,
         pages: pages.map((page) => ({ type: page.type, html: page.html, tailHtml: page.tailHtml || '' })),
         currentBgTheme,
         currentAccentTheme,
@@ -6320,6 +7243,7 @@ function studioHtmlV2(payload, libs) {
       if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
       restoringState = true;
       try {
+        stageScale.innerHTML = '';
         let shouldReflowSavedDraft = Boolean(options.forceReflow) || state.version !== config.version;
         function sanitizeStoredHtml(html) {
           const holder = document.createElement('div');
@@ -6349,6 +7273,18 @@ function studioHtmlV2(payload, libs) {
         coverImageEnabled = state.coverImageEnabled !== false;
         syncPaperPatternUi();
         applyLayout(false);
+        if (state.flowHtml) {
+          continuousFlowHtml = sanitizeStoredHtml(state.flowHtml);
+          const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
+          cover.tailHtml = '';
+          const flowBlocks = pairAdjacentPortraitImages(continuousFlowBlocksFromHtml());
+          pages = coverImageEnabled
+            ? [cover].concat(paginateBlocks(flowBlocks))
+            : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+          pageIndex = Math.max(0, Math.min(Number(state.pageIndex || 0), pages.length - 1));
+        } else {
+          refreshContinuousFlowHtmlFromPages();
+        }
         renderAll();
         if (shouldReflowSavedDraft && pages.some((page) => page.type === 'body')) {
           window.setTimeout(() => reflow(), 120);
@@ -6524,18 +7460,19 @@ function studioHtmlV2(payload, libs) {
           flattenImagesForExport(card);
           const underlineRects = stabilizeExportInlineStyles(card, theme);
           await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          const canvas = await html2canvas(card, {
+          const renderedCanvas = await html2canvas(card, {
             width: config.width,
             height: config.height,
             windowWidth: config.width,
             windowHeight: config.height,
-            scale: 1,
+            scale: EXPORT_RENDER_SCALE,
             backgroundColor: theme.cardBg,
             useCORS: true,
             allowTaint: true,
             logging: false,
           });
-          paintExportUnderlineRects(canvas, underlineRects);
+          paintExportUnderlineRects(renderedCanvas, underlineRects);
+          const canvas = downsampleExportCanvas(renderedCanvas);
           const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
           zip.file(String(i + 1).padStart(2, '0') + '.png', blob);
         }
@@ -6551,6 +7488,10 @@ function studioHtmlV2(payload, libs) {
       removeAutoLineBreaks(holder);
       stripCaretAnchors(holder);
       holder.querySelectorAll?.('.xhs-page-end, .xhs-page-start').forEach((node) => node.classList.remove('xhs-page-end', 'xhs-page-start'));
+      holder.querySelectorAll?.('.xhs-boundary-blank').forEach((node) => {
+        node.classList.remove('xhs-boundary-blank');
+        node.style.removeProperty('--xhs-boundary-blank-height');
+      });
       holder.querySelectorAll?.('.xhs-caret-marker').forEach((node) => {
         if (preserveCaretMarkerId && node.dataset?.xhsCaretMarker === preserveCaretMarkerId) return;
         node.remove();
@@ -6582,6 +7523,7 @@ function studioHtmlV2(payload, libs) {
       });
       const blocks = sanitizeMergedFlowBlocks(Array.from(merged.children));
       const baseBlocks = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
+      continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       if (!coverImageEnabled) {
         pages = [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
@@ -6637,7 +7579,7 @@ function studioHtmlV2(payload, libs) {
         recordEditorHistory();
       }, true);
     });
-    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, listUnorderedBtn, listOrderedBtn].forEach((button) => {
+    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, codeBtn, listUnorderedBtn, listOrderedBtn, insertImageBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
       button?.addEventListener('click', () => recordEditorHistory(), true);
     });
@@ -6648,10 +7590,10 @@ function studioHtmlV2(payload, libs) {
     greenTextBtn.addEventListener('click', applyGreenText);
     greenUnderlineBtn.addEventListener('click', applyGreenUnderline);
     keypointBtn.addEventListener('click', makeKeypointBlock);
+    codeBtn?.addEventListener('click', makeCodeBlock);
     listUnorderedBtn?.addEventListener('click', () => makeListBlock('unordered'));
     listOrderedBtn?.addEventListener('click', () => makeListBlock('ordered'));
-    overviewModeBtn?.addEventListener('click', () => setViewMode('overview'));
-    editModeBtn?.addEventListener('click', () => setViewMode('edit'));
+    insertImageBtn?.addEventListener('click', requestImageInsert);
     coverImageOnBtn?.addEventListener('click', () => applyCoverImageMode(true));
     coverImageOffBtn?.addEventListener('click', () => applyCoverImageMode(false));
     bgThemeButtons.forEach((button) => button.addEventListener('click', () => applyBackgroundTheme(button.dataset.bgTheme)));
