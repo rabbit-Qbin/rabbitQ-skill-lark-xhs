@@ -25,6 +25,13 @@ function findBrowser() {
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
+async function activateStudioPage(page, index) {
+  await page.evaluate((targetIndex) => {
+    document.querySelectorAll('#pageTabs button')[targetIndex]?.click();
+  }, index);
+  await page.waitForTimeout(80);
+}
+
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "rabbitq-xhs-smoke-"));
   const sourceDir = path.join(root, "source");
@@ -277,7 +284,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.8\.81"/);
+  assert.match(html, /"version":"0\.9\.1"/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
@@ -337,7 +344,9 @@ async function main() {
   assert.match(html, /<button id="headingBtn2"[^>]*>H2<\/button>/);
   assert.match(html, /id="listUnorderedBtn"[^>]*aria-label="无序列表"[^>]*><svg class="toolbar-icon"/);
   assert.match(html, /id="listOrderedBtn"[^>]*aria-label="有序列表"[^>]*><svg class="toolbar-icon"/);
+  assert.match(html, /id="insertImageBtn"[^>]*aria-label="插入图片"[^>]*><svg class="toolbar-icon"/);
   assert.match(html, /id="overviewRail" class="overview-rail"/);
+  assert.doesNotMatch(html, /id="overviewModeBtn"|id="editModeBtn"|单页编辑/);
   assert.match(html, /\.xhs-quote \{[^}]*background: transparent;/);
   assert.doesNotMatch(html, /id="headingBtn"/);
   assert.doesNotMatch(html, /id="replaceImageBtn"/);
@@ -372,30 +381,17 @@ async function main() {
       await overviewSubtitle.click();
       await orderedPage.keyboard.press('Shift+Enter');
       await orderedPage.keyboard.type('第二行');
-      assert.strictEqual(
-        await orderedPage.locator('#overviewModeBtn').evaluate((button) => button.classList.contains('active')),
-        true,
-        'typing a subtitle line break in overview should not open single-page edit',
-      );
+      assert.strictEqual(await orderedPage.locator('#editModeBtn').count(), 0, 'Studio should expose only the overview editor');
       assert.match(await overviewSubtitle.innerText(), /第一行\r?\n+第二行/, 'overview subtitle should keep the inserted line break');
       await overviewSubtitle.dblclick();
-      assert.strictEqual(
-        await orderedPage.locator('#overviewModeBtn').evaluate((button) => button.classList.contains('active')),
-        true,
-        'double-clicking editable overview text should select text without opening single-page edit',
-      );
+      assert.strictEqual(await orderedPage.locator('#editModeBtn').count(), 0, 'double-clicking text must stay in overview');
     }
     const overviewItems = orderedPage.locator('#overviewRail .overview-item');
     if (await overviewItems.count() > 1) {
-      await overviewItems.nth(1).dblclick();
+      await overviewItems.nth(1).click();
       await orderedPage.waitForTimeout(350);
-      assert.strictEqual(await orderedPage.locator('#editModeBtn').evaluate((button) => button.classList.contains('active')), true, 'double-clicking an overview page should open single-page edit');
-      assert.match(await orderedPage.locator('#pageInfo').innerText(), /当前第 2 \/ /, 'double-click should open the selected overview page');
-      await orderedPage.click('#overviewModeBtn');
-      await orderedPage.waitForTimeout(300);
+      assert.match(await orderedPage.locator('#pageInfo').innerText(), /当前第 2 \/ /, 'clicking a page should activate it in overview');
     }
-    await orderedPage.click('#editModeBtn');
-    await orderedPage.waitForTimeout(500);
     const orderedListPageIndex = await orderedPage.evaluate(() => {
       const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
       for (let index = 0; index < tabs.length; index += 1) {
@@ -405,7 +401,7 @@ async function main() {
       return -1;
     });
     assert.ok(orderedListPageIndex >= 0, "expected ordered list page in Studio runtime");
-    await orderedPage.locator("#pageTabs button").nth(orderedListPageIndex).click();
+    await orderedPage.evaluate((index) => document.querySelectorAll("#pageTabs button")[index]?.click(), orderedListPageIndex);
     await orderedPage.waitForTimeout(100);
     assert.strictEqual(
       await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"]').count(),
@@ -817,7 +813,6 @@ async function main() {
     const continuousBackspacePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await continuousBackspacePage.addInitScript(() => localStorage.clear());
     await continuousBackspacePage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
-    await continuousBackspacePage.click('#editModeBtn');
     await continuousBackspacePage.waitForTimeout(350);
     const splitTailState = await continuousBackspacePage.evaluate(() => {
       const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
@@ -889,7 +884,6 @@ async function main() {
     const continuousQuotePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await continuousQuotePage.addInitScript(() => localStorage.clear());
     await continuousQuotePage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
-    await continuousQuotePage.click('#editModeBtn');
     await continuousQuotePage.waitForTimeout(350);
     const quoteThreshold = await continuousQuotePage.evaluate(() => {
       const snapshot = pages.map((page) => ({ ...page }));
@@ -922,7 +916,7 @@ async function main() {
       return { initial, keepOnPage };
     });
     assert.ok(quoteThreshold.initial > 0, 'continuous-flow fixture should place its quote on a body page');
-    await continuousQuotePage.locator('#pageTabs button').nth(quoteThreshold.initial).click();
+    await activateStudioPage(continuousQuotePage, quoteThreshold.initial);
     await continuousQuotePage.locator('#stageScale .xhs-quote').evaluate((quote) => {
       const node = document.createTreeWalker(quote, NodeFilter.SHOW_TEXT).nextNode();
       if (!node) throw new Error('quote text node missing');
@@ -968,7 +962,6 @@ async function main() {
     const beforeInputPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await beforeInputPage.addInitScript(() => localStorage.clear());
     await beforeInputPage.goto(`file://${path.join(boldListOutputDir, "xhs-studio.html")}`);
-    await beforeInputPage.click('#editModeBtn');
     await beforeInputPage.waitForTimeout(300);
     const beforeInputListPageIndex = await beforeInputPage.evaluate(() => {
       for (const [index, tab] of Array.from(document.querySelectorAll('#pageTabs button')).entries()) {
@@ -977,7 +970,7 @@ async function main() {
       }
       return -1;
     });
-    await beforeInputPage.locator('#pageTabs button').nth(beforeInputListPageIndex).click();
+    await activateStudioPage(beforeInputPage, beforeInputListPageIndex);
     const beforeInputListState = await beforeInputPage.evaluate(() => {
       const body = document.querySelector('#stageScale .xhs-list-line .xhs-list-body');
       const frame = body.closest('[contenteditable="true"]');
@@ -1003,7 +996,7 @@ async function main() {
     });
     assert.strictEqual(beforeInputListState.allowed, false, 'list beforeinput should be handled by the Studio command chain');
     assert.ok(beforeInputListState.plainText.some((text) => text.includes(beforeInputListState.sample.slice(0, 4))), 'beforeinput list backspace should unlist into a paragraph');
-    await beforeInputPage.locator('#pageTabs button').first().click();
+    await activateStudioPage(beforeInputPage, 0);
     const coverUndoState = await beforeInputPage.evaluate(async () => {
       const title = document.querySelector('#stageScale .cover-title');
       const suffix = '封面撤回';
@@ -1020,9 +1013,63 @@ async function main() {
     assert.strictEqual(await beforeInputPage.locator('#stageScale .cover-title').innerText().then((text) => text.includes(coverUndoState.suffix)), false, 'cover text should also use Studio undo history');
     await beforeInputPage.close();
 
+    const insertImagePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await insertImagePage.addInitScript(() => localStorage.clear());
+    await insertImagePage.goto(`file://${htmlPath}`);
+    await insertImagePage.waitForTimeout(350);
+    const insertBodyPageIndex = await insertImagePage.evaluate(() => {
+      for (const [index, tab] of Array.from(document.querySelectorAll('#pageTabs button')).entries()) {
+        tab.click();
+        if (document.querySelector('#stageScale .xhs-body-frame .xhs-p:not(.xhs-manual-blank)')) return index;
+      }
+      return -1;
+    });
+    assert.ok(insertBodyPageIndex > 0, 'insert-image fixture should contain editable body prose');
+    await activateStudioPage(insertImagePage, insertBodyPageIndex);
+    const imageInsertBefore = await insertImagePage.evaluate(() => {
+      const paragraph = document.querySelector('#stageScale .xhs-body-frame .xhs-p:not(.xhs-manual-blank)');
+      const text = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT).nextNode();
+      const range = document.createRange();
+      range.setStart(text, Math.min(2, text.textContent.length));
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      paragraph.closest('[contenteditable="true"]')?.focus();
+      const state = serializeStudioState();
+      const holder = document.createElement('div');
+      holder.innerHTML = state.flowHtml || '';
+      return {
+        imageCount: holder.querySelectorAll('.xhs-image-block img').length,
+        hasFlowHtml: Boolean(state.flowHtml),
+      };
+    });
+    assert.strictEqual(imageInsertBefore.hasFlowHtml, true, 'saved Studio state should include one canonical continuous flow');
+    const [imageChooser] = await Promise.all([
+      insertImagePage.waitForEvent('filechooser'),
+      insertImagePage.click('#insertImageBtn'),
+    ]);
+    await imageChooser.setFiles(path.join(sourceDir, 'fixture.png'));
+    await insertImagePage.waitForTimeout(700);
+    const imageInsertAfter = await insertImagePage.evaluate(() => {
+      const state = serializeStudioState();
+      const holder = document.createElement('div');
+      holder.innerHTML = state.flowHtml || '';
+      return {
+        imageCount: holder.querySelectorAll('.xhs-image-block img').length,
+        pageImageCount: pages.reduce((total, savedPage) => {
+          const pageHolder = document.createElement('div');
+          pageHolder.innerHTML = savedPage.type === 'cover' ? (savedPage.tailHtml || '') : (savedPage.html || '');
+          return total + pageHolder.querySelectorAll('.xhs-image-block img').length;
+        }, 0),
+      };
+    });
+    assert.strictEqual(imageInsertAfter.imageCount, imageInsertBefore.imageCount + 1, 'toolbar image insertion should add one image to the continuous document');
+    assert.strictEqual(imageInsertAfter.pageImageCount, imageInsertAfter.imageCount, 'paginated views must derive every image from the canonical flow exactly once');
+    await insertImagePage.close();
+
     const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await page.goto(`file://${htmlPath}`);
-    await page.click('#editModeBtn');
     await page.waitForTimeout(500);
     const draftIdentity = await page.evaluate(() => ({
       key: draftStorageKey(),
@@ -1137,6 +1184,43 @@ async function main() {
     assert.strictEqual(proseVirtualClick.caretInGapCursor, true, 'clicking unused space below prose should focus a temporary gap cursor');
     assert.strictEqual(proseVirtualClick.gapCursorCount, 1, 'blank canvas needs only one selection decoration');
     assert.strictEqual(proseVirtualClick.manualBlankCount, 0, 'a gap cursor must not mutate the document into empty paragraphs');
+    await page.evaluate(() => reflow());
+    await page.waitForTimeout(120);
+    const proseGapAfterReflow = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      return {
+        caretInGapCursor: Boolean(anchor?.closest?.('.xhs-gap-cursor')),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+        manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
+      };
+    });
+    assert.strictEqual(proseGapAfterReflow.caretInGapCursor, true, 'automatic repagination must restore the temporary tail caret');
+    assert.strictEqual(proseGapAfterReflow.gapCursorCount, 1, 'repagination must not make the tail caret blink away');
+    assert.strictEqual(proseGapAfterReflow.manualBlankCount, 0, 'restoring a temporary caret must not create a document blank');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    const proseGapAfterEnter = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const anchor = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.anchorNode
+        : selection?.anchorNode?.parentElement;
+      const state = serializeStudioState();
+      const flow = document.createElement('div');
+      flow.innerHTML = state.flowHtml || '';
+      return {
+        caretInBlank: Boolean(anchor?.closest?.('.xhs-manual-blank')),
+        gapCursorCount: document.querySelectorAll('#stageScale .xhs-gap-cursor').length,
+        manualBlankCount: document.querySelectorAll('#stageScale .xhs-manual-blank').length,
+        flowBlankCount: flow.querySelectorAll('.xhs-manual-blank').length,
+      };
+    });
+    assert.strictEqual(proseGapAfterEnter.caretInBlank, true, 'Enter on a temporary tail caret should create and keep one real editable blank');
+    assert.strictEqual(proseGapAfterEnter.gapCursorCount, 0, 'the temporary cursor must be consumed after Enter');
+    assert.strictEqual(proseGapAfterEnter.manualBlankCount, 1, 'one Enter should create exactly one blank line');
+    assert.strictEqual(proseGapAfterEnter.flowBlankCount, 1, 'the new blank line must persist in the canonical flow');
 
     // A drop cursor in empty visual space is only feedback. Dropping moves the
     // block to the end-of-page document position without writing blank rows.
@@ -1525,29 +1609,28 @@ async function main() {
       second.style.top = '0';
       second.innerHTML = result[1]?.html || '';
       document.body.appendChild(second);
-      const leadingBlank = second.firstElementChild;
-      const followingNode = leadingBlank?.nextElementSibling;
-      const leadingBlankHeight = leadingBlank?.getBoundingClientRect().height ?? -1;
-      const followingOffset = followingNode ? followingNode.getBoundingClientRect().top - second.getBoundingClientRect().top : -1;
+      const firstBoundaryBlank = first.querySelector('.xhs-manual-blank');
+      const secondFirst = second.firstElementChild;
+      const secondFirstOffset = secondFirst ? secondFirst.getBoundingClientRect().top - second.getBoundingClientRect().top : -1;
       second.remove();
       return {
         pageCount: result.length,
-        firstHasBlank: Boolean(first.querySelector('.xhs-manual-blank')),
-        secondStartsWithBlank: Boolean(leadingBlank?.classList.contains('xhs-manual-blank')),
+        firstHasBlank: Boolean(firstBoundaryBlank),
+        firstBlankAtEnd: Boolean(firstBoundaryBlank?.classList.contains('xhs-page-end')),
+        secondStartsWithBlank: Boolean(secondFirst?.classList.contains('xhs-manual-blank')),
         secondText: second.textContent?.trim() || '',
-        leadingBlankHeight,
-        followingOffset,
+        secondFirstOffset,
         refillPageCountWithBlank: refillWithBlank.length,
         pageCountAfterDelete: afterDelete.length,
         firstPageTextAfterDelete: afterDelete[0]?.html || '',
       };
     });
     assert.strictEqual(emptyParagraphPaginationProbe.pageCount, 2, 'an empty paragraph near a page edge should continue in normal document flow');
-    assert.strictEqual(emptyParagraphPaginationProbe.firstHasBlank, false, 'an empty paragraph that does not fit must move forward instead of being hidden on the previous page');
-    assert.strictEqual(emptyParagraphPaginationProbe.secondStartsWithBlank, true, 'the empty paragraph must remain immediately before its following paragraph');
+    assert.strictEqual(emptyParagraphPaginationProbe.firstHasBlank, true, 'a boundary blank belongs to the preceding page position');
+    assert.strictEqual(emptyParagraphPaginationProbe.firstBlankAtEnd, true, 'the boundary blank should close the preceding page');
+    assert.strictEqual(emptyParagraphPaginationProbe.secondStartsWithBlank, false, 'the next visible page must start with real content, not a hidden blank');
     assert.strictEqual(emptyParagraphPaginationProbe.secondText, '空行后的正文');
-    assert.ok(emptyParagraphPaginationProbe.leadingBlankHeight <= 0.1, 'a preserved blank at the start of a page must not create a visible empty first line');
-    assert.ok(emptyParagraphPaginationProbe.followingOffset <= 0.1, 'text after a boundary blank should start at the first visible line');
+    assert.ok(emptyParagraphPaginationProbe.secondFirstOffset <= 0.1, 'text after a boundary blank should start at the first visible line');
     assert.strictEqual(emptyParagraphPaginationProbe.refillPageCountWithBlank, 2, 'an intentional blank may push the following paragraph to a new page');
     assert.strictEqual(emptyParagraphPaginationProbe.pageCountAfterDelete, 1, 'deleting the boundary blank should let the following paragraph flow back to the previous page');
     assert.match(emptyParagraphPaginationProbe.firstPageTextAfterDelete, /空行后的正文/);
@@ -1625,7 +1708,7 @@ async function main() {
       text: '甲乙',
     }, 'Shift+Enter semantics should keep a soft line break inside the same paragraph block');
 
-    await page.locator('#pageTabs button').nth(1).click();
+    await activateStudioPage(page, 1);
     await page.waitForTimeout(100);
     const plainParagraphBlankDeleteProbe = await page.evaluate(() => {
       const frame = document.querySelector('#stageScale .xhs-body-frame');
@@ -1656,7 +1739,7 @@ async function main() {
       const count = await page.locator("#pageTabs button").count();
       const order = [];
       for (let index = 1; index < count; index += 1) {
-        await page.locator("#pageTabs button").nth(index).click();
+        await activateStudioPage(page, index);
         await page.waitForTimeout(50);
         const blocks = await page.locator("#stageScale .xhs-body-frame > :not(.xhs-caret-anchor)").evaluateAll((nodes) => nodes.flatMap((node) => {
           if (node.classList.contains("xhs-table-block")) {
@@ -1678,7 +1761,7 @@ async function main() {
     }
 
     const flowOrderBeforeCoverToggle = await collectFlowOrder();
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     assert.strictEqual(await page.locator("#coverThemeTools").isVisible(), true);
     await page.click("#coverImageOffBtn");
     await page.waitForTimeout(500);
@@ -1705,7 +1788,7 @@ async function main() {
     // Regression: deleting a leading manual-blank line inside the cover's
     // tail frame (shown when the cover image is off) must actually remove
     // it instead of leaving behind a phantom empty caret-anchor paragraph.
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     await page.click("#coverImageOffBtn");
     await page.waitForTimeout(500);
     const tailFrameHeadingCount = await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").count();
@@ -1740,9 +1823,9 @@ async function main() {
     assert.strictEqual(tailFrameBlankState.caretAnchorCount, 0);
     assert.strictEqual(tailFrameBlankState.firstChildIsHeading, tailFrameBaseline.firstChildIsHeading);
     // Persisted state (survives switching pages away and back) must stay clean too.
-    await page.locator("#pageTabs button").nth(1).click();
+    await activateStudioPage(page, 1);
     await page.waitForTimeout(100);
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     await page.waitForTimeout(100);
     assert.strictEqual(await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => (
       frame.querySelectorAll(".xhs-caret-anchor").length
@@ -1755,7 +1838,7 @@ async function main() {
 
     // Regression: deleting a leading manual-blank on body page 2 must not leave a phantom blank below.
     if (await page.locator("#pageTabs button").count() > 2) {
-      await page.locator("#pageTabs button").nth(2).click();
+      await activateStudioPage(page, 2);
       await page.waitForTimeout(100);
       const bodyPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
       const bodyPageBaseline = await bodyPageFrame.evaluate((frame) => ({
@@ -1799,7 +1882,7 @@ async function main() {
     }
 
     // Regression: deleting a mid-page manual-blank must not resurrect phantom blanks after reflow.
-    await page.locator("#pageTabs button").nth(1).click();
+    await activateStudioPage(page, 1);
     await page.waitForTimeout(100);
     const midPageFrame = page.locator("#stageScale .xhs-body-card .xhs-body-frame").first();
     const midPageBaseline = await midPageFrame.evaluate((frame) => ({
@@ -1847,7 +1930,7 @@ async function main() {
     let multiCalloutPageIndex = -1;
     let headingPageIndex = -1;
     for (let index = 0; index < pageCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(80);
       const pageContent = await page.evaluate(() => ({
         quotes: Array.from(document.querySelectorAll("#stageScale .xhs-quote")).map((node) => node.textContent.trim()),
@@ -1889,8 +1972,7 @@ async function main() {
       return -1;
     });
     assert.ok(crossDragImagePageIndex > 0, 'expected an image on a body page for cross-page drag');
-    await page.locator('#pageTabs button').nth(crossDragImagePageIndex).click({ force: true });
-    await page.locator('#overviewModeBtn').click();
+    await activateStudioPage(page, crossDragImagePageIndex);
     await page.waitForTimeout(160);
     const crossPageTargetIndex = await page.evaluate((sourceIndex) => {
       const target = Array.from(document.querySelectorAll('.overview-item')).find((item) => {
@@ -1987,7 +2069,6 @@ async function main() {
       return Array.from(holder.querySelectorAll('.xhs-p, .xhs-rich')).some((node) => (node.textContent || '').trim() === text);
     }, targetParagraphText);
     assert.strictEqual(paragraphRestoredAfterDragUndo, true, 'undo after a prose drop should restore the original unsplit paragraph');
-    await page.locator('#editModeBtn').click();
     await page.waitForTimeout(100);
 
     // Feishu treats headings, cards, quotes, code blocks and lists as movable
@@ -2006,9 +2087,8 @@ async function main() {
       ? structuralDragSourceIndex + 1
       : structuralDragSourceIndex - 1;
     assert.ok(structuralDragTargetIndex > 0 && structuralDragTargetIndex !== structuralDragSourceIndex, 'expected another body page for structural drag target');
-    await page.locator('#pageTabs button').nth(structuralDragSourceIndex).click({ force: true });
+    await activateStudioPage(page, structuralDragSourceIndex);
     const structuralFlowBefore = await page.evaluate(() => Array.from(studioFlowIntegritySignature(pages)).sort().join(''));
-    await page.locator('#overviewModeBtn').click();
     await page.waitForTimeout(160);
     const sourceCallout = page.locator('#stageScale .xhs-callout').first();
     const structuralTargetCard = page.locator(`.overview-item[data-index="${structuralDragTargetIndex}"] .overview-card-frame`);
@@ -2037,7 +2117,6 @@ async function main() {
     assert.strictEqual(structuralDragState.integrity, structuralFlowBefore, 'cross-page structural drag must preserve all text, images, blanks and page breaks');
     assert.strictEqual(structuralDragState.targetOutlineCount, 0, 'structural cross-page drop highlight should clear after drop');
     assert.strictEqual(structuralDragState.draggingClassCount, 0, 'structural cross-page drag must not persist its temporary dragging style');
-    await page.locator('#editModeBtn').click();
     await page.waitForTimeout(100);
 
     // Regression: backspace at the start of a list line should unlist it into plain body text.
@@ -2050,15 +2129,25 @@ async function main() {
       return -1;
     });
     assert.ok(listPageIndex >= 0, "expected at least one list line in studio output");
-    await page.locator("#pageTabs button").nth(listPageIndex).click();
+    await activateStudioPage(page, listPageIndex);
     await page.waitForTimeout(100);
     const firstListLine = page.locator('#stageScale .xhs-list-line').first();
+    await firstListLine.scrollIntoViewIfNeeded();
     const firstListBox = await firstListLine.boundingBox();
     assert.ok(firstListBox, 'expected a visible list item for Alt-drag scope regression');
     await page.mouse.move(firstListBox.x + firstListBox.width / 2, firstListBox.y + firstListBox.height / 2);
     await page.keyboard.down('Alt');
     await page.mouse.down();
-    assert.strictEqual(await page.locator('#stageScale .xhs-list-line.reorder-dragging').count(), 1, 'Alt-drag must select only the current list item');
+    const listDragStartState = await page.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      return {
+        count: document.querySelectorAll('#stageScale .xhs-list-line.reorder-dragging').length,
+        hit: hit ? [hit.tagName, hit.id, hit.className].join('.') : '',
+        dragging: Boolean(blockReorderDrag),
+        activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
+      };
+    }, { x: firstListBox.x + firstListBox.width / 2, y: firstListBox.y + firstListBox.height / 2 });
+    assert.strictEqual(listDragStartState.count, 1, `Alt-drag must select only the current list item: ${JSON.stringify(listDragStartState)}`);
     await page.mouse.up();
     await page.keyboard.up('Alt');
     await page.waitForTimeout(100);
@@ -2089,7 +2178,11 @@ async function main() {
     const samePageSourceBox = await samePageSource.boundingBox();
     const samePageAnchorBox = await samePageAnchor.boundingBox();
     assert.ok(samePageSourceBox && samePageAnchorBox, 'expected visible source and anchor list items');
-    await samePageSource.hover();
+    await page.mouse.move(2, 2);
+    await page.waitForTimeout(140);
+    await samePageSource.evaluate((node) => {
+      node.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
     await page.waitForTimeout(80);
     const samePageHandleBox = await page.locator('#blockHalo .xhs-block-drag-handle').boundingBox();
     assert.ok(samePageHandleBox, 'expected the compact drag handle for the source list item');
@@ -2109,6 +2202,8 @@ async function main() {
       indicatorHidden: document.querySelector('.xhs-drop-indicator')?.hidden,
       overviewLineVisible: Boolean(document.querySelector('.xhs-overview-drop-indicator:not([hidden])')),
       viewMode,
+      insertBeforeId: blockReorderDrag?.insertBefore?.dataset?.xhsBlockId || '',
+      sourceId: blockReorderDrag?.node?.dataset?.xhsBlockId || '',
     }));
     assert.strictEqual(samePageFeedback.lineVisible, true, 'same-page drag should expose its exact insertion line: ' + JSON.stringify(samePageFeedback));
     assert.strictEqual(samePageFeedback.previewExists, false, 'same-page drag must not create a transparent destination clone');
@@ -2133,7 +2228,7 @@ async function main() {
       };
     }, samePageMove);
     assert.ok(samePageCommitted.sourceIndex >= 0 && samePageCommitted.anchorIndex >= 0, 'moved list item and anchor must survive repagination');
-    assert.ok(samePageCommitted.sourceIndex < samePageCommitted.anchorIndex, 'same-page drop must commit the new list-item order');
+    assert.ok(samePageCommitted.sourceIndex < samePageCommitted.anchorIndex, `same-page drop must commit the new list-item order: ${JSON.stringify({ samePageFeedback, samePageCommitted })}`);
     assert.strictEqual(samePageCommitted.selectedListCount, 1, 'same-page moved list item should remain selected');
     assert.strictEqual(samePageCommitted.lineVisible, false, 'same-page insertion line should clear after drop');
     await page.keyboard.press('Control+z');
@@ -2147,7 +2242,7 @@ async function main() {
       return -1;
     });
     assert.ok(restoredListPageIndex >= 0, 'undo after drag should restore the original list for later editing regressions');
-    await page.locator('#pageTabs button').nth(restoredListPageIndex).click();
+    await activateStudioPage(page, restoredListPageIndex);
     await page.waitForTimeout(100);
     // Feishu interaction: unlist the second item, then Backspace again. The
     // plain paragraph must merge into the first item's body, not become a new
@@ -2261,7 +2356,7 @@ async function main() {
       return -1;
     });
     assert.ok(remainingListPageIndex >= 0, "expected remaining list item after unlisting the first item");
-    await page.locator("#pageTabs button").nth(remainingListPageIndex).click();
+    await activateStudioPage(page, remainingListPageIndex);
     await page.waitForTimeout(100);
     const listBodyWithContent = page.locator("#stageScale .xhs-list-line .xhs-list-body").filter({ hasText: "序列续写测试" });
     await listBodyWithContent.first().evaluate((body) => {
@@ -2309,7 +2404,7 @@ async function main() {
       return -1;
     });
     assert.ok(cardPageForMerge >= 0, "expected a card for paragraph continuation regression");
-    await page.locator('#pageTabs button').nth(cardPageForMerge).click();
+    await activateStudioPage(page, cardPageForMerge);
     await page.waitForTimeout(100);
     const cardMergeSetup = await page.evaluate(() => {
       const card = document.querySelector('#stageScale .xhs-callout');
@@ -2354,7 +2449,7 @@ async function main() {
     let enterTestPageIndex = -1;
     const enterPageTabCount = await page.locator("#pageTabs button").count();
     for (let index = 0; index < enterPageTabCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(50);
       if (await page.locator("#stageScale .xhs-p").filter({ hasText: "这件事花的时间" }).count() > 0) {
         enterTestPageIndex = index;
@@ -2412,7 +2507,7 @@ async function main() {
     assert.strictEqual(content.tables.reduce((total, table) => total + table.rows, 0), 21);
     assert.ok(content.tables.some((table) => table.text.includes("无封面图")));
     assert.ok(headingPageIndex >= 0);
-    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await activateStudioPage(page, headingPageIndex);
     await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
       for (let index = 0; index < 3; index += 1) {
         const blank = document.createElement("p");
@@ -2435,7 +2530,7 @@ async function main() {
       await page.waitForTimeout(120);
     }
     await page.waitForTimeout(800);
-    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await activateStudioPage(page, headingPageIndex);
     await page.waitForTimeout(100);
     const leadingBlankState = await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => ({
       hasManualBlankBefore: heading.previousElementSibling?.classList.contains("xhs-manual-blank") || false,
@@ -2570,7 +2665,7 @@ async function main() {
 
     assert.ok(multiCalloutPageIndex >= 0 || pageCount > 0);
     for (let index = 0; index < pageCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(80);
       const calloutCount = await page.locator("#stageScale .xhs-callout").count();
       if (calloutCount >= 2) {
@@ -2579,7 +2674,7 @@ async function main() {
       }
     }
     assert.ok(multiCalloutPageIndex >= 0, "expected a page with at least two callouts after reflow");
-    await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
+    await activateStudioPage(page, multiCalloutPageIndex);
     const styleTestCallouts = page.locator("#stageScale .xhs-callout");
     const styleTestCalloutCount = await styleTestCallouts.count();
     assert.ok(styleTestCalloutCount >= 2);
@@ -2587,15 +2682,15 @@ async function main() {
     await page.click('[data-card-style="frame"]');
     assert.strictEqual(await styleTestCallouts.nth(0).evaluate((node) => node.classList.contains("xhs-card-frame")), true);
     assert.strictEqual(await styleTestCallouts.nth(1).evaluate((node) => node.classList.contains("xhs-card-frame")), false);
-    await page.locator("#pageTabs button").nth(0).click();
-    await page.locator("#pageTabs button").nth(multiCalloutPageIndex).click();
+    await activateStudioPage(page, 0);
+    await activateStudioPage(page, multiCalloutPageIndex);
     const restoredStyleCallouts = page.locator("#stageScale .xhs-callout");
     assert.strictEqual(await restoredStyleCallouts.nth(0).evaluate((node) => node.classList.contains("xhs-card-frame")), true);
     assert.strictEqual(await restoredStyleCallouts.nth(1).evaluate((node) => node.classList.contains("xhs-card-frame")), false);
 
     assert.ok(calloutPageIndex >= 0 || pageCount > 0);
     for (let index = 0; index < pageCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       await page.waitForTimeout(80);
       const hasTargetCallout = await page.locator("#stageScale .xhs-callout-body").filter({ hasText: "这是明确的卡片" }).count();
       if (hasTargetCallout > 0) {
@@ -2604,7 +2699,7 @@ async function main() {
       }
     }
     assert.ok(calloutPageIndex >= 0, "expected a page with the target callout after reflow");
-    await page.locator("#pageTabs button").nth(calloutPageIndex).click();
+    await activateStudioPage(page, calloutPageIndex);
     const calloutCountBeforeToggle = await page.locator("#stageScale .xhs-callout").count();
     await page.locator("#stageScale .xhs-callout-body").filter({ hasText: "这是明确的卡片" }).first().click();
     await page.click("#keypointBtn");
@@ -2626,7 +2721,16 @@ async function main() {
     const caretText = "连续输入".repeat(180) + "光标终点";
     await page.evaluate((text) => document.execCommand("insertText", false, text), caretText);
     await page.waitForTimeout(2200);
-    assert.ok(await page.locator("#stageScale .xhs-p").filter({ hasText: "光标终点" }).count() >= 1, "typed paragraph should survive reflow");
+    const typedParagraphCount = await page.locator("#stageScale .xhs-p").filter({ hasText: "光标终点" }).count();
+    const typedParagraphDebug = await page.evaluate(() => ({
+      pageIndex,
+      matchingPages: pages.map((savedPage, index) => ({
+        index,
+        hasText: String(savedPage.html || savedPage.tailHtml || '').includes('光标终点'),
+      })).filter((item) => item.hasText),
+      notice: document.querySelector('#runtimeNotice')?.textContent || '',
+    }));
+    assert.ok(typedParagraphCount >= 1, `typed paragraph should survive reflow: ${JSON.stringify(typedParagraphDebug)}`);
     assert.strictEqual(await page.locator('[data-xhs-caret-marker]').count(), 0);
     const restoredCaret = await page.evaluate(() => {
       const selection = window.getSelection();
@@ -2654,7 +2758,7 @@ async function main() {
     // Image double-click / Backspace deletion also live here, after page-index
     // dependent assertions, because these mutations can reflow content.
     assert.ok(headingPageIndex >= 0);
-    await page.locator("#pageTabs button").nth(headingPageIndex).click();
+    await activateStudioPage(page, headingPageIndex);
     const level1Heading = page.locator('#stageScale .xhs-heading').filter({ hasText: "结构识别" }).first();
     const level1Gap = await level1Heading.evaluate((heading) => {
       const number = heading.querySelector('.xhs-heading-number')?.getBoundingClientRect();
@@ -2693,7 +2797,16 @@ async function main() {
     });
     await page.waitForTimeout(200);
     const level2Count = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).count();
-    assert.strictEqual(level2Count, 1, "二级标题 button should create a level-2 heading");
+    const level2Debug = await page.evaluate(() => ({
+      pageIndex,
+      stageHasText: document.querySelector('#stageScale')?.innerText.includes('临时二级标题') || false,
+      matchingPages: pages.map((savedPage, index) => ({
+        index,
+        hasText: String(savedPage.html || savedPage.tailHtml || '').includes('临时二级标题'),
+        hasLevel2: String(savedPage.html || savedPage.tailHtml || '').includes('data-level="2"'),
+      })).filter((item) => item.hasText),
+    }));
+    assert.strictEqual(level2Count, 1, `二级标题 button should create a level-2 heading: ${JSON.stringify(level2Debug)}`);
     const level2Style = await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "临时二级标题" }).first().evaluate((heading) => {
       const title = heading.querySelector(".xhs-heading-title");
       const styles = getComputedStyle(title);
@@ -2784,7 +2897,7 @@ async function main() {
     const pageTabCount = await page.locator("#pageTabs button").count();
     let imagePageIndex = -1;
     for (let index = 0; index < pageTabCount; index += 1) {
-      await page.locator("#pageTabs button").nth(index).click();
+      await activateStudioPage(page, index);
       if (await page.locator("#stageScale .xhs-image-frame").count()) {
         imagePageIndex = index;
         break;
@@ -2801,7 +2914,7 @@ async function main() {
     await page.waitForTimeout(300);
     assert.strictEqual(await page.locator("#stageScale .xhs-image-frame").count(), 0, "Backspace should delete the selected image block");
 
-    await page.locator("#pageTabs button").first().click();
+    await activateStudioPage(page, 0);
     const coverSubtitle = page.locator("#stageScale .cover-subtitle");
     await coverSubtitle.fill("");
     await coverSubtitle.click();
@@ -2898,15 +3011,13 @@ async function main() {
       sessionStorage.setItem("rabbitq-flow-test-initialized", "1");
     });
     await flowPage.goto(`file://${flowHtmlPath}`);
-    await flowPage.click('#editModeBtn');
     await flowPage.waitForTimeout(500);
 
     async function collectAllBodyTextFrom(targetPage) {
-      await targetPage.locator('#editModeBtn').click();
       const count = await targetPage.locator("#pageTabs button").count();
       const chunks = [];
       for (let index = 0; index < count; index += 1) {
-        await targetPage.locator("#pageTabs button").nth(index).click();
+        await activateStudioPage(targetPage, index);
         await targetPage.waitForTimeout(40);
         const bodyLocator = targetPage.locator("#stageScale .xhs-body-frame");
         const coverTailLocator = targetPage.locator("#stageScale .xhs-cover-tail-frame");
@@ -2932,7 +3043,7 @@ async function main() {
       return -1;
     });
     assert.ok(flowSentencePageIndex >= 0, "expected the long flow paragraph for punctuation Enter regression");
-    await flowPage.locator("#pageTabs button").nth(flowSentencePageIndex).click();
+    await activateStudioPage(flowPage, flowSentencePageIndex);
     await flowPage.waitForTimeout(100);
     const flowSentenceParagraph = flowPage.locator("#stageScale .xhs-p").filter({ hasText: "此工具为本兔自用工具" }).first();
     await flowSentenceParagraph.evaluate((paragraph) => {
@@ -2962,7 +3073,7 @@ async function main() {
     const flowAfterExplicitReflow = (await collectAllBodyTextFrom(flowPage)).replace(/\s+/g, "");
     assert.ok(flowAfterExplicitReflow.includes(flowSentence.replace(/\s+/g, "")), "paragraph tail after 、 must survive explicit reflow");
 
-    await flowPage.locator("#pageTabs button").first().click();
+    await activateStudioPage(flowPage, 0);
     await flowPage.waitForTimeout(120);
     await flowPage.click("#coverImageOffBtn");
     await flowPage.waitForTimeout(300);
@@ -3018,7 +3129,6 @@ async function main() {
     const embeddedPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
     await embeddedPage.addInitScript(() => localStorage.clear());
     await embeddedPage.goto(`file://${embeddedHtmlPath}`);
-    await embeddedPage.click('#editModeBtn');
     await embeddedPage.waitForTimeout(600);
     const healedEmbeddedText = await collectAllBodyTextFrom(embeddedPage);
     assert.match(healedEmbeddedText, /持续debug/, "corrupted embeddedState should fall back to the source template");

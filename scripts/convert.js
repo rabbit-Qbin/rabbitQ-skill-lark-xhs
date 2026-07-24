@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.8.81";
+const VERSION = "0.9.1";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -929,7 +929,6 @@ function studioHtmlV2(payload, libs) {
     .page-tabs button { min-width: 42px; padding: 8px 10px; }
     .stage-wrap { width: min(70vw, 620px); aspect-ratio: ${width} / ${height}; position: relative; margin: 0 auto 24px; }
     .stage-scale { position: absolute; left: 0; top: 0; transform-origin: top left; width: ${width}px; height: ${height}px; }
-    .view-switch { display: flex; justify-content: center; gap: 8px; margin: 0 0 14px; }
     .overview-rail { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 32px) / 3); gap: 16px; width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-gutter: stable; padding: 2px 4px 18px; margin: 0 auto 20px; }
     .overview-item { min-width: 0; scroll-snap-align: start; cursor: pointer; }
     .overview-page-label { margin: 0 0 7px; color: #667085; font-family: var(--xhs-font); font-size: 13px; font-weight: 700; text-align: center; }
@@ -964,7 +963,8 @@ function studioHtmlV2(payload, libs) {
     .xhs-p { margin: 0 0 var(--body-paragraph-gap); max-width: var(--body-text-width); color: #111; font-size: var(--body-font) !important; line-height: var(--body-line); font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0 !important; overflow: hidden; }
     .xhs-manual-blank { min-height: calc(var(--body-font) * var(--body-line)); }
     .xhs-body-frame > .xhs-page-start.xhs-manual-blank,
-    .xhs-body-frame > .xhs-page-end.xhs-manual-blank { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    .xhs-body-frame > .xhs-page-end.xhs-manual-blank:not(.xhs-boundary-blank) { min-height: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    .xhs-body-frame > .xhs-page-end.xhs-boundary-blank { min-height: var(--xhs-boundary-blank-height, 1px) !important; height: var(--xhs-boundary-blank-height, 1px) !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
     .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank { min-height: var(--body-line-px) !important; height: auto !important; margin: 0 0 var(--body-paragraph-gap) !important; padding: 0 !important; overflow: visible !important; }
     .xhs-body-frame.xhs-empty-flow-frame > .xhs-manual-blank:last-child { margin-bottom: 0 !important; }
     .xhs-caret-marker { display: inline-block !important; width: 0 !important; height: 0 !important; min-height: 0 !important; overflow: hidden !important; padding: 0 !important; margin: 0 !important; line-height: 0 !important; }
@@ -1090,16 +1090,13 @@ function studioHtmlV2(payload, libs) {
         <button id="codeBtn" title="macOS 代码块" aria-label="代码块">&lt;/&gt;</button>
         <button id="listUnorderedBtn" class="icon-button" title="无序列表" aria-label="无序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>
         <button id="listOrderedBtn" class="icon-button" title="有序列表" aria-label="有序列表"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg></button>
+        <button id="insertImageBtn" class="icon-button" title="在光标位置插入图片" aria-label="插入图片"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 4.5-4.5 3.5 3 2.5-2.5L20 18"/></svg></button>
         <button id="saveHtmlBtn">保存编辑 HTML</button>
         <button id="exportBtn" class="primary">批量导出 PNG ZIP</button>
         <button id="resetBtn" title="清除当前编辑，恢复生成时的初始内容">一键复原</button>
       </div>
-      <div class="view-switch" role="group" aria-label="预览模式">
-        <button id="overviewModeBtn" class="active">总览编辑</button>
-        <button id="editModeBtn">单页编辑</button>
-      </div>
       <div id="overviewRail" class="overview-rail"></div>
-      <div id="pageTabs" class="page-tabs"></div>
+      <div id="pageTabs" class="page-tabs" hidden></div>
       <div id="stageWrap" class="stage-wrap" hidden><div id="stageScale" class="stage-scale"></div></div>
     </main>
     <aside class="panel">
@@ -1241,8 +1238,9 @@ function studioHtmlV2(payload, libs) {
     });
     const embeddedState = /* XHS_EMBEDDED_STATE */ null;
     let pages = [];
+    let continuousFlowHtml = '';
     let pageIndex = 0;
-    let viewMode = 'overview';
+    const viewMode = 'overview';
     let selectedFrame = null;
     let selectedFlowBlock = null;
     let coverImageEnabled = true;
@@ -1293,14 +1291,15 @@ function studioHtmlV2(payload, libs) {
     const stageWrap = document.getElementById('stageWrap');
     const stageScale = document.getElementById('stageScale');
     const overviewRail = document.getElementById('overviewRail');
-    const overviewModeBtn = document.getElementById('overviewModeBtn');
-    const editModeBtn = document.getElementById('editModeBtn');
     const pageTabs = document.getElementById('pageTabs');
     const pageInfo = document.getElementById('pageInfo');
     const runtimeNotice = document.getElementById('runtimeNotice');
     const imageList = document.getElementById('imageList');
     const imageTools = document.getElementById('imageTools');
     const imageInput = document.getElementById('imageInput');
+    let imageInputAction = 'replace';
+    let pendingImageInsertRange = null;
+    let pendingImageInsertEditable = null;
     const exportRoot = document.getElementById('exportRoot');
     const fitContainBtn = document.getElementById('fitContainBtn');
     const fitCoverBtn = document.getElementById('fitCoverBtn');
@@ -1313,6 +1312,7 @@ function studioHtmlV2(payload, libs) {
     const codeBtn = document.getElementById('codeBtn');
     const listUnorderedBtn = document.getElementById('listUnorderedBtn');
     const listOrderedBtn = document.getElementById('listOrderedBtn');
+    const insertImageBtn = document.getElementById('insertImageBtn');
     const coverTools = document.getElementById('coverTools');
     const coverThemeTools = document.getElementById('coverThemeTools');
     const cardStyleTools = document.getElementById('cardStyleTools');
@@ -2292,6 +2292,7 @@ function studioHtmlV2(payload, libs) {
         normalizedBlocks = Array.from(holder.children);
       }
       const baseBlocks = normalizedBlocks.length ? mergeSplitBlocks(normalizedBlocks) : extractBlocksFromTemplate();
+      continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       pages = coverImageEnabled
         ? [cover].concat(paginateBlocks(flowBlocks))
@@ -2424,6 +2425,22 @@ function studioHtmlV2(payload, libs) {
         if (!block.dataset?.split && !block.dataset?.flowId) return block;
         return stripSplitState(block);
       });
+    }
+    function serializeContinuousFlowBlocks(blocks) {
+      const holder = document.createElement('div');
+      (blocks || []).forEach((block) => holder.appendChild(block.cloneNode(true)));
+      stripReflowArtifacts(holder);
+      holder.querySelectorAll('.reorder-dragging, .selected-flow-block').forEach((node) => {
+        node.classList.remove('reorder-dragging', 'selected-flow-block');
+      });
+      return holder.innerHTML;
+    }
+    function continuousFlowBlocksFromHtml(html = continuousFlowHtml) {
+      const holder = document.createElement('div');
+      holder.innerHTML = String(html || '');
+      stripReflowArtifacts(holder);
+      const blocks = sanitizeMergedFlowBlocks(Array.from(holder.children));
+      return blocks.length ? mergeSplitBlocks(blocks) : [];
     }
     function isStructuredFlowBlock(node) {
       return node?.nodeType === Node.ELEMENT_NODE && (
@@ -2869,6 +2886,18 @@ function studioHtmlV2(payload, libs) {
             pushPage();
             remaining = config.pageLimit;
           }
+          if (current.length && fitHeight > remaining && block.classList.contains('xhs-manual-blank')) {
+            // A blank typed at the physical page edge belongs to the document
+            // boundary before the following content. Keep it at the end of the
+            // current page so the next visible character starts on the first
+            // line of the next page; never carry a hidden blank into that page.
+            block.classList.add('xhs-boundary-blank');
+            block.style.setProperty('--xhs-boundary-blank-height', Math.max(1, remaining) + 'px');
+            current.push(block);
+            pushPage();
+            pending = null;
+            continue;
+          }
           if (current.length && fitHeight > remaining) {
             if (isSplittableTextBlock(block)) {
               const split = splitBlockToFit(block, remaining);
@@ -2982,6 +3011,7 @@ function studioHtmlV2(payload, libs) {
     }
     function paginate() {
       const blocks = pairAdjacentPortraitImages(extractBlocksFromTemplate());
+      continuousFlowHtml = serializeContinuousFlowBlocks(blocks);
       const cover = { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       pages = [cover].concat(
         coverImageEnabled ? paginateBlocks(blocks) : paginateBlocksWithCoverTail(blocks, cover)
@@ -3024,12 +3054,11 @@ function studioHtmlV2(payload, libs) {
       ).join('');
       overviewRail.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
       overviewRail.querySelectorAll('.xhs-caret-marker, .xhs-caret-anchor, .xhs-block-halo').forEach((node) => node.remove());
-      const openPage = (item, edit = false) => {
+      const openPage = (item) => {
         saveCurrentPage({ skipNormalize: true });
         persistDraftCheckpoint();
         pageIndex = Number(item.dataset.index);
         selectedFrame = null;
-        if (edit) viewMode = 'edit';
         renderAll();
       };
       const targetsOverviewEditor = (event) => {
@@ -3041,21 +3070,16 @@ function studioHtmlV2(payload, libs) {
       };
       let overviewSelectTimer = null;
       overviewRail.querySelectorAll('.overview-item').forEach((item) => {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (event) => {
+          if (targetsOverviewEditor(event)) return;
           if (Number(item.dataset.index) === pageIndex) return;
           window.clearTimeout(overviewSelectTimer);
-          overviewSelectTimer = window.setTimeout(() => openPage(item, false), 220);
-        });
-        item.addEventListener('dblclick', (event) => {
-          if (targetsOverviewEditor(event)) return;
-          window.clearTimeout(overviewSelectTimer);
-          event.preventDefault();
-          openPage(item, true);
+          overviewSelectTimer = window.setTimeout(() => openPage(item), 0);
         });
         item.addEventListener('keydown', (event) => {
           if (event.key !== 'Enter' || targetsOverviewEditor(event)) return;
           event.preventDefault();
-          openPage(item, true);
+          openPage(item);
         });
       });
       requestAnimationFrame(() => {
@@ -3064,27 +3088,12 @@ function studioHtmlV2(payload, libs) {
       });
     }
     function syncViewMode() {
-      const overview = viewMode === 'overview';
-      overviewRail.hidden = !overview;
-      stageWrap.hidden = overview;
-      pageTabs.hidden = overview;
-      overviewModeBtn.classList.toggle('active', overview);
-      editModeBtn.classList.toggle('active', !overview);
-      if (overview) {
-        const activeFrame = overviewRail.querySelector('.overview-item.active .overview-card-frame');
-        if (activeFrame && stageScale.parentElement !== activeFrame) activeFrame.appendChild(stageScale);
-        requestAnimationFrame(fitOverviewCards);
-      } else {
-        if (stageScale.parentElement !== stageWrap) stageWrap.appendChild(stageScale);
-        requestAnimationFrame(fitStage);
-      }
-    }
-    function setViewMode(mode) {
-      const next = mode === 'edit' ? 'edit' : 'overview';
-      if (viewMode === next) return;
-      saveCurrentPage({ skipNormalize: true });
-      viewMode = next;
-      renderAll();
+      overviewRail.hidden = false;
+      stageWrap.hidden = true;
+      pageTabs.hidden = true;
+      const activeFrame = overviewRail.querySelector('.overview-item.active .overview-card-frame');
+      if (activeFrame && stageScale.parentElement !== activeFrame) activeFrame.appendChild(stageScale);
+      requestAnimationFrame(fitOverviewCards);
     }
     function renderTabs() {
       pageTabs.innerHTML = pages.map((_, i) => '<button class="' + (i === pageIndex ? 'active' : '') + '" data-index="' + i + '">' + String(i + 1).padStart(2, '0') + '</button>').join('');
@@ -3438,7 +3447,11 @@ function studioHtmlV2(payload, libs) {
       }
       window.clearTimeout(reflowTimer);
       if (force) reflowForcePending = true;
-      const delay = force ? 520 : 1400;
+      // Structural input must follow the caret immediately. Delaying Enter or
+      // Backspace until the user pauses lets several real paragraphs collect
+      // inside one clipped page, then makes them appear on the next page as a
+      // batch. Text typing can still use a short overflow debounce.
+      const delay = force ? 0 : 240;
       reflowTimer = window.setTimeout(() => {
         if (isComposingText) {
           compositionNeedsReflow = compositionNeedsReflow || force || reflowForcePending;
@@ -3480,6 +3493,7 @@ function studioHtmlV2(payload, libs) {
       const marker = document.createElement('span');
       marker.className = 'xhs-caret-marker';
       marker.dataset.xhsCaretMarker = id;
+      if (element?.closest?.('.xhs-gap-cursor')) marker.dataset.xhsGapCursor = '1';
       marker.textContent = '\u200B';
       range.insertNode(marker);
       range.setStartAfter(marker);
@@ -3497,6 +3511,7 @@ function studioHtmlV2(payload, libs) {
       if (!id) return false;
       const marker = stageScale.querySelector('[data-xhs-caret-marker="' + id + '"]');
       if (!marker) return false;
+      const restoreGapCursor = marker.dataset?.xhsGapCursor === '1';
       const parent = marker.parentNode;
       const next = marker.nextSibling;
       const previous = marker.previousSibling;
@@ -3506,6 +3521,18 @@ function studioHtmlV2(payload, libs) {
       const selection = window.getSelection();
       if (!selection || !parent) return false;
       const range = document.createRange();
+      if (restoreGapCursor) {
+        parent.classList?.add('xhs-caret-anchor', 'xhs-gap-cursor');
+        parent.dataset.xhsGapCursor = '1';
+        if (!parent.querySelector?.('br')) parent.appendChild(document.createElement('br'));
+        editable?.focus?.({ preventScroll: true });
+        range.selectNodeContents(parent);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        saveCurrentPage({ skipNormalize: true });
+        return true;
+      }
       const isManualBlank = parent.classList?.contains('xhs-manual-blank') || parent.dataset?.xhsManualBlank === '1';
       const emptyMarkerParagraph = parent.matches?.('.xhs-p, .xhs-rich') && !isManualBlank && !cleanText(parent.textContent);
       const previousBlock = emptyMarkerParagraph ? parent.previousElementSibling : null;
@@ -3807,9 +3834,21 @@ function studioHtmlV2(payload, libs) {
     function performParagraphEnter(frame, range) {
       const block = directFlowChild(frame, range.startContainer, range.startOffset);
       const isManualBlank = Boolean(block?.classList?.contains('xhs-manual-blank') || block?.dataset?.xhsManualBlank === '1');
-      if (!isManualBlank && !isEditableParagraphBlock(block)) return false;
+      const isGapCursor = Boolean(block?.classList?.contains('xhs-gap-cursor') || block?.dataset?.xhsGapCursor === '1');
+      if (!isGapCursor && !isManualBlank && !isEditableParagraphBlock(block)) return false;
       saveCurrentPage({ skipNormalize: true });
       persistDraftCheckpoint();
+      if (isGapCursor) {
+        markParagraphEnterHandled();
+        block.classList.remove('xhs-caret-anchor', 'xhs-gap-cursor');
+        block.classList.add('xhs-manual-blank');
+        delete block.dataset.xhsGapCursor;
+        block.dataset.xhsManualBlank = '1';
+        block.innerHTML = '<br>';
+        frame.focus({ preventScroll: true });
+        setCaretInside(block);
+        return true;
+      }
       if (isManualBlank) {
         markParagraphEnterHandled();
         const nextP = makeEmptyParagraph();
@@ -4079,7 +4118,9 @@ function studioHtmlV2(payload, libs) {
     }
     function repaginateContinuousHolder(holder, caretMarkerId, previousPages, previousPageIndex) {
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
-      const flowBlocks = pairAdjacentPortraitImages(Array.from(holder.children));
+      const baseBlocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(holder.children)));
+      continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
+      const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       pages = coverImageEnabled
         ? [cover].concat(paginateBlocks(flowBlocks))
         : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
@@ -4512,6 +4553,15 @@ function studioHtmlV2(payload, libs) {
           targetBlock = null;
         }, 120);
       }
+      halo.addEventListener('pointerdown', (event) => {
+        if (!event.altKey || event.target?.closest?.('.xhs-block-drag-handle') || !targetBlock) return;
+        const frame = targetBlock.closest?.('[contenteditable="true"]');
+        if (!frame) return;
+        beginFlowBlockReorder(event, targetBlock, frame, halo);
+      }, true);
+      halo.addEventListener('pointermove', continueFlowBlockReorder);
+      halo.addEventListener('pointerup', endFlowBlockReorder);
+      halo.addEventListener('pointercancel', endFlowBlockReorder);
       halo.addEventListener('mouseenter', () => clearTimeout(haloHideTimer));
       halo.addEventListener('mouseleave', hideHalo);
       dragHandle.addEventListener('pointerdown', (event) => {
@@ -5461,6 +5511,12 @@ function studioHtmlV2(payload, libs) {
       const bodyFrame = blockReorderDrag?.bodyFrame;
       const flowNode = blockReorderDrag?.node;
       if (!bodyFrame || !flowNode) return;
+      if (!blockReorderDrag.moved) {
+        reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
+        clearOverviewDropPage();
+        clearBlockDropFeedback();
+        return;
+      }
       if (!blockReorderDrag.hasDropTarget) {
         reorderGroupNodes(flowNode).forEach((node) => node.classList.remove('reorder-dragging'));
         clearOverviewDropPage();
@@ -5545,6 +5601,9 @@ function studioHtmlV2(payload, libs) {
         crossPage: null,
         hasDropTarget: false,
         textDrop: null,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
         blockId,
         imageId: isImageReorderNode(flowNode)
           ? ensureImageId(flowNode.querySelector?.('.xhs-image-block') || flowNode)
@@ -5552,12 +5611,16 @@ function studioHtmlV2(payload, libs) {
       };
       reorderGroupNodes(flowNode).forEach((node) => node.classList.add('reorder-dragging'));
       blockReorderDrag.captureTarget?.setPointerCapture?.(event.pointerId);
-      updateFlowBlockDropTarget(event.clientX, event.clientY, bodyFrame);
       return true;
     }
     function continueFlowBlockReorder(event) {
       if (!blockReorderDrag || event.pointerId !== blockReorderDrag.id) return false;
       event.preventDefault();
+      if (!blockReorderDrag.moved) {
+        const distance = Math.hypot(event.clientX - blockReorderDrag.startX, event.clientY - blockReorderDrag.startY);
+        if (distance < 4) return true;
+        blockReorderDrag.moved = true;
+      }
       updateFlowBlockDropTarget(event.clientX, event.clientY, blockReorderDrag.bodyFrame);
       return true;
     }
@@ -6429,8 +6492,8 @@ function studioHtmlV2(payload, libs) {
       if (activeFlowBlockAt(replacement)) selectFlowBlock(replacement);
       else clearSelectedFlowBlock();
       normalizeNestedFlowBlocks(stageScale);
-      saveCurrentPage();
-      scheduleOverflowReflow(true);
+      saveCurrentPage({ skipNormalize: true });
+      reflow();
       return true;
     }
     function makeHeadingBlock(level = '1') {
@@ -6463,8 +6526,8 @@ function studioHtmlV2(payload, libs) {
       ensureEditorCaretAnchors(stageScale);
       const title = heading.querySelector('.xhs-heading-title');
       if (title) setCaretInside(title);
-      saveCurrentPage();
-      scheduleOverflowReflow(true);
+      saveCurrentPage({ skipNormalize: true });
+      reflow();
     }
     function makeKeypointBlock() {
       if (tryToggleOrSwitchFlowBlock('card')) return;
@@ -6697,7 +6760,72 @@ function studioHtmlV2(payload, libs) {
         alert('请先点选封面图或正文图片。');
         return;
       }
+      imageInputAction = 'replace';
+      pendingImageInsertRange = null;
+      pendingImageInsertEditable = null;
       imageInput.click();
+    }
+    function requestImageInsert() {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) {
+        alert('请先把光标放到正文中，再插入图片。');
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const element = range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement;
+      const editable = element?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      if (!editable || !stageScale.contains(editable)) {
+        alert('请先把光标放到正文中，再插入图片。');
+        return;
+      }
+      imageInputAction = 'insert';
+      pendingImageInsertRange = range.cloneRange();
+      pendingImageInsertEditable = editable;
+      imageInput.click();
+    }
+    function insertImageBlockAtSavedRange(block) {
+      const editable = pendingImageInsertEditable;
+      const range = pendingImageInsertRange;
+      if (!editable?.isConnected || !range) return false;
+      const flowBlock = directFlowChild(editable, range.startContainer, range.startOffset);
+      if (!flowBlock) {
+        if (range.startContainer === editable) {
+          editable.insertBefore(block, editable.childNodes[range.startOffset] || null);
+        } else {
+          editable.appendChild(block);
+        }
+        return true;
+      }
+      if (isPlainSplittable(flowBlock)) {
+        const before = document.createRange();
+        before.selectNodeContents(flowBlock);
+        try {
+          before.setEnd(range.startContainer, range.startOffset);
+        } catch (_) {
+          flowBlock.after(block);
+          return true;
+        }
+        const offset = before.toString().length;
+        const total = textLengthDeep(flowBlock);
+        if (offset <= 0) {
+          flowBlock.before(block);
+        } else if (offset >= total) {
+          flowBlock.after(block);
+        } else {
+          const anchor = splitTextBlockForDrop(flowBlock, offset);
+          editable.insertBefore(block, anchor || null);
+        }
+        return true;
+      }
+      const field = caretFieldForBlock(flowBlock, range.startContainer);
+      if (isCaretAtFieldStart(range, field) || isCaretAtFlowBlockStart(range, flowBlock)) {
+        flowBlock.before(block);
+      } else {
+        flowBlock.after(block);
+      }
+      return true;
     }
     function deleteImage() {
       if (!selectedFrame) {
@@ -6793,10 +6921,34 @@ function studioHtmlV2(payload, libs) {
     }
     imageInput.addEventListener('change', () => {
       const file = imageInput.files && imageInput.files[0];
-      if (!file || !selectedFrame) return;
+      if (!file) return;
+      const action = imageInputAction;
       const reader = new FileReader();
       reader.onload = () => {
         const nextSrc = String(reader.result || '');
+        if (action === 'insert') {
+          const block = imageBlockFromSrc(nextSrc, file.name || '');
+          if (!insertImageBlockAtSavedRange(block)) {
+            showRuntimeNotice('没有找到原来的正文光标位置，请重新放置光标后插入图片。');
+          } else {
+            const frame = block.querySelector('.xhs-image-frame');
+            const imageId = ensureImageId(block);
+            stageScale.querySelectorAll('.selectable-image').forEach(bindSelectableFrame);
+            saveCurrentPage({ skipNormalize: true });
+            reflow(imageId);
+            const restored = imageId ? findImageBlockById(stageScale, imageId)?.querySelector('.xhs-image-frame') : null;
+            if (restored || frame?.isConnected) selectFrame(restored || frame);
+          }
+          imageInputAction = 'replace';
+          pendingImageInsertRange = null;
+          pendingImageInsertEditable = null;
+          imageInput.value = '';
+          return;
+        }
+        if (!selectedFrame) {
+          imageInput.value = '';
+          return;
+        }
         let img = selectedImage();
         if (!img) {
           img = document.createElement('img');
@@ -6880,13 +7032,21 @@ function studioHtmlV2(payload, libs) {
     function draftCheckpointKey() {
       return draftStorageKey() + ':checkpoint';
     }
+    function refreshContinuousFlowHtmlFromPages() {
+      if (!pages.length) return continuousFlowHtml;
+      const holder = mergedContinuousFlowHolder();
+      continuousFlowHtml = serializeContinuousFlowBlocks(Array.from(holder.children));
+      return continuousFlowHtml;
+    }
     function serializeStudioState() {
+      refreshContinuousFlowHtmlFromPages();
       return {
         generator: 'rabbitQ-skill-lark-xhs',
         version: config.version,
         savedAt: new Date().toISOString(),
         sourceFingerprint: config.sourceFingerprint || '',
         pageIndex,
+        flowHtml: continuousFlowHtml,
         pages: pages.map((page) => ({ type: page.type, html: page.html, tailHtml: page.tailHtml || '' })),
         currentBgTheme,
         currentAccentTheme,
@@ -7083,6 +7243,7 @@ function studioHtmlV2(payload, libs) {
       if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
       restoringState = true;
       try {
+        stageScale.innerHTML = '';
         let shouldReflowSavedDraft = Boolean(options.forceReflow) || state.version !== config.version;
         function sanitizeStoredHtml(html) {
           const holder = document.createElement('div');
@@ -7112,6 +7273,18 @@ function studioHtmlV2(payload, libs) {
         coverImageEnabled = state.coverImageEnabled !== false;
         syncPaperPatternUi();
         applyLayout(false);
+        if (state.flowHtml) {
+          continuousFlowHtml = sanitizeStoredHtml(state.flowHtml);
+          const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
+          cover.tailHtml = '';
+          const flowBlocks = pairAdjacentPortraitImages(continuousFlowBlocksFromHtml());
+          pages = coverImageEnabled
+            ? [cover].concat(paginateBlocks(flowBlocks))
+            : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+          pageIndex = Math.max(0, Math.min(Number(state.pageIndex || 0), pages.length - 1));
+        } else {
+          refreshContinuousFlowHtmlFromPages();
+        }
         renderAll();
         if (shouldReflowSavedDraft && pages.some((page) => page.type === 'body')) {
           window.setTimeout(() => reflow(), 120);
@@ -7315,6 +7488,10 @@ function studioHtmlV2(payload, libs) {
       removeAutoLineBreaks(holder);
       stripCaretAnchors(holder);
       holder.querySelectorAll?.('.xhs-page-end, .xhs-page-start').forEach((node) => node.classList.remove('xhs-page-end', 'xhs-page-start'));
+      holder.querySelectorAll?.('.xhs-boundary-blank').forEach((node) => {
+        node.classList.remove('xhs-boundary-blank');
+        node.style.removeProperty('--xhs-boundary-blank-height');
+      });
       holder.querySelectorAll?.('.xhs-caret-marker').forEach((node) => {
         if (preserveCaretMarkerId && node.dataset?.xhsCaretMarker === preserveCaretMarkerId) return;
         node.remove();
@@ -7346,6 +7523,7 @@ function studioHtmlV2(payload, libs) {
       });
       const blocks = sanitizeMergedFlowBlocks(Array.from(merged.children));
       const baseBlocks = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
+      continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       if (!coverImageEnabled) {
         pages = [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
@@ -7401,7 +7579,7 @@ function studioHtmlV2(payload, libs) {
         recordEditorHistory();
       }, true);
     });
-    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, codeBtn, listUnorderedBtn, listOrderedBtn].forEach((button) => {
+    [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, codeBtn, listUnorderedBtn, listOrderedBtn, insertImageBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
       button?.addEventListener('click', () => recordEditorHistory(), true);
     });
@@ -7415,8 +7593,7 @@ function studioHtmlV2(payload, libs) {
     codeBtn?.addEventListener('click', makeCodeBlock);
     listUnorderedBtn?.addEventListener('click', () => makeListBlock('unordered'));
     listOrderedBtn?.addEventListener('click', () => makeListBlock('ordered'));
-    overviewModeBtn?.addEventListener('click', () => setViewMode('overview'));
-    editModeBtn?.addEventListener('click', () => setViewMode('edit'));
+    insertImageBtn?.addEventListener('click', requestImageInsert);
     coverImageOnBtn?.addEventListener('click', () => applyCoverImageMode(true));
     coverImageOffBtn?.addEventListener('click', () => applyCoverImageMode(false));
     bgThemeButtons.forEach((button) => button.addEventListener('click', () => applyBackgroundTheme(button.dataset.bgTheme)));
