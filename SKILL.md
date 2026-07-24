@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
-description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持手动分页（---）、连续分页、封面开关、主题组合、引用/卡片/序列/表格/macOS 代码块、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.9.1
+description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持 AI 封面生成后直插、手动分页（---）、连续分页、封面开关、主题组合、引用/卡片/序列/表格/macOS 代码块、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
+version: 0.9.2
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -69,13 +69,14 @@ metadata:
    - CLI `--title` / `--subtitle`
    - **已有任一来源** → 直接转换，不要用 AI 覆盖。
    - **缺 `subtitle` 且用户未指定** → AI 读完全文后总结，通过 `--subtitle` 传入。
-4. 在 Skill 根目录运行 `node scripts/ensure-font.js`：先检查 `Noto Serif SC`；macOS 缺失且已安装 Homebrew 时自动执行 `brew install --cask font-noto-serif-sc`。安装后重新打开浏览器，确保新字体生效。不得用 Apple 私有 `STSongti-*` 映射替代这一步。
-5. 若 `node_modules` 不存在，在 Skill 根目录运行 `npm ci`。
-6. 调用 `scripts/convert.js` 生成 Studio（仅缺副标题时带 `--subtitle`）。
-7. 返回可点击的 `xhs-studio.html` 绝对路径，并告知用户采用的副标题文案。
-8. 若有视频警告，必须在结果中说明视频已跳过。
-9. 对真实页面进行视觉验证；不能只报告脚本退出码。默认停在 Studio 预览，不导出 PNG ZIP。
-10. 只有用户明确要求“导出”“验收”“准备发布/发小红书”或“核对 PNG”时，才实际导出 PNG ZIP。
+4. 主动询问用户是否需要 AI 生成封面图、想做成什么风格；用户确认需要时，先用图像生成能力制作与文章主题匹配的封面 PNG/JPG，再通过 `--cover-image <绝对路径>` 一并传给转换器。若用户只说“要封面”而未指定风格，默认生成适配文章主题的主视觉图，并在图上放清晰的文章标题与一句短副标题，保留足够留白、避免文字被主体遮挡。用户不需要或没有确认时，保留 Studio 的可编辑封面占位图。
+5. 在 Skill 根目录运行 `node scripts/ensure-font.js`：先检查 `Noto Serif SC`；macOS 缺失且已安装 Homebrew 时自动执行 `brew install --cask font-noto-serif-sc`。安装后重新打开浏览器，确保新字体生效。不得用 Apple 私有 `STSongti-*` 映射替代这一步。
+6. 若 `node_modules` 不存在，在 Skill 根目录运行 `npm ci`。
+7. 调用 `scripts/convert.js` 生成 Studio（仅缺副标题时带 `--subtitle`；有 AI 封面时同时带 `--cover-image`）。
+8. 返回可点击的 `xhs-studio.html` 绝对路径，并告知用户采用的副标题文案。
+9. 若有视频警告，必须在结果中说明视频已跳过。
+10. 对真实页面进行视觉验证；不能只报告脚本退出码。默认停在 Studio 预览，不导出 PNG ZIP。
+11. 只有用户明确要求“导出”“验收”“准备发布/发小红书”或“核对 PNG”时，才实际导出 PNG ZIP。
 
 ### AI 副标题生成（缺省时必做）
 
@@ -126,7 +127,8 @@ subtitle: 飞书 Markdown 直转可编辑 3:4 图文
 
 ```bash
 node "scripts/convert.js" "article.md" \
-  --subtitle "两件真实 skill 开发复盘，教你什么工作该交给 AI"
+  --subtitle "两件真实 skill 开发复盘，教你什么工作该交给 AI" \
+  --cover-image "/path/to/cover.png"
 ```
 
 基本命令：
@@ -143,6 +145,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 -o, --output-dir <dir>   输出目录，默认在源 Markdown 旁生成 <slug>-xhs
 --title <text>           覆盖标题
 --subtitle <text>        指定封面副标题
+--cover-image <file>     本地 PNG/JPG/WebP 封面图，转换时自动嵌入首张封面
 --keywords <a,b,c>       兼容保留的关键词元数据
 --size <WxH>             3:4 画布，默认 1080x1440
 --width <px>             画布宽度

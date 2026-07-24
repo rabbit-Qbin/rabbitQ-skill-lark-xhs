@@ -93,10 +93,13 @@ async function main() {
 
   const convert = childProcess.spawnSync(
     process.execPath,
-    [path.join(__dirname, "convert.js"), sourceDir, "-o", outputDir],
+    [path.join(__dirname, "convert.js"), sourceDir, "-o", outputDir, "--cover-image", "fixture.png"],
     { encoding: "utf8" },
   );
   assert.strictEqual(convert.status, 0, convert.stderr || convert.stdout);
+  const coverHtml = fs.readFileSync(path.join(outputDir, "xhs-studio.html"), "utf8");
+  assert.match(coverHtml, /"coverImageSrc":"data:image\/png;base64,/);
+  assert.match(coverHtml, /alt="封面图"/);
 
   const explicitSourceDir = path.join(root, "explicit-cover-source");
   const explicitOutputDir = path.join(root, "explicit-cover-output");
@@ -284,7 +287,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.1"/);
+  assert.match(html, /"version":"0\.9\.2"/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);

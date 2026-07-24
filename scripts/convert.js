@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.1";
+const VERSION = "0.9.2";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -47,6 +47,7 @@ Options:
   -o, --output-dir <dir>   Output directory. Default: <input>-xhs
   --title <text>           Override title
   --subtitle <text>        Cover subtitle. Default: editable placeholder
+  --cover-image <file>     Embed a local image as the initial cover image
   --keywords <a,b,c>       Extra keywords metadata, kept for compatibility
   --size <WxH>             Canvas size. Default: 1080x1440
   --width <px>             Canvas width
@@ -78,6 +79,8 @@ function parseArgs(argv) {
       opts.title = argv[++i];
     } else if (arg === "--subtitle" && argv[i + 1]) {
       opts.subtitle = argv[++i];
+    } else if (arg === "--cover-image" && argv[i + 1]) {
+      opts.coverImage = argv[++i];
     } else if (arg === "--topic" && argv[i + 1]) {
       // Deprecated: kept for old commands, intentionally ignored.
       i += 1;
@@ -348,6 +351,21 @@ function mimeTypeForFile(file) {
 function assetToDataUrl(file) {
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return "";
   return `data:${mimeTypeForFile(file)};base64,${fs.readFileSync(file).toString("base64")}`;
+}
+
+function resolveCoverImage(file, markdownFile) {
+  if (!file) return "";
+  const resolved = path.isAbsolute(file)
+    ? file
+    : path.resolve(path.dirname(markdownFile), file);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    throw new Error(`Cover image not found: ${file}`);
+  }
+  const dataUrl = assetToDataUrl(resolved);
+  if (!/^data:image\//i.test(dataUrl)) {
+    throw new Error(`Cover image must be an image file: ${file}`);
+  }
+  return dataUrl;
 }
 
 function unescapeMarkdownUrl(value) {
@@ -852,6 +870,7 @@ function studioHtmlV2(payload, libs) {
     bodyCharsPerLine = 21,
     headingNumberSize,
     headingTitleSize,
+    coverImageSrc,
   } = payload;
   const coverPadX = Math.round(width * 0.082);
   const coverPadTop = Math.round(height * 0.066);
@@ -1223,6 +1242,7 @@ function studioHtmlV2(payload, libs) {
       coverTitleSize,
       coverSubtitleSize,
       headingTitleSize,
+      coverImageSrc,
       songtiFont,
       warnings,
       sourceFingerprint: payload.sourceFingerprint || "",
@@ -3005,7 +3025,10 @@ function studioHtmlV2(payload, libs) {
     }
     function initialCoverHtml() {
       const sub = config.subtitle ? esc(config.subtitle) : '';
-      return '<div class="cover-media"><div class="cover-image-frame selectable-image" data-fit="cover" data-role="cover"><div class="cover-placeholder">点击替换封面图</div></div></div>' +
+      const coverImage = config.coverImageSrc
+        ? '<img src="' + esc(config.coverImageSrc) + '" alt="封面图" draggable="false" />'
+        : '<div class="cover-placeholder">点击替换封面图</div>';
+      return '<div class="cover-media"><div class="cover-image-frame selectable-image" data-fit="cover" data-role="cover">' + coverImage + '</div></div>' +
         '<div class="cover-text"><div class="cover-title" contenteditable="true" spellcheck="false">' + esc(config.title) + '</div><div class="cover-title-bar"></div>' +
         '<div class="cover-subtitle" contenteditable="true" spellcheck="false" data-placeholder="点击这里填写副标题">' + sub + '</div></div>';
     }
@@ -7700,6 +7723,7 @@ function main() {
     const { frontmatter, chineseMeta } = prepareMarkdownBody(markdown);
     const title = opts.title || extractTitle(markdown) || path.basename(resolved.markdownFile, path.extname(resolved.markdownFile));
     const subtitle = opts.subtitle || frontmatter.subtitle || chineseMeta.subtitle || "";
+    const coverImageSrc = resolveCoverImage(opts.coverImage, resolved.markdownFile);
     const base = slugify(title);
     const outDir = path.resolve(opts.outputDir || path.join(path.dirname(resolved.markdownFile), `${base}-xhs`));
     fs.mkdirSync(outDir, { recursive: true });
@@ -7741,6 +7765,7 @@ function main() {
       bodyCharsPerLine: 21,
       headingNumberSize: Math.round(87 * scaleX),
       headingTitleSize: Math.round(48 * scaleX),
+      coverImageSrc,
       sourceFingerprint,
       sourcePath: resolved.markdownFile,
     };
@@ -7757,6 +7782,7 @@ function main() {
       version: VERSION,
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
+      coverImage: opts.coverImage ? path.resolve(path.dirname(resolved.markdownFile), opts.coverImage) : "",
       width: opts.width,
       height: opts.height,
       layout: {
