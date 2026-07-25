@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.3";
+const VERSION = "0.9.4";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -1139,7 +1139,7 @@ function studioHtmlV2(payload, libs) {
           <button id="coverModeHalfBtn" class="active">半封面</button>
           <button id="coverModeNoneBtn">无封面</button>
         </div>
-        <p class="hint">全封面独占首张；半封面上图下标题；无封面上标题、下半页续正文。</p>
+        <p class="hint">全封面图 1080×1440；半封面图 1080×720、下方保留可编辑标题；无封面直接使用标题和正文。</p>
       </div>
       <div id="cardStyleTools" class="tool-group" hidden>
         <p class="tool-title">卡片样式</p>

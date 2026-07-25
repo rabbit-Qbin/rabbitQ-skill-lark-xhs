@@ -314,7 +314,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.3"/);
+  assert.match(html, /"version":"0\.9\.4"/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
