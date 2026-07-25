@@ -99,7 +99,34 @@ async function main() {
   assert.strictEqual(convert.status, 0, convert.stderr || convert.stdout);
   const coverHtml = fs.readFileSync(path.join(outputDir, "xhs-studio.html"), "utf8");
   assert.match(coverHtml, /"coverImageSrc":"data:image\/png;base64,/);
+  assert.match(coverHtml, /"coverMode":"half"/);
   assert.match(coverHtml, /alt="封面图"/);
+  assert.match(coverHtml, /id="coverModeFullBtn"/);
+  assert.match(coverHtml, /id="coverModeHalfBtn"/);
+  assert.match(coverHtml, /id="coverModeNoneBtn"/);
+
+  const fullCoverOutputDir = path.join(root, "full-cover-output");
+  const fullCoverConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), sourceDir, "-o", fullCoverOutputDir, "--cover-mode", "full", "--cover-image", "fixture.png"],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(fullCoverConvert.status, 0, fullCoverConvert.stderr || fullCoverConvert.stdout);
+  const fullCoverManifest = JSON.parse(fs.readFileSync(path.join(fullCoverOutputDir, "manifest.json"), "utf8"));
+  const fullCoverHtml = fs.readFileSync(path.join(fullCoverOutputDir, "xhs-studio.html"), "utf8");
+  assert.strictEqual(fullCoverManifest.coverMode, "full");
+  assert.match(fullCoverHtml, /"coverMode":"full"/);
+  assert.match(fullCoverHtml, /\.xhs-cover-card\.full-cover-image \.cover-media \{ height: 100%; \}/);
+
+  const noCoverOutputDir = path.join(root, "no-cover-output");
+  const noCoverConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), sourceDir, "-o", noCoverOutputDir, "--cover-mode", "none"],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(noCoverConvert.status, 0, noCoverConvert.stderr || noCoverConvert.stdout);
+  const noCoverManifest = JSON.parse(fs.readFileSync(path.join(noCoverOutputDir, "manifest.json"), "utf8"));
+  assert.strictEqual(noCoverManifest.coverMode, "none");
 
   const explicitSourceDir = path.join(root, "explicit-cover-source");
   const explicitOutputDir = path.join(root, "explicit-cover-output");
@@ -287,7 +314,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.2"/);
+  assert.match(html, /"version":"0\.9\.3"/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
@@ -1766,7 +1793,7 @@ async function main() {
     const flowOrderBeforeCoverToggle = await collectFlowOrder();
     await activateStudioPage(page, 0);
     assert.strictEqual(await page.locator("#coverThemeTools").isVisible(), true);
-    await page.click("#coverImageOffBtn");
+    await page.click("#coverModeNoneBtn");
     await page.waitForTimeout(500);
     assert.strictEqual(await page.locator("#coverThemeTools").isVisible(), false);
     assert.match(await page.locator("#pageInfo").innerText(), /正文已接入封面下半区/);
@@ -1783,7 +1810,7 @@ async function main() {
     });
     assert.strictEqual(coverTailRepaginationState.after, coverTailRepaginationState.before, 'image/block repagination with the cover disabled must preserve the complete continuous flow');
     assert.strictEqual(coverTailRepaginationState.afterTailText, coverTailRepaginationState.beforeTailText, 'cover-tail content must survive image/block repagination');
-    await page.click("#coverImageOnBtn");
+    await page.click("#coverModeHalfBtn");
     await page.waitForTimeout(500);
     const flowOrderAfterCoverToggle = await collectFlowOrder();
     assert.deepStrictEqual(flowOrderAfterCoverToggle, flowOrderBeforeCoverToggle);
@@ -1792,7 +1819,7 @@ async function main() {
     // tail frame (shown when the cover image is off) must actually remove
     // it instead of leaving behind a phantom empty caret-anchor paragraph.
     await activateStudioPage(page, 0);
-    await page.click("#coverImageOffBtn");
+    await page.click("#coverModeNoneBtn");
     await page.waitForTimeout(500);
     const tailFrameHeadingCount = await page.locator("#stageScale .xhs-cover-tail-frame .xhs-heading").count();
     assert.ok(tailFrameHeadingCount > 0, "expected a heading to flow into the cover tail frame");
@@ -1836,7 +1863,7 @@ async function main() {
     assert.strictEqual(await page.locator("#stageScale .xhs-cover-tail-frame").first().evaluate((frame) => (
       frame.querySelectorAll(".xhs-manual-blank").length
     )), tailFrameBaseline.manualBlankCount);
-    await page.click("#coverImageOnBtn");
+    await page.click("#coverModeHalfBtn");
     await page.waitForTimeout(500);
 
     // Regression: deleting a leading manual-blank on body page 2 must not leave a phantom blank below.
@@ -3004,7 +3031,7 @@ async function main() {
     assert.strictEqual((await page.locator("#stageScale .cover-title").innerText()).trim(), "回归测试");
     assert.strictEqual(await page.locator('[data-bg-theme="white"]').evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator('[data-paper-pattern="none"]').evaluate((node) => node.classList.contains("active")), true);
-    assert.strictEqual(await page.locator("#coverImageOnBtn").evaluate((node) => node.classList.contains("active")), true);
+    assert.strictEqual(await page.locator("#coverModeHalfBtn").evaluate((node) => node.classList.contains("active")), true);
     assert.strictEqual(await page.locator("#bodyFontRange").inputValue(), "36");
 
     const flowPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
@@ -3078,7 +3105,7 @@ async function main() {
 
     await activateStudioPage(flowPage, 0);
     await flowPage.waitForTimeout(120);
-    await flowPage.click("#coverImageOffBtn");
+    await flowPage.click("#coverModeNoneBtn");
     await flowPage.waitForTimeout(300);
     const flowAfterCoverToggle = await collectAllBodyTextFrom(flowPage);
     assert.match(flowAfterCoverToggle, /持续debug/, "cover toggle reflow should keep full paragraph");

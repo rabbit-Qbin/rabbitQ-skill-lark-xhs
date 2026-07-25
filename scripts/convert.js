@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.2";
+const VERSION = "0.9.3";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -48,6 +48,7 @@ Options:
   --title <text>           Override title
   --subtitle <text>        Cover subtitle. Default: editable placeholder
   --cover-image <file>     Embed a local image as the initial cover image
+  --cover-mode <mode>      Cover layout: full, half, or none. Default: half
   --keywords <a,b,c>       Extra keywords metadata, kept for compatibility
   --size <WxH>             Canvas size. Default: 1080x1440
   --width <px>             Canvas width
@@ -66,6 +67,7 @@ function parseArgs(argv) {
     outputDir: "",
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
+    coverMode: "half",
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -81,6 +83,8 @@ function parseArgs(argv) {
       opts.subtitle = argv[++i];
     } else if (arg === "--cover-image" && argv[i + 1]) {
       opts.coverImage = argv[++i];
+    } else if (arg === "--cover-mode" && argv[i + 1]) {
+      opts.coverMode = String(argv[++i]).trim().toLowerCase();
     } else if (arg === "--topic" && argv[i + 1]) {
       // Deprecated: kept for old commands, intentionally ignored.
       i += 1;
@@ -108,6 +112,9 @@ function parseArgs(argv) {
   }
   if (Math.abs(opts.width / opts.height - 3 / 4) > 0.012) {
     throw new Error(`Canvas must be 3:4. Received ${opts.width}x${opts.height}.`);
+  }
+  if (!["full", "half", "none"].includes(opts.coverMode)) {
+    throw new Error("--cover-mode must be one of: full, half, none");
   }
   return opts;
 }
@@ -871,6 +878,7 @@ function studioHtmlV2(payload, libs) {
     headingNumberSize,
     headingTitleSize,
     coverImageSrc,
+    coverMode,
   } = payload;
   const coverPadX = Math.round(width * 0.082);
   const coverPadTop = Math.round(height * 0.066);
@@ -967,6 +975,8 @@ function studioHtmlV2(payload, libs) {
     .cover-title-bar { flex: 0 0 auto; width: ${Math.round(width * 0.12)}px; height: ${Math.max(5, Math.round(width * 0.005))}px; background: var(--xhs-accent); border-radius: 999px; margin: ${Math.round(height * 0.006)}px 0 ${Math.round(height * 0.014)}px; }
     .xhs-cover-card.no-cover-image .cover-media { display: none; }
     .xhs-cover-card.no-cover-image .cover-text { top: 0; height: ${coverSplitY}px; padding-bottom: ${coverNoImagePadBottom}px; z-index: 2; justify-content: flex-start; }
+    .xhs-cover-card.full-cover-image .cover-media { height: 100%; }
+    .xhs-cover-card.full-cover-image .cover-text { display: none; }
     .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
     .cover-subtitle * { font-size: inherit !important; line-height: inherit !important; letter-spacing: inherit; }
     .cover-subtitle strong, .cover-subtitle b, .cover-subtitle .xhs-cover-bold { font-weight: 900 !important; }
@@ -1123,12 +1133,13 @@ function studioHtmlV2(payload, libs) {
       <p class="hint">飞书导出的 Markdown 与附件自动分页为 3:4 图文。悬浮区块可拖动左侧小手柄，也可按住 Alt 直接拖动；蓝色横线就是松手后的实际落点。</p>
       <div id="pageInfo" class="hint"></div>
       <div id="coverTools" class="tool-group" hidden>
-        <p class="tool-title">封面图</p>
-        <div class="tool-row">
-          <button id="coverImageOnBtn" class="active">显示封面图</button>
-          <button id="coverImageOffBtn">关闭封面图</button>
+        <p class="tool-title">封面形式</p>
+        <div class="theme-grid">
+          <button id="coverModeFullBtn">全封面</button>
+          <button id="coverModeHalfBtn" class="active">半封面</button>
+          <button id="coverModeNoneBtn">无封面</button>
         </div>
-        <p class="hint">关闭后标题区上移占上半页，下半页自动接续正文内容。</p>
+        <p class="hint">全封面独占首张；半封面上图下标题；无封面上标题、下半页续正文。</p>
       </div>
       <div id="cardStyleTools" class="tool-group" hidden>
         <p class="tool-title">卡片样式</p>
@@ -1243,6 +1254,7 @@ function studioHtmlV2(payload, libs) {
       coverSubtitleSize,
       headingTitleSize,
       coverImageSrc,
+      coverMode,
       songtiFont,
       warnings,
       sourceFingerprint: payload.sourceFingerprint || "",
@@ -1263,7 +1275,7 @@ function studioHtmlV2(payload, libs) {
     const viewMode = 'overview';
     let selectedFrame = null;
     let selectedFlowBlock = null;
-    let coverImageEnabled = true;
+    let coverMode = ['full', 'half', 'none'].includes(config.coverMode) ? config.coverMode : 'half';
     let blockReorderDrag = null;
     let blockDropIndicator = null;
     let overviewBlockDropIndicator = null;
@@ -1336,8 +1348,9 @@ function studioHtmlV2(payload, libs) {
     const coverTools = document.getElementById('coverTools');
     const coverThemeTools = document.getElementById('coverThemeTools');
     const cardStyleTools = document.getElementById('cardStyleTools');
-    const coverImageOnBtn = document.getElementById('coverImageOnBtn');
-    const coverImageOffBtn = document.getElementById('coverImageOffBtn');
+    const coverModeFullBtn = document.getElementById('coverModeFullBtn');
+    const coverModeHalfBtn = document.getElementById('coverModeHalfBtn');
+    const coverModeNoneBtn = document.getElementById('coverModeNoneBtn');
     const bgThemeButtons = Array.from(document.querySelectorAll('[data-bg-theme]'));
     const accentThemeButtons = Array.from(document.querySelectorAll('[data-accent-theme]'));
     const coverThemeButtons = Array.from(document.querySelectorAll('[data-cover-theme]'));
@@ -2260,7 +2273,7 @@ function studioHtmlV2(payload, libs) {
       const pageNodes = new Map();
       pages.forEach((page, index) => {
         const html = page.type === 'cover'
-          ? (!coverImageEnabled ? (page.tailHtml || '') : '')
+          ? (coverMode === 'none' ? (page.tailHtml || '') : '')
           : (page.html || '');
         if (!html) return;
         const pageHolder = document.createElement('div');
@@ -2314,9 +2327,9 @@ function studioHtmlV2(payload, libs) {
       const baseBlocks = normalizedBlocks.length ? mergeSplitBlocks(normalizedBlocks) : extractBlocksFromTemplate();
       continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
-      pages = coverImageEnabled
-        ? [cover].concat(paginateBlocks(flowBlocks))
-        : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+      pages = coverMode === 'none'
+        ? [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover))
+        : [cover].concat(paginateBlocks(flowBlocks));
       const nextIndex = selectedImageId
         ? pageIndexForImageId(selectedImageId)
         : pageIndexForFlowBlockId(selectedBlockId);
@@ -3037,7 +3050,7 @@ function studioHtmlV2(payload, libs) {
       continuousFlowHtml = serializeContinuousFlowBlocks(blocks);
       const cover = { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       pages = [cover].concat(
-        coverImageEnabled ? paginateBlocks(blocks) : paginateBlocksWithCoverTail(blocks, cover)
+        coverMode === 'none' ? paginateBlocksWithCoverTail(blocks, cover) : paginateBlocks(blocks)
       );
       pageIndex = Math.min(pageIndex, Math.max(0, pages.length - 1));
       selectedFrame = null;
@@ -3046,11 +3059,13 @@ function studioHtmlV2(payload, libs) {
     function cardHtml(page) {
       if (!page) page = { type: 'body', html: '' };
       if (page.type === 'cover') {
-        const noCover = !coverImageEnabled;
+        const noCover = coverMode === 'none';
+        const fullCover = coverMode === 'full';
         const tail = noCover
           ? '<div class="xhs-body-frame xhs-cover-tail-frame" contenteditable="true" spellcheck="false">' + (page.tailHtml || '') + '</div>'
           : '';
-        return '<div class="xhs-card xhs-cover-card' + (noCover ? ' no-cover-image' : '') + '">' + page.html + tail + '</div>';
+        const modeClass = noCover ? ' no-cover-image' : (fullCover ? ' full-cover-image' : '');
+        return '<div class="xhs-card xhs-cover-card' + modeClass + '">' + page.html + tail + '</div>';
       }
       return '<div class="xhs-card xhs-body-card"><div class="xhs-body-frame" contenteditable="true" spellcheck="false">' + page.html + '</div></div>';
     }
@@ -3316,7 +3331,10 @@ function studioHtmlV2(payload, libs) {
       normalizeUnderlineDecorations(stageScale);
       normalizeCalloutBodyLabels(stageScale);
       const coverCard = stageScale.querySelector('.xhs-cover-card');
-      if (coverCard) coverCard.classList.toggle('no-cover-image', !coverImageEnabled);
+      if (coverCard) {
+        coverCard.classList.toggle('no-cover-image', coverMode === 'none');
+        coverCard.classList.toggle('full-cover-image', coverMode === 'full');
+      }
       sanitizeCoverTitleNode(stageScale.querySelector('.cover-title'));
       balanceCoverSubtitle();
       balanceCoverTitle();
@@ -4144,9 +4162,9 @@ function studioHtmlV2(payload, libs) {
       const baseBlocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(holder.children)));
       continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
-      pages = coverImageEnabled
-        ? [cover].concat(paginateBlocks(flowBlocks))
-        : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+      pages = coverMode === 'none'
+        ? [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover))
+        : [cover].concat(paginateBlocks(flowBlocks));
       const caretPageIndex = pageIndexForCaretMarker(caretMarkerId);
       if (caretMarkerId && caretPageIndex < 0) {
         pages = previousPages;
@@ -5127,14 +5145,13 @@ function studioHtmlV2(payload, libs) {
       const isCover = pages[pageIndex]?.type === 'cover';
       const selectionInfo = activeFlowBlockAt(window.getSelection()?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (coverTools) coverTools.hidden = !isCover;
-      if (coverThemeTools) coverThemeTools.hidden = !isCover || !coverImageEnabled;
+      if (coverThemeTools) coverThemeTools.hidden = !isCover || coverMode === 'none';
       if (cardStyleTools) cardStyleTools.hidden = selectionInfo?.type !== 'card';
       syncCardStyleUi();
       syncToolbarState();
-      if (coverImageOnBtn && coverImageOffBtn) {
-        coverImageOnBtn.classList.toggle('active', coverImageEnabled);
-        coverImageOffBtn.classList.toggle('active', !coverImageEnabled);
-      }
+      coverModeFullBtn?.classList.toggle('active', coverMode === 'full');
+      coverModeHalfBtn?.classList.toggle('active', coverMode === 'half');
+      coverModeNoneBtn?.classList.toggle('active', coverMode === 'none');
     }
     function clearSelectedFlowBlock() {
       stageScale.querySelectorAll('.selected-flow-block').forEach((node) => node.classList.remove('selected-flow-block'));
@@ -5147,12 +5164,12 @@ function studioHtmlV2(payload, libs) {
       if (selectedFlowBlock) selectedFlowBlock.classList.add('selected-flow-block');
       syncPanelTools();
     }
-    function applyCoverImageMode(enabled, shouldSave = true) {
-      coverImageEnabled = enabled !== false;
-      if (coverImageOnBtn && coverImageOffBtn) {
-        coverImageOnBtn.classList.toggle('active', coverImageEnabled);
-        coverImageOffBtn.classList.toggle('active', !coverImageEnabled);
-      }
+    function applyCoverMode(mode, shouldSave = true) {
+      if (!['full', 'half', 'none'].includes(mode)) return;
+      coverMode = mode;
+      coverModeFullBtn?.classList.toggle('active', coverMode === 'full');
+      coverModeHalfBtn?.classList.toggle('active', coverMode === 'half');
+      coverModeNoneBtn?.classList.toggle('active', coverMode === 'none');
       reflow();
       if (shouldSave) saveCurrentPage();
     }
@@ -5379,7 +5396,7 @@ function studioHtmlV2(payload, libs) {
       });
       const targetPageIndex = Number(item?.dataset?.index);
       const targetPage = pages[targetPageIndex];
-      const acceptsBodyFlow = targetPage?.type === 'body' || (targetPage?.type === 'cover' && !coverImageEnabled);
+      const acceptsBodyFlow = targetPage?.type === 'body' || (targetPage?.type === 'cover' && coverMode === 'none');
       if (!item || !Number.isInteger(targetPageIndex) || targetPageIndex === pageIndex || !acceptsBodyFlow) return null;
       const frame = item.querySelector('.xhs-cover-tail-frame, .xhs-body-frame');
       if (!frame) return null;
@@ -5821,8 +5838,9 @@ function studioHtmlV2(payload, libs) {
       });
       const page = pages[pageIndex];
       const label = page?.type === 'cover' ? '封面页' : '正文页';
-      const coverFlowHint = page?.type === 'cover' && !coverImageEnabled ? ' · 正文已接入封面下半区' : '';
-      pageInfo.textContent = pages.length ? label + ' · 当前第 ' + (pageIndex + 1) + ' / ' + pages.length + ' 页' + coverFlowHint : '暂无分页';
+      const coverModeLabel = coverMode === 'full' ? '全封面' : (coverMode === 'half' ? '半封面' : '无封面');
+      const coverFlowHint = page?.type === 'cover' && coverMode === 'none' ? ' · 正文已接入封面下半区' : '';
+      pageInfo.textContent = pages.length ? label + (page?.type === 'cover' ? ' · ' + coverModeLabel : '') + ' · 当前第 ' + (pageIndex + 1) + ' / ' + pages.length + ' 页' + coverFlowHint : '暂无分页';
     }
     function renderAll() {
       renderTabs();
@@ -7076,7 +7094,7 @@ function studioHtmlV2(payload, libs) {
         currentCoverTheme,
         currentPaperPattern,
         currentCardStyle,
-        coverImageEnabled,
+        coverMode,
         controls: {
           coverTitle: coverTitleRange.value,
           bodyFont: bodyFontRange.value,
@@ -7164,7 +7182,7 @@ function studioHtmlV2(payload, libs) {
         pageIndex = 0;
         selectedFrame = null;
         selectedFlowBlock = null;
-        coverImageEnabled = true;
+        coverMode = ['full', 'half', 'none'].includes(config.coverMode) ? config.coverMode : 'half';
         coverTitleRange.value = String(initialLayout.coverTitleSize);
         bodyFontRange.value = String(initialLayout.bodyFontSize);
         bodyLineRange.value = String(initialLayout.bodyLineHeight * 100);
@@ -7293,7 +7311,9 @@ function studioHtmlV2(payload, libs) {
         applyCoverTheme(state.currentCoverTheme || 'background', false);
         applyPaperPattern(state.currentPaperPattern || 'none', false);
         applyCardStyle(state.currentCardStyle || 'bar', false);
-        coverImageEnabled = state.coverImageEnabled !== false;
+        coverMode = ['full', 'half', 'none'].includes(state.coverMode)
+          ? state.coverMode
+          : (state.coverImageEnabled === false ? 'none' : 'half');
         syncPaperPatternUi();
         applyLayout(false);
         if (state.flowHtml) {
@@ -7301,9 +7321,9 @@ function studioHtmlV2(payload, libs) {
           const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
           cover.tailHtml = '';
           const flowBlocks = pairAdjacentPortraitImages(continuousFlowBlocksFromHtml());
-          pages = coverImageEnabled
-            ? [cover].concat(paginateBlocks(flowBlocks))
-            : [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
+          pages = coverMode === 'none'
+            ? [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover))
+            : [cover].concat(paginateBlocks(flowBlocks));
           pageIndex = Math.max(0, Math.min(Number(state.pageIndex || 0), pages.length - 1));
         } else {
           refreshContinuousFlowHtmlFromPages();
@@ -7548,7 +7568,7 @@ function studioHtmlV2(payload, libs) {
       const baseBlocks = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
       continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
-      if (!coverImageEnabled) {
+      if (coverMode === 'none') {
         pages = [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover));
       } else {
         cover.tailHtml = '';
@@ -7617,8 +7637,9 @@ function studioHtmlV2(payload, libs) {
     listUnorderedBtn?.addEventListener('click', () => makeListBlock('unordered'));
     listOrderedBtn?.addEventListener('click', () => makeListBlock('ordered'));
     insertImageBtn?.addEventListener('click', requestImageInsert);
-    coverImageOnBtn?.addEventListener('click', () => applyCoverImageMode(true));
-    coverImageOffBtn?.addEventListener('click', () => applyCoverImageMode(false));
+    coverModeFullBtn?.addEventListener('click', () => applyCoverMode('full'));
+    coverModeHalfBtn?.addEventListener('click', () => applyCoverMode('half'));
+    coverModeNoneBtn?.addEventListener('click', () => applyCoverMode('none'));
     bgThemeButtons.forEach((button) => button.addEventListener('click', () => applyBackgroundTheme(button.dataset.bgTheme)));
     accentThemeButtons.forEach((button) => button.addEventListener('click', () => applyAccentTheme(button.dataset.accentTheme)));
     coverThemeButtons.forEach((button) => button.addEventListener('click', () => applyCoverTheme(button.dataset.coverTheme)));
@@ -7766,6 +7787,7 @@ function main() {
       headingNumberSize: Math.round(87 * scaleX),
       headingTitleSize: Math.round(48 * scaleX),
       coverImageSrc,
+      coverMode: opts.coverMode,
       sourceFingerprint,
       sourcePath: resolved.markdownFile,
     };
@@ -7782,6 +7804,8 @@ function main() {
       version: VERSION,
       mode: "lark-xhs-fixed-pages",
       title: payload.title,
+      subtitle: payload.subtitle,
+      coverMode: payload.coverMode,
       coverImage: opts.coverImage ? path.resolve(path.dirname(resolved.markdownFile), opts.coverImage) : "",
       width: opts.width,
       height: opts.height,
