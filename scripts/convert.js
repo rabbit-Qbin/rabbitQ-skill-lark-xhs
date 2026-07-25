@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.4";
+const VERSION = "0.9.5";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2224,12 +2224,18 @@ function studioHtmlV2(payload, libs) {
       if (ratio < 0.76) return Math.round(Math.max(420, Math.min(780, rawHeight)));
       return Math.round(Math.max(300, Math.min(650, rawHeight)));
     }
+    function pastedImageWidthPercent(dims) {
+      if (!dims || !dims.width || !dims.height) return 92;
+      const ratio = dims.width / dims.height;
+      if (ratio >= 1.6) return 82;
+      if (ratio <= 0.8) return 76;
+      return 92;
+    }
     function imageBlockFromSrc(src, alt = '', options = {}) {
       const figure = document.createElement('figure');
       figure.className = 'xhs-image-block xhs-block';
       figure.dataset.imageId = 'img-' + (++imageIdCounter);
       if (options.inGrid) figure.classList.add('xhs-image-cell');
-      figure.style.width = '100%';
       const frame = document.createElement('div');
       frame.className = 'xhs-image-frame selectable-image';
       frame.dataset.fit = 'contain';
@@ -2247,7 +2253,10 @@ function studioHtmlV2(payload, libs) {
         frame.dataset.naturalWidth = String(dims.width);
         frame.dataset.naturalHeight = String(dims.height);
       }
-      frame.style.height = defaultImageHeight(dims, options.frameWidth || config.bodyContentWidth) + 'px';
+      const widthPercent = Number(options.widthPercent || (options.pasted ? pastedImageWidthPercent(dims) : 100));
+      figure.style.width = Math.max(35, Math.min(100, widthPercent)) + '%';
+      const frameWidth = (options.frameWidth || config.bodyContentWidth) * (Math.max(35, Math.min(100, widthPercent)) / 100);
+      frame.style.height = defaultImageHeight(dims, frameWidth) + 'px';
       frame.appendChild(nextImg);
       figure.appendChild(frame);
       return figure;
@@ -3427,7 +3436,7 @@ function studioHtmlV2(payload, libs) {
         event.preventDefault();
         const srcs = (await Promise.all(files.map(readFileAsDataUrl))).filter(Boolean);
         if (!srcs.length) return;
-        const blocks = srcs.map((src) => imageBlockFromSrc(src));
+        const blocks = srcs.map((src) => imageBlockFromSrc(src, '', { pasted: true }));
         const nodes = blocks.length > 1 ? [imageGridFromBlocks(blocks)] : blocks;
         insertNodesAtSelection(nodes, editable);
         stageScale.querySelectorAll('.selectable-image').forEach(bindSelectableFrame);
