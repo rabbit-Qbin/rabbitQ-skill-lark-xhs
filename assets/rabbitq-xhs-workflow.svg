@@ -1,13 +1,13 @@
 ﻿<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
-  <title id="title">rabbitQ 飞书 Markdown 转小红书图文 v0.9.5 工作流</title>
+  <title id="title">rabbitQ 飞书 Markdown 转小红书图文工作流</title>
   <desc id="desc">飞书导出 Markdown 和附件，AI 补充副标题，用户选择全封面、半封面或无封面，转换为可编辑的小红书三比四 Studio，最后保存 HTML 或按需导出 PNG。</desc>
   <rect width="1600" height="900" fill="#f2f5f7"/>
   <rect x="52" y="48" width="1496" height="804" rx="8" fill="#ffffff" stroke="#d9e1e7" stroke-width="2"/>
 
   <text x="82" y="112" fill="#17202a" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="42" font-weight="800">飞书 Markdown → AI 处理 → 小红书 3:4 Studio</text>
-  <text x="84" y="154" fill="#66727d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="22">v0.9.5 · 三种封面形式，固定图片规格与 IP 一致性</text>
+  <text x="84" y="154" fill="#66727d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="22">三种封面形式，默认交付可编辑 HTML</text>
   <rect x="1352" y="79" width="146" height="48" rx="8" fill="#17202a"/>
-  <text x="1425" y="111" text-anchor="middle" fill="#ffffff" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="18" font-weight="700">rabbitQ v0.9.5</text>
+  <text x="1425" y="111" text-anchor="middle" fill="#ffffff" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="18" font-weight="700">rabbitQ</text>
 
   <g transform="translate(82 218)">
     <rect width="310" height="410" rx="8" fill="#ffffff" stroke="#cdd8df" stroke-width="2"/>
@@ -42,8 +42,8 @@
     <rect x="28" y="220" width="254" height="1" fill="#e1e7eb"/>
     <text x="28" y="260" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 通读全文补副标题</text>
     <text x="28" y="298" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 选择全 / 半 / 无封面</text>
-    <text x="28" y="336" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 按形式生成并直插 HTML</text>
-    <text x="28" y="380" fill="#2e5fb2" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">支持 --cover-image</text>
+    <text x="28" y="336" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 生图可用时生成并直插 HTML</text>
+    <text x="28" y="380" fill="#2e5fb2" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">不可用时给出替代方案</text>
   </g>
 
   <path d="M789 423h46" stroke="#4d7fd2" stroke-width="5" stroke-linecap="round"/>
@@ -86,7 +86,7 @@
   </g>
 
   <rect x="82" y="690" width="1436" height="116" rx="8" fill="#17202a"/>
-  <text x="112" y="728" fill="#ffffff" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="18" font-weight="700">v0.9.5 核心保证</text>
+  <text x="112" y="728" fill="#ffffff" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="18" font-weight="700">核心保证</text>
   <g font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19" fill="#eef3f6">
     <circle cx="132" cy="766" r="6" fill="#5fa66a"/><text x="150" y="773">本地处理，素材不上传</text>
     <circle cx="480" cy="766" r="6" fill="#4d7fd2"/><text x="498" y="773">原稿字段优先，不覆盖</text>

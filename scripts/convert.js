@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.5";
+const VERSION = "0.9.6";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
