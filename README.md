@@ -4,6 +4,8 @@
 
 把飞书云文档导出的 Markdown 和图片附件，直接转换成一个本地可编辑的 `xhs-studio.html`。默认只生成 HTML；在浏览器里修改文字、封面、图片和样式，确认后再按需批量导出 1080 × 1440 PNG ZIP。
 
+当前版本为 **v0.9.2**。需要封面时，可先让 AI 生成配图，再通过 `--cover-image` 在转换时直接写入 Studio。
+
 ![飞书 Markdown 转小红书图文工作流](assets/rabbitq-xhs-workflow.svg)
 
 ![rabbitQ 小红书图文 Studio 三页总览编辑](assets/rabbitq-xhs-studio-v0855.png)
@@ -236,6 +238,14 @@ node scripts/convert.js article.md
 node scripts/convert.js lark-export.zip
 node scripts/convert.js article.md -o "/path/to/output-xhs"
 ```
+
+需要在第 1 页直接嵌入封面图时：
+
+```bash
+node scripts/convert.js article.md --cover-image "/path/to/cover.png"
+```
+
+封面图支持 PNG、JPG/JPEG、WebP 和 GIF，并会嵌入生成的 HTML，移动输出目录后仍可正常显示。
 
 ### 4. 编辑与导出
 
