@@ -6,6 +6,8 @@
 
 当前版本：**v0.9.2**
 
+![rabbitQ 飞书 Markdown 转小红书 3:4 图文 v0.9.2 工作流](assets/rabbitq-xhs-workflow-v092.svg)
+
 ## 它解决什么
 
 飞书适合写长文，小红书需要逐页图文。这个 Skill 负责中间最费时间的一段：
