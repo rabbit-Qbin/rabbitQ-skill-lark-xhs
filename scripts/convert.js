@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.6";
+const VERSION = "0.9.7";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -1045,7 +1045,9 @@ function studioHtmlV2(payload, libs) {
     .xhs-resize-handle.handle-e { right: 4px; top: 50%; width: 14px; height: 58px; transform: translateY(-50%); border-radius: 999px; cursor: ew-resize; }
     .xhs-resize-handle.handle-s { left: 50%; bottom: 4px; width: 58px; height: 14px; transform: translateX(-50%); border-radius: 999px; cursor: ns-resize; }
     .xhs-resize-handle.handle-se { right: 4px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; cursor: nwse-resize; }
-    .resizing-image-frame { cursor: nwse-resize; }
+    .resizing-image-frame[data-resize-mode="e"] { cursor: ew-resize; }
+    .resizing-image-frame[data-resize-mode="s"] { cursor: ns-resize; }
+    .resizing-image-frame[data-resize-mode="se"] { cursor: nwse-resize; }
     .xhs-image-grid { display: grid; gap: ${imageGridGap}px; margin: 0 0 var(--body-paragraph-gap); align-items: start; justify-items: center; text-align: center; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-image-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .xhs-image-grid.three, .xhs-image-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2072,6 +2074,20 @@ function studioHtmlV2(payload, libs) {
             item.replaceChildren(markerNode, body);
             changed = true;
           }
+          if (body) {
+            // A list marker belongs to the structural marker span only. Broad
+            // selections can otherwise leave its text inside the editable body
+            // and make every later list-style toggle add another marker.
+            const bodyHtml = stripListMarkerFromHtml(normalizeInlineHtml(body.innerHTML));
+            if (bodyHtml !== body.innerHTML) {
+              body.innerHTML = bodyHtml || '<br>';
+              changed = true;
+            }
+            if (!cleanText(body.textContent) && !body.querySelector('br')) {
+              body.innerHTML = '<br>';
+              changed = true;
+            }
+          }
           if (item.dataset.listType !== listType) {
             item.dataset.listType = listType;
             changed = true;
@@ -2087,6 +2103,32 @@ function studioHtmlV2(payload, libs) {
         });
       });
       return changed;
+    }
+    function normalizeListNumbersAcrossBlocks(blocks) {
+      let previousWasList = false;
+      let previousType = '';
+      let orderedIndex = 0;
+      (blocks || []).forEach((block) => {
+        if (block?.classList?.contains('xhs-caret-anchor')) return;
+        if (!block?.classList?.contains('xhs-list-line')) {
+          previousWasList = false;
+          previousType = '';
+          orderedIndex = 0;
+          return;
+        }
+        const listType = block.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
+        orderedIndex = previousWasList && previousType === listType ? orderedIndex + 1 : 1;
+        block.dataset.listType = listType;
+        const body = block.querySelector('.xhs-list-body');
+        if (body && !cleanText(body.textContent) && !body.querySelector('br')) body.innerHTML = '<br>';
+        const marker = block.querySelector('.xhs-list-marker');
+        const markerIsValid = listType === 'ordered'
+          ? Boolean(marker?.classList.contains('xhs-list-marker-ordered') && cleanText(marker.textContent) === String(orderedIndex) + '.')
+          : Boolean(marker?.classList.contains('xhs-list-marker-dot'));
+        if (!markerIsValid) marker?.replaceWith(listMarkerElement(listType, orderedIndex));
+        previousWasList = true;
+        previousType = listType;
+      });
     }
     function expandReasonStacksInFrame(frame) {
       if (!frame) return false;
@@ -2334,6 +2376,7 @@ function studioHtmlV2(payload, libs) {
         normalizedBlocks = Array.from(holder.children);
       }
       const baseBlocks = normalizedBlocks.length ? mergeSplitBlocks(normalizedBlocks) : extractBlocksFromTemplate();
+      normalizeListNumbersAcrossBlocks(baseBlocks);
       continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       pages = coverMode === 'none'
@@ -2509,6 +2552,7 @@ function studioHtmlV2(payload, libs) {
       if (node.classList.contains('xhs-caret-anchor')) return isEmptyCaretAnchor(node);
       if (node.classList.contains('xhs-manual-blank') || node.dataset?.xhsManualBlank === '1') return false;
       if (node.classList.contains('xhs-callout')) return !cleanText(node.querySelector('.xhs-callout-body')?.textContent || '');
+      if (node.classList.contains('xhs-list-line')) return false;
       if (node.classList.contains('xhs-p') || node.classList.contains('xhs-rich')) {
         if (node.classList.contains('xhs-manual-blank')) return false;
         return !cleanText(node.textContent) && !node.querySelector('br');
@@ -3056,6 +3100,7 @@ function studioHtmlV2(payload, libs) {
     }
     function paginate() {
       const blocks = pairAdjacentPortraitImages(extractBlocksFromTemplate());
+      normalizeListNumbersAcrossBlocks(blocks);
       continuousFlowHtml = serializeContinuousFlowBlocks(blocks);
       const cover = { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       pages = [cover].concat(
@@ -3201,6 +3246,7 @@ function studioHtmlV2(payload, libs) {
           frameHeight: frame.getBoundingClientRect().height / Math.max(0.1, scale),
         };
         frame.dataset.resizing = '1';
+        frame.dataset.resizeMode = drag.mode;
         frame.classList.add('resizing-image-frame');
         window.clearTimeout(imageReflowTimer);
         handle.setPointerCapture?.(event.pointerId);
@@ -3217,6 +3263,7 @@ function studioHtmlV2(payload, libs) {
         event.stopPropagation();
         handle.releasePointerCapture?.(event.pointerId);
         frame.dataset.resizing = '0';
+        delete frame.dataset.resizeMode;
         frame.classList.remove('resizing-image-frame');
         drag = null;
         saveCurrentPage();
@@ -4169,6 +4216,7 @@ function studioHtmlV2(payload, libs) {
     function repaginateContinuousHolder(holder, caretMarkerId, previousPages, previousPageIndex) {
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       const baseBlocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(holder.children)));
+      normalizeListNumbersAcrossBlocks(baseBlocks);
       continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       pages = coverMode === 'none'
@@ -5698,13 +5746,20 @@ function studioHtmlV2(payload, libs) {
           selectFlowBlock(block);
           const imgFrame = block.querySelector?.('.xhs-image-frame');
           if (imgFrame && event.target.closest('.xhs-image-frame, .xhs-image-block, .xhs-image-grid')) selectFrame(imgFrame);
+          else clearSelectedFrame();
           return;
         }
         if (!event.target.closest?.('.selectable-image')) {
+          clearSelectedFrame();
           clearSelectedFlowBlock();
         }
       });
     }
+    document.addEventListener('pointerdown', (event) => {
+      if (!selectedFrame || !(event.target instanceof Element)) return;
+      if (event.target.closest('.selectable-image, #imageTools, #imageList')) return;
+      clearSelectedFrame();
+    }, true);
     function bindImageDrag(frame) {
       let drag = null;
       frame.tabIndex = 0;
@@ -6417,7 +6472,7 @@ function studioHtmlV2(payload, libs) {
       }
       if (info.type === 'list') {
         return flowBlockListBodies(info)
-          .map((body) => normalizeInlineHtml(body.innerHTML))
+          .map((body) => stripListMarkerFromHtml(normalizeInlineHtml(body.innerHTML)))
           .join('<br>');
       }
       if (info.type === 'code') return escWithBreaks(flowBlockPlainText(info));
@@ -6466,7 +6521,7 @@ function studioHtmlV2(payload, libs) {
         const listType = targetLevel === 'ordered' ? 'ordered' : 'unordered';
         if (info.type === 'list') {
           return flowBlockListBodies(info).map((body, index) => buildListLine({
-            html: normalizeInlineHtml(body.innerHTML),
+            html: stripListMarkerFromHtml(normalizeInlineHtml(body.innerHTML)),
             plain: cleanText(body.textContent),
           }, listType, index + 1, { preserveBodyHtml: true }));
         }
@@ -6510,7 +6565,10 @@ function studioHtmlV2(payload, libs) {
         const range = selection.getRangeAt(0);
         const startInfo = activeFlowBlockAt(range.startContainer);
         const endInfo = activeFlowBlockAt(range.endContainer);
-        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) return false;
+        const sameListGroup = startInfo?.type === 'list' && endInfo?.type === 'list' &&
+          startInfo.listType === endInfo.listType &&
+          startInfo.els?.includes(endInfo.el) && endInfo.els?.includes(startInfo.el);
+        if (!startInfo || !endInfo || (startInfo.el !== endInfo.el && !sameListGroup)) return false;
       }
       const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
@@ -7575,6 +7633,7 @@ function studioHtmlV2(payload, libs) {
       });
       const blocks = sanitizeMergedFlowBlocks(Array.from(merged.children));
       const baseBlocks = blocks.length ? mergeSplitBlocks(blocks) : extractBlocksFromTemplate();
+      normalizeListNumbersAcrossBlocks(baseBlocks);
       continuousFlowHtml = serializeContinuousFlowBlocks(baseBlocks);
       const flowBlocks = pairAdjacentPortraitImages(baseBlocks);
       if (coverMode === 'none') {

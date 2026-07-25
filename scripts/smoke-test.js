@@ -314,10 +314,15 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.6"/);
+  assert.match(html, /"version":"0\.9\.7"/);
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);
+  assert.match(html, /resizing-image-frame\[data-resize-mode="s"\]/);
+  assert.match(html, /\.selectable-image, #imageTools, #imageList/);
+  assert.match(html, /node\.classList\.contains\('xhs-list-line'\)\) return false/);
+  assert.match(html, /const sameListGroup = startInfo\?\.type === 'list'/);
+  assert.match(html, /function normalizeListNumbersAcrossBlocks\(blocks\)/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
   assert.match(html, /按住 Alt 拖动/);
