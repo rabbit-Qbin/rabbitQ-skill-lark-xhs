@@ -60,10 +60,12 @@ function fetchDocument(url) {
   if (start < 0) throw new Error(`docs +fetch 返回不是 JSON：${text.slice(0, 400)}`);
   const payload = JSON.parse(text.slice(start));
   const data = payload.data || payload;
-  if (!data || typeof data.markdown !== "string") {
-    throw new Error("docs +fetch 返回中缺少 markdown 字段");
+  // 新版 lark-cli 返回 data.document.content（XML-ish），旧版返回 data.markdown。
+  const content = data?.document?.content ?? data?.markdown;
+  if (typeof content !== "string") {
+    throw new Error("docs +fetch 返回中缺少文档内容字段（document.content / markdown）");
   }
-  return { auth: true, title: data.title || "", markdown: data.markdown };
+  return { auth: true, title: data?.document?.title || data?.title || "", markdown: content };
 }
 
 function prefixBlockquote(content) {
@@ -73,15 +75,36 @@ function prefixBlockquote(content) {
     .join("\n");
 }
 
+function stripTags(value) {
+  return String(value || "").replace(/<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi, "").trim();
+}
+
+/**
+ * 清洗 docs +fetch 返回的文档内容为标准 Markdown。
+ * 兼容两种返回形态：
+ * - 新版 lark-cli：data.document.content（XML-ish，含 <title>/<h3>/<p>/<b>/<u>/<img src="token"/>）
+ * - 旧版：data.markdown（飞书自定义标签，如 <image token>、<grid>）
+ */
 function cleanLarkMarkdown(markdown) {
   const imageTokens = [];
+  let title = "";
   let body = String(markdown || "");
 
-  // 图片：记录 token，引用指向本地 assets 路径（下载后可能修正扩展名）。
+  body = body.replace(/<title>([\s\S]*?)<\/title>/, (_, inner) => {
+    title = stripTags(inner);
+    return "";
+  });
+
+  // 图片：新版 <img src="token"/> 与旧版 <image token="..."/> 都记录 token。
+  body = body.replace(/<img\b[^>]*?src="([^"]+)"[^>]*?\/?>/g, (_, token) => {
+    imageTokens.push(token);
+    const name = `img_${String(imageTokens.length).padStart(3, "0")}_${token.slice(0, 8)}`;
+    return `\n\n![图片 ${imageTokens.length}](assets/${name}.png)\n\n`;
+  });
   body = body.replace(/<image\b[^>]*?token="([^"]+)"[^>]*?\/?>/g, (_, token) => {
     imageTokens.push(token);
     const name = `img_${String(imageTokens.length).padStart(3, "0")}_${token.slice(0, 8)}`;
-    return `![图片 ${imageTokens.length}](assets/${name}.png)`;
+    return `\n\n![图片 ${imageTokens.length}](assets/${name}.png)\n\n`;
   });
 
   // 画板无法导出为图片，保留占位说明。
@@ -92,15 +115,32 @@ function cleanLarkMarkdown(markdown) {
   body = body.replace(/<file\b[^>]*?name="([^"]*)"[^>]*?\/?>/g, "**[附件: $1]**");
 
   // 引用类容器统一成 Markdown 引用块。
-  body = body.replace(/<callout\b[^>]*>([\s\S]*?)<\/callout>/g, (_, inner) => prefixBlockquote(inner));
-  body = body.replace(/<quote-container\b[^>]*>([\s\S]*?)<\/quote-container>/g, (_, inner) => prefixBlockquote(inner));
+  body = body.replace(/<callout\b[^>]*>([\s\S]*?)<\/callout>/g, (_, inner) => `\n\n${prefixBlockquote(stripTags(inner))}\n\n`);
+  body = body.replace(/<quote-container\b[^>]*>([\s\S]*?)<\/quote-container>/g, (_, inner) => `\n\n${prefixBlockquote(stripTags(inner))}\n\n`);
+
+  // 标题层级照原样映射。
+  body = body.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/g, (_, depth, inner) => `\n\n${"#".repeat(Number(depth))} ${stripTags(inner)}\n\n`);
+
+  // 行内样式。飞书常把一句话拆成多个连续 <u>/<b> 段，先合并再转换，
+  // 否则会得到 ++a++++b++ 这类断裂标记。
+  body = body.replace(/<\/u>\s*<u\b[^>]*>/g, "");
+  body = body.replace(/<\/b>\s*<b\b[^>]*>/g, "");
+  body = body.replace(/<b\b[^>]*>([\s\S]*?)<\/b>/g, "**$1**");
+  body = body.replace(/<strong\b[^>]*>([\s\S]*?)<\/strong>/g, "**$1**");
+  body = body.replace(/<u\b[^>]*>([\s\S]*?)<\/u>/g, "++$1++");
+  body = body.replace(/<text\b[^>]*>([\s\S]*?)<\/text>/g, "$1");
+
+  // 列表。
+  body = body.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/g, (_, inner) => `\n- ${stripTags(inner)}`);
+  body = body.replace(/<\/?(?:ul|ol)\b[^>]*>/g, "\n");
+
+  // 段落。
+  body = body.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/g, (_, inner) => (inner.trim() ? `\n\n${inner.trim()}\n\n` : "\n\n"));
+  body = body.replace(/<p\b[^>]*\/?>/g, "\n\n");
 
   // 分栏布局展平为顺序内容（栏与栏之间保留段落分隔）。
   body = body.replace(/<\/column>\s*<column\b[^>]*>/g, "\n\n");
   body = body.replace(/<\/?(?:grid|column)\b[^>]*>/g, "");
-
-  // 行内样式标签只留文字。
-  body = body.replace(/<text\b[^>]*>([\s\S]*?)<\/text>/g, "$1");
 
   // lark-table 等其余私有标签：保留文本，去掉标签本身。
   body = body.replace(/<\/?lark-table\b[^>]*>/g, "");
@@ -108,7 +148,7 @@ function cleanLarkMarkdown(markdown) {
 
   // 收敛多余空行。
   body = body.replace(/\n{3,}/g, "\n\n");
-  return { body: `${body.trim()}\n`, imageTokens };
+  return { title, body: `${body.trim()}\n`, imageTokens };
 }
 
 function downloadImages(imageTokens, assetsDir, body) {
@@ -158,8 +198,8 @@ function main() {
   if (opts.fetchJson) {
     const payload = JSON.parse(fs.readFileSync(opts.fetchJson, "utf8"));
     const data = payload.data || payload;
-    title = data.title || "";
-    rawMarkdown = data.markdown || "";
+    title = data?.document?.title || data?.title || "";
+    rawMarkdown = data?.document?.content ?? data?.markdown ?? "";
   } else {
     const fetchResult = fetchDocument(opts.url);
     if (!fetchResult.auth) {
@@ -170,7 +210,9 @@ function main() {
     rawMarkdown = fetchResult.markdown;
   }
 
-  const { body, imageTokens } = cleanLarkMarkdown(rawMarkdown);
+  const cleaned = cleanLarkMarkdown(rawMarkdown);
+  if (!title) title = cleaned.title;
+  const { body, imageTokens } = cleaned;
   let finalBody = body;
   let downloaded = 0;
   if (opts.fetchJson) {

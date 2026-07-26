@@ -68,7 +68,7 @@ async function main() {
     "",
     "这句包含==高亮词==强调。",
     "",
-    "这句包含++下划词++强调，还有\\~转义符。",
+    "这句包含++下划+词++强调，还有\\~转义符。",
     "",
     "| 模式 | 适合 | 页数 |",
     "| --- | --- | ---: |",
@@ -324,9 +324,9 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.19"/);
+  assert.match(html, /"version":"0\.9\.20"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
-  assert.match(html, /<span class="xhs-green-underline">下划词<\/span>/, "++text++ should map to underline inline emphasis");
+  assert.match(html, /<span class="xhs-green-underline">下划\+词<\/span>/, "++text++ should map to underline inline emphasis, allowing single + inside");
   assert.match(html, /还有~转义符/, "backslash-escaped punctuation should be unescaped");
   assert.ok(!/还有\\~转义符/.test(html), "escape backslash must not survive conversion");
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
@@ -395,8 +395,9 @@ async function main() {
   const larkFetchFixture = path.join(root, "lark-fetch.json");
   fs.writeFileSync(larkFetchFixture, JSON.stringify({
     data: {
-      title: "导出清洗回归",
-      markdown: '# 导出清洗回归\n\n正文第一段。\n\n<image token="OegLb5brabcdef" width="800" height="600"/>\n\n<callout emoji="bulb">这是高亮块内容</callout>\n\n<grid cols="2"><column width="50">左栏内容</column><column width="50">右栏内容</column></grid>\n\n<text color="red">红色文字</text>\n\n<view type="1"><file token="T123" name="演示.mp4"/></view>\n\n<whiteboard token="WB999"/>\n',
+      document: {
+        content: '<title>导出清洗回归</title><h3>01 章节</h3><p>正文<b>加粗</b>与<u>下划</u><u>线+符号</u>。</p><img name="image.png" href="https://internal" mime="image/png" scale="1.0" src="OegLb5brabcdef"/><p></p><callout emoji="bulb"><p>这是高亮块内容</p></callout><grid cols="2"><column width="50">左栏内容</column><column width="50">右栏内容</column></grid><view type="1"><file token="T123" name="演示.mp4"/></view><whiteboard token="WB999"/><p>结尾</p>',
+      },
     },
   }));
   const larkExportDir = path.join(root, "lark-export");
@@ -408,13 +409,14 @@ async function main() {
   assert.strictEqual(larkExport.status, 0, larkExport.stderr || larkExport.stdout);
   const larkMd = fs.readFileSync(path.join(larkExportDir, "导出清洗回归.md"), "utf8");
   assert.match(larkMd, /title: 导出清洗回归/);
+  assert.match(larkMd, /^### 01 章节$/m);
+  assert.match(larkMd, /正文\*\*加粗\*\*与\+\+下划线\+符号\+\+。/);
   assert.match(larkMd, /!\[图片 1\]\(assets\/img_001_OegLb5br\.png\)/);
   assert.match(larkMd, /^> 这是高亮块内容$/m);
   assert.match(larkMd, /左栏内容\n\n右栏内容/);
-  assert.match(larkMd, /^红色文字$/m);
   assert.match(larkMd, /\*\*\[附件: 演示\.mp4\]\*\*/);
   assert.match(larkMd, /\*\(画板: WB999\)\*/);
-  assert.doesNotMatch(larkMd, /<\/?(?:image|callout|grid|column|text|view|file|whiteboard)\b/);
+  assert.doesNotMatch(larkMd, /<\/?(?:img|image|callout|grid|column|text|view|file|whiteboard|h3|p|b|u)\b/);
   const larkTokens = JSON.parse(fs.readFileSync(path.join(larkExportDir, "_image_tokens.json"), "utf8"));
   assert.deepStrictEqual(larkTokens, ["OegLb5brabcdef"]);
   assert.doesNotMatch(html, /&lt;br&gt;/);
