@@ -45,7 +45,7 @@
     <text x="28" y="286" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 第二遍：AI 判断强调与结构</text>
     <text x="28" y="322" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 通读全文补副标题、选封面</text>
     <text x="28" y="358" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 生图可用时生成并直插 HTML</text>
-    <text x="28" y="392" fill="#2e5fb2" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">==有色字== 与 ++下划线++ 行内语法</text>
+    <text x="28" y="392" fill="#2e5fb2" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">有色字、下划线行内强调语法</text>
   </g>
 
   <path d="M789 423h46" stroke="#4d7fd2" stroke-width="5" stroke-linecap="round"/>
