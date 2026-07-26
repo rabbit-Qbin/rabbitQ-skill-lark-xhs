@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.14";
+const VERSION = "0.9.15";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -1813,12 +1813,15 @@ function studioHtmlV2(payload, libs) {
       return Boolean(numberChild && titleChild);
     }
     function headingHtml(number, titleText, level) {
+      // Caret markers use zero-width spaces; if a rebuild ever captured one
+      // into the title text, drop it here so it cannot persist visibly.
+      const cleanTitle = String(titleText || '').replace(/\\u200b/g, '');
       if (String(level) === '2') {
-        const safeTitle = String(titleText || '').trim();
+        const safeTitle = cleanTitle.trim();
         return '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + escWithBreaks(safeTitle) + '</span>';
       }
       const safeNumber = String(number || '00').match(/^(\\d{2})/)?.[1] || '00';
-      const safeTitle = stripHeadingNumberPrefix(titleText, safeNumber);
+      const safeTitle = stripHeadingNumberPrefix(cleanTitle, safeNumber);
       return '<span class="xhs-heading-number" contenteditable="true" spellcheck="false">' + esc(safeNumber) + '</span>' +
         '<span class="xhs-heading-space" aria-hidden="true">&nbsp;</span>' +
         '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + escWithBreaks(safeTitle) + '</span>';
@@ -1827,7 +1830,7 @@ function studioHtmlV2(payload, libs) {
       const block = makeElement('section', 'xhs-heading xhs-block');
       block.setAttribute('contenteditable', 'false');
       block.dataset.level = String(level) === '2' ? '2' : '1';
-      block.innerHTML = headingHtml(number, titleText, block.dataset.level);
+      block.innerHTML = headingHtml(number, String(titleText || '').replace(/\\u200b/g, ''), block.dataset.level);
       return block;
     }
     function headingFromElement(el) {
@@ -2442,6 +2445,7 @@ function studioHtmlV2(payload, libs) {
       return pages.findIndex((page) => String(page.html || '').includes(token) || String(page.tailHtml || '').includes(token));
     }
     function repaginateBodyBlocks(blocks, selectedImageId = '', selectedBlockId = '') {
+      invalidateSerializedDomCache();
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml() };
       let normalizedBlocks = blocks;
       if (blocks.length) {
@@ -3179,6 +3183,7 @@ function studioHtmlV2(payload, libs) {
         '<div class="cover-subtitle" contenteditable="true" spellcheck="false" data-placeholder="点击这里填写副标题">' + sub + '</div></div>';
     }
     function paginate() {
+      invalidateSerializedDomCache();
       const blocks = pairAdjacentPortraitImages(extractBlocksFromTemplate());
       normalizeListNumbersAcrossBlocks(blocks);
       continuousFlowHtml = serializeContinuousFlowBlocks(blocks);
@@ -3217,6 +3222,11 @@ function studioHtmlV2(payload, libs) {
         if (preview) preview.style.transform = 'scale(' + scale + ')';
       });
     }
+    // Overview previews must not eagerly decode multi-MB base64 images:
+    // lazy/async keeps offscreen cards cheap and the main thread responsive.
+    function overviewPreviewHtml(html) {
+      return String(html || '').replace(/<img\\b/g, '<img loading="lazy" decoding="async"');
+    }
     function renderOverview() {
       if (stageScale.parentElement !== stageWrap) stageWrap.appendChild(stageScale);
       if (overviewObserver) {
@@ -3227,7 +3237,7 @@ function studioHtmlV2(payload, libs) {
       overviewRail.innerHTML = pages.map((page, i) =>
         '<article class="overview-item' + (i === pageIndex ? ' active' : '') + '" data-index="' + i + '" tabindex="0" aria-label="第 ' + (i + 1) + ' 页，共 ' + pages.length + ' 页">' +
           '<div class="overview-page-label">' + (i + 1) + '/' + pages.length + '</div>' +
-          '<div class="overview-card-frame">' + (i === pageIndex ? '' : (shouldHydrateImmediately(i) ? '<div class="overview-card-scale">' + cardHtml(page) + '</div>' : '<div class="overview-card-placeholder">第 ' + (i + 1) + ' 页</div>')) + '</div>' +
+          '<div class="overview-card-frame">' + (i === pageIndex ? '' : (shouldHydrateImmediately(i) ? '<div class="overview-card-scale">' + overviewPreviewHtml(cardHtml(page)) + '</div>' : '<div class="overview-card-placeholder">第 ' + (i + 1) + ' 页</div>')) + '</div>' +
         '</article>'
       ).join('');
       overviewRail.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
@@ -3237,7 +3247,7 @@ function studioHtmlV2(payload, libs) {
         if (!Number.isFinite(index) || index === pageIndex || !pages[index]) return;
         const frame = item.querySelector('.overview-card-frame');
         if (!frame || frame.querySelector('.overview-card-scale')) return;
-        frame.innerHTML = '<div class="overview-card-scale">' + cardHtml(pages[index]) + '</div>';
+        frame.innerHTML = '<div class="overview-card-scale">' + overviewPreviewHtml(cardHtml(pages[index])) + '</div>';
         frame.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
         frame.querySelectorAll('.xhs-caret-marker, .xhs-caret-anchor, .xhs-block-halo, .xhs-resize-handle').forEach((node) => node.remove());
         requestAnimationFrame(fitOverviewCards);
@@ -3252,7 +3262,7 @@ function studioHtmlV2(payload, libs) {
       }
       const openPage = (item) => {
         saveCurrentPage({ skipNormalize: true });
-        persistDraftCheckpoint();
+        schedulePersistDraft();
         pageIndex = Number(item.dataset.index);
         selectedFrame = null;
         renderAll();
@@ -3296,7 +3306,7 @@ function studioHtmlV2(payload, libs) {
       pageTabs.querySelectorAll('button').forEach((button) => {
         button.addEventListener('click', () => {
           saveCurrentPage({ skipNormalize: true });
-          persistDraftCheckpoint();
+          schedulePersistDraft();
           pageIndex = Number(button.dataset.index);
           selectedFrame = null;
           renderAll();
@@ -3669,24 +3679,37 @@ function studioHtmlV2(payload, libs) {
       if (page.type === 'cover') {
         const tail = clone.querySelector('.xhs-cover-tail-frame');
         if (tail) {
-          page.tailHtml = tail.innerHTML;
+          const nextTail = tail.innerHTML;
+          if (page.tailHtml !== nextTail) {
+            page.tailHtml = nextTail;
+            invalidateSerializedDomCache();
+          }
           tail.remove();
         } else {
           page.tailHtml = page.tailHtml || '';
         }
-        page.html = clone.innerHTML;
+        const nextHtml = clone.innerHTML;
+        if (page.html !== nextHtml) {
+          page.html = nextHtml;
+          invalidateSerializedDomCache();
+        }
       } else {
         const frame = clone.querySelector('.xhs-body-card .xhs-body-frame') || clone.querySelector('.xhs-body-frame:not(.xhs-cover-tail-frame)');
-        if (frame) page.html = frame.innerHTML;
+        if (frame) {
+          const nextHtml = frame.innerHTML;
+          if (page.html !== nextHtml) {
+            page.html = nextHtml;
+            invalidateSerializedDomCache();
+          }
+        }
       }
-      if (!skipPersist) persistDraft();
+      if (!skipPersist) schedulePersistDraft();
     }
     function scheduleLightSave() {
       if (isComposingText) return;
       window.clearTimeout(lightSaveTimer);
       lightSaveTimer = window.setTimeout(() => saveCurrentPage({ skipNormalize: true, skipPersist: true }), 180);
-      window.clearTimeout(draftPersistTimer);
-      draftPersistTimer = window.setTimeout(() => persistDraft(), 1000);
+      schedulePersistDraft(1000);
     }
     function scheduleOverflowReflow(force = false) {
       if (isComposingText) {
@@ -4091,7 +4114,7 @@ function studioHtmlV2(payload, libs) {
       const isGapCursor = Boolean(block?.classList?.contains('xhs-gap-cursor') || block?.dataset?.xhsGapCursor === '1');
       if (!isGapCursor && !isManualBlank && !isEditableParagraphBlock(block)) return false;
       saveCurrentPage({ skipNormalize: true });
-      persistDraftCheckpoint();
+      schedulePersistDraft();
       if (isGapCursor) {
         markParagraphEnterHandled();
         block.classList.remove('xhs-caret-anchor', 'xhs-gap-cursor');
@@ -4371,6 +4394,7 @@ function studioHtmlV2(payload, libs) {
       return merged;
     }
     function repaginateContinuousHolder(holder, caretMarkerId, previousPages, previousPageIndex) {
+      invalidateSerializedDomCache();
       const cover = pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml(), tailHtml: '' };
       const baseBlocks = mergeSplitBlocks(sanitizeMergedFlowBlocks(Array.from(holder.children)));
       normalizeListNumbersAcrossBlocks(baseBlocks);
@@ -6697,7 +6721,7 @@ function studioHtmlV2(payload, libs) {
     }
     function buildFlowBlocksFromContent(targetType, targetLevel, info) {
       if (targetType === 'heading') {
-        const plain = stripHeadingNumberPrefix(flowBlockPlainText(info), '00');
+        const plain = stripHeadingNumberPrefix(flowBlockPlainText(info), '00').replace(/\\u200b/g, '');
         const number = targetLevel === '1' ? nextAutoHeadingNumber() : '';
         return [makeNewHeadingBlock(number, plain, targetLevel)];
       }
@@ -7422,16 +7446,29 @@ function studioHtmlV2(payload, libs) {
       continuousFlowHtml = serializeContinuousFlowBlocks(Array.from(holder.children));
       return continuousFlowHtml;
     }
+    // Expensive parts of serializeStudioState (full-flow rebuild + deflate of
+    // every page) are cached here; anything that mutates page HTML must
+    // invalidate. Assembling the state object from cached parts is cheap.
+    let serializedDomCache = null;
+    function invalidateSerializedDomCache() {
+      serializedDomCache = null;
+    }
     function serializeStudioState() {
-      refreshContinuousFlowHtmlFromPages();
+      if (!serializedDomCache) {
+        refreshContinuousFlowHtmlFromPages();
+        serializedDomCache = {
+          flowHtml: deflateImageUris(continuousFlowHtml),
+          pages: pages.map((page) => ({ type: page.type, html: deflateImageUris(page.html), tailHtml: deflateImageUris(page.tailHtml || '') })),
+        };
+      }
       return {
         generator: 'rabbitQ-skill-lark-xhs',
         version: config.version,
         savedAt: new Date().toISOString(),
         sourceFingerprint: config.sourceFingerprint || '',
         pageIndex,
-        flowHtml: deflateImageUris(continuousFlowHtml),
-        pages: pages.map((page) => ({ type: page.type, html: deflateImageUris(page.html), tailHtml: deflateImageUris(page.tailHtml || '') })),
+        flowHtml: serializedDomCache.flowHtml,
+        pages: serializedDomCache.pages,
         currentBgTheme,
         currentAccentTheme,
         currentCoverTheme,
@@ -7446,6 +7483,21 @@ function studioHtmlV2(payload, libs) {
           bodyPadY: bodyPadYRange.value,
         },
       };
+    }
+    function persistDraftNow() {
+      persistDraft();
+      persistDraftCheckpoint();
+    }
+    // Serializing the whole document costs 200-350ms on image-heavy files, so
+    // never do it synchronously on an interaction path; coalesce instead and
+    // flush once when the user pauses.
+    function schedulePersistDraft(delay = 450) {
+      if (restoringState || !pages.length) return;
+      window.clearTimeout(draftPersistTimer);
+      draftPersistTimer = window.setTimeout(() => {
+        draftPersistTimer = null;
+        persistDraftNow();
+      }, delay);
     }
     function persistDraft() {
       if (restoringState || !pages.length) return;
@@ -7646,6 +7698,7 @@ function studioHtmlV2(payload, libs) {
     function applyStudioState(state, options = {}) {
       if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
       restoringState = true;
+      invalidateSerializedDomCache();
       try {
         if (state.imageTokens && typeof state.imageTokens === 'object') {
           Object.keys(state.imageTokens).forEach((token) => {
