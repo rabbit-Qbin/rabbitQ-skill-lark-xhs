@@ -75,6 +75,8 @@ metadata:
    node scripts/lark-export.js <飞书URL> -o <输出目录>
    ```
    脚本自动完成：`docs +fetch` 取文档 → 清洗飞书私有标签（image/callout/grid/lark-table 等）→ `docs +media-download` 逐张下载图片到 `assets/` → 产出 `<输出目录>/<标题>.md + assets/ + _image_tokens.json`。
+   - 已验证环境：`lark-cli 1.0.65`。新旧版本 `+fetch` 返回格式不同（`document.content` XML / `markdown`），脚本内部已兼容，AI 不需要分别处理。
+   - **飞书原生样式会随导出带过来**：文档里的加粗 → `**`、下划线 → `++`、高亮块（callout）→ `>` 引用，转换时直接生效，不要在第二遍样式判断里重复标记同一段文字。
 3. **授权失败处理**：脚本以退出码 2 结束时，把下面这句发给用户并等其完成授权后重跑同一条命令：
    `lark-cli auth login --scope "wiki:wiki:readonly docx:document:readonly"`
    文档对当前账号不可见（403/权限不足）时，如实告知用户去文档分享设置里开权限，不要反复重试。
