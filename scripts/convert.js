@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.8";
+const VERSION = "0.9.9";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -962,6 +962,7 @@ function studioHtmlV2(payload, libs) {
     .overview-card-frame { position: relative; width: 100%; aspect-ratio: ${width} / ${height}; overflow: hidden; border: 2px solid transparent; background: #fff; box-shadow: 0 12px 34px rgba(20, 24, 30, .12); }
     .overview-item.active .overview-card-frame { border-color: #17202a; }
     .overview-card-scale { position: absolute; left: 0; top: 0; width: ${width}px; height: ${height}px; transform-origin: top left; pointer-events: none; }
+    .overview-card-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: #98a2b3; font-size: 28px; font-weight: 760; background: linear-gradient(135deg, rgba(245, 247, 250, .72), rgba(255, 255, 255, .96)); }
     .overview-rail[hidden], .stage-wrap[hidden], .page-tabs[hidden] { display: none; }
     .xhs-card { position: relative; width: ${width}px; height: ${height}px; overflow: hidden; background-color: var(--xhs-card-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); color: #111; letter-spacing: 0; box-shadow: 0 26px 90px rgba(20, 24, 30, .18); }
     .cover-media { position: absolute; left: 0; top: 0; width: 100%; height: ${coverSplitY}px; background-color: var(--xhs-cover-bg); background-image: var(--xhs-paper-pattern, none); background-size: var(--xhs-paper-size, auto); }
@@ -1290,6 +1291,7 @@ function studioHtmlV2(payload, libs) {
     let compositionNeedsReflow = false;
     const editorUndoStack = [];
     const editorRedoStack = [];
+    let draftPersistTimer = null;
     let historyTypingTimer = null;
     let historyTypingActive = false;
     let historyTypingTarget = null;
@@ -1305,6 +1307,8 @@ function studioHtmlV2(payload, libs) {
     let manualBlankDeleteKeydownTimer = null;
     let paragraphEnterKeydownHandled = false;
     let paragraphEnterKeydownTimer = null;
+    let overviewObserver = null;
+    let panelSyncRaf = 0;
     const boundFrames = new WeakSet();
     const imageResizeObserver = window.ResizeObserver ? new ResizeObserver((entries) => {
       entries.forEach((entry) => {
@@ -3145,14 +3149,37 @@ function studioHtmlV2(payload, libs) {
     }
     function renderOverview() {
       if (stageScale.parentElement !== stageWrap) stageWrap.appendChild(stageScale);
+      if (overviewObserver) {
+        overviewObserver.disconnect();
+        overviewObserver = null;
+      }
+      const shouldHydrateImmediately = (index) => Math.abs(index - pageIndex) <= 2;
       overviewRail.innerHTML = pages.map((page, i) =>
         '<article class="overview-item' + (i === pageIndex ? ' active' : '') + '" data-index="' + i + '" tabindex="0" aria-label="第 ' + (i + 1) + ' 页，共 ' + pages.length + ' 页">' +
           '<div class="overview-page-label">' + (i + 1) + '/' + pages.length + '</div>' +
-          '<div class="overview-card-frame">' + (i === pageIndex ? '' : '<div class="overview-card-scale">' + cardHtml(page) + '</div>') + '</div>' +
+          '<div class="overview-card-frame">' + (i === pageIndex ? '' : (shouldHydrateImmediately(i) ? '<div class="overview-card-scale">' + cardHtml(page) + '</div>' : '<div class="overview-card-placeholder">第 ' + (i + 1) + ' 页</div>')) + '</div>' +
         '</article>'
       ).join('');
       overviewRail.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
       overviewRail.querySelectorAll('.xhs-caret-marker, .xhs-caret-anchor, .xhs-block-halo').forEach((node) => node.remove());
+      const hydrateOverviewItem = (item) => {
+        const index = Number(item.dataset.index);
+        if (!Number.isFinite(index) || index === pageIndex || !pages[index]) return;
+        const frame = item.querySelector('.overview-card-frame');
+        if (!frame || frame.querySelector('.overview-card-scale')) return;
+        frame.innerHTML = '<div class="overview-card-scale">' + cardHtml(pages[index]) + '</div>';
+        frame.querySelectorAll('[contenteditable]').forEach((node) => node.setAttribute('contenteditable', 'false'));
+        frame.querySelectorAll('.xhs-caret-marker, .xhs-caret-anchor, .xhs-block-halo, .xhs-resize-handle').forEach((node) => node.remove());
+        requestAnimationFrame(fitOverviewCards);
+      };
+      if ('IntersectionObserver' in window) {
+        overviewObserver = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) hydrateOverviewItem(entry.target);
+          });
+        }, { root: overviewRail, rootMargin: '120% 80%' });
+        overviewRail.querySelectorAll('.overview-item').forEach((item) => overviewObserver.observe(item));
+      }
       const openPage = (item) => {
         saveCurrentPage({ skipNormalize: true });
         persistDraftCheckpoint();
@@ -3507,6 +3534,7 @@ function studioHtmlV2(payload, libs) {
     }
     function saveCurrentPage(options = {}) {
       const skipNormalize = Boolean(options.skipNormalize);
+      const skipPersist = Boolean(options.skipPersist);
       const page = pages[pageIndex];
       const card = stageScale.querySelector('.xhs-card');
       if (!page || !card) return;
@@ -3537,12 +3565,14 @@ function studioHtmlV2(payload, libs) {
         const frame = clone.querySelector('.xhs-body-card .xhs-body-frame') || clone.querySelector('.xhs-body-frame:not(.xhs-cover-tail-frame)');
         if (frame) page.html = frame.innerHTML;
       }
-      persistDraft();
+      if (!skipPersist) persistDraft();
     }
     function scheduleLightSave() {
       if (isComposingText) return;
       window.clearTimeout(lightSaveTimer);
-      lightSaveTimer = window.setTimeout(() => saveCurrentPage({ skipNormalize: true }), 180);
+      lightSaveTimer = window.setTimeout(() => saveCurrentPage({ skipNormalize: true, skipPersist: true }), 180);
+      window.clearTimeout(draftPersistTimer);
+      draftPersistTimer = window.setTimeout(() => persistDraft(), 1000);
     }
     function scheduleOverflowReflow(force = false) {
       if (isComposingText) {
@@ -5219,6 +5249,13 @@ function studioHtmlV2(payload, libs) {
       coverModeFullBtn?.classList.toggle('active', coverMode === 'full');
       coverModeHalfBtn?.classList.toggle('active', coverMode === 'half');
       coverModeNoneBtn?.classList.toggle('active', coverMode === 'none');
+    }
+    function schedulePanelToolsSync() {
+      if (panelSyncRaf) return;
+      panelSyncRaf = requestAnimationFrame(() => {
+        panelSyncRaf = 0;
+        syncPanelTools();
+      });
     }
     function clearSelectedFlowBlock() {
       stageScale.querySelectorAll('.selected-flow-block').forEach((node) => node.classList.remove('selected-flow-block'));
@@ -7760,7 +7797,7 @@ function studioHtmlV2(payload, libs) {
     });
     document.addEventListener('selectionchange', () => {
       if (!stageScale?.isConnected) return;
-      syncPanelTools();
+      schedulePanelToolsSync();
     });
     window.addEventListener('resize', () => {
       fitStage();
