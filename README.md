@@ -4,7 +4,7 @@
 
 把飞书云文档导出的 Markdown、图片附件或完整 ZIP，转换成一个可在浏览器里继续编辑的 `xhs-studio.html`。默认只生成 HTML；确认排版后，再按需批量导出 1080 × 1440 PNG ZIP。
 
-当前版本：**v0.9.13**
+当前版本：**v0.9.14**
 
 ![rabbitQ 飞书 Markdown 转小红书 3:4 图文工作流](assets/rabbitq-xhs-workflow.svg)
 
