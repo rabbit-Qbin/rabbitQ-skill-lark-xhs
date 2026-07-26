@@ -19,9 +19,9 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.23";
+const VERSION = "0.9.24";
 const HEADING_LEVEL2_MARGIN_PX = 40;
-const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
+const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 0;
 const DEFAULT_BG_THEME = "white";
 const DEFAULT_ACCENT_THEME = "blue";
 const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点|总结|小结|一句话|建议|提示|技巧|要点|避坑|误区|须知|干货";
@@ -942,7 +942,7 @@ function studioHtmlV2(payload, libs) {
       --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
       --body-regular-weight: 720;
       --body-bold-weight: 720;
-      --body-unbold-weight: 700;
+      --body-unbold-weight: 550;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
@@ -5424,6 +5424,20 @@ function studioHtmlV2(payload, libs) {
       selectedFlowBlock = null;
       syncPanelTools();
     }
+    function deleteSelectedFlowBlock() {
+      if (!selectedFlowBlock || !stageScale.contains(selectedFlowBlock)) return false;
+      const block = selectedFlowBlock;
+      const fallback = block.previousElementSibling || block.nextElementSibling;
+      clearSelectedFlowBlock();
+      recordEditorHistory();
+      block.remove();
+      const frame = stageScale.querySelector('.xhs-body-card .xhs-body-frame, .xhs-cover-tail-frame');
+      const caretTarget = fallback && frame?.contains(fallback) ? fallback : null;
+      if (caretTarget) setCaretInside(caretTarget);
+      saveCurrentPage({ skipNormalize: true });
+      scheduleOverflowReflow(true);
+      return true;
+    }
     function selectFlowBlock(block) {
       clearSelectedFlowBlock();
       selectedFlowBlock = block || null;
@@ -8146,6 +8160,18 @@ function studioHtmlV2(payload, libs) {
       const redo = event.key.toLowerCase() === 'y' || event.shiftKey;
       restoreEditorHistory(redo ? 'redo' : 'undo');
     });
+    document.addEventListener('keydown', (event) => {
+      if (!selectedFlowBlock || isHistoryShortcut(event) || isComposingText) return;
+      if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+      const target = event.target;
+      const editable = target?.isContentEditable ? target : target?.closest?.('[contenteditable="true"]');
+      // Caret inside a block that still has text = normal editing; only a
+      // selected block without an inner caret, or one already emptied, is
+      // deleted as a whole. Corner labels (结论/注意) do not count as text.
+      const contentRoot = selectedFlowBlock.querySelector('.xhs-callout-body, .xhs-heading-title, .xhs-code-content') || selectedFlowBlock;
+      if (editable && cleanText(contentRoot.textContent || '')) return;
+      if (deleteSelectedFlowBlock()) event.preventDefault();
+    }, true);
     document.addEventListener('keydown', (event) => {
       if (!selectedFrame) return;
       const target = event.target;

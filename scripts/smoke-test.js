@@ -328,7 +328,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.23"/);
+  assert.match(html, /"version":"0\.9\.24"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /<span class="xhs-green-underline">下划\+词<\/span>/, "++text++ should map to underline inline emphasis, allowing single + inside");
   assert.match(html, /<code>\*\*粗\*\*<\/code>/, "code spans must protect literal ** markers");
@@ -366,7 +366,7 @@ async function main() {
   assert.match(html, /--body-line-px: 58px;/);
   assert.match(html, /--body-regular-weight: 720;/);
   assert.match(html, /--body-bold-weight: 720;/);
-  assert.match(html, /--body-unbold-weight: 700;/);
+  assert.match(html, /--body-unbold-weight: 550;/);
   assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /<strong>结论<\/strong><p><strong>总结：这是总结卡片/, "总结 label should trigger a card with the inferred 结论 corner");
@@ -397,6 +397,7 @@ async function main() {
   assert.match(html, /size: line \+ 'px ' \+ line \+ 'px'/);
   assert.match(html, /headingUnderline \/ 4/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \{[\s\S]*?margin: 0 0 40px;/, "二级标题只保留下间距，避免与前一结构块叠加");
+  assert.match(html, /\.xhs-body-frame > \.xhs-page-start\.xhs-heading\[data-level="2"\] \{ margin-top: 0px;/, "level-2 headings must start flush at page top (no phantom blank line)");
   assert.doesNotMatch(html, /\.xhs-heading\[data-level="1"\] \+ \.xhs-heading\[data-level="2"\]/, "标题间距应使用统一的单向节奏规则");
   assert.match(html, /\.xhs-body-frame > \.xhs-page-end \{ margin-bottom: 0 !important; \}/);
 
@@ -590,7 +591,7 @@ async function main() {
     assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
 
     // Regression: body text starts at 720, but the B control must be a real
-    // two-state toggle: 720 default -> 700 unbold -> 720 default.
+    // two-state toggle: 720 default -> 550 unbold -> 720 default.
     const boldToggleBody = orderedPage.locator('#stageScale .xhs-list-body').first();
     await boldToggleBody.evaluate((body) => {
       const range = document.createRange();
@@ -612,17 +613,17 @@ async function main() {
       weight: getComputedStyle(body.querySelector('.xhs-text-regular') || body).fontWeight,
       regularMarks: body.querySelectorAll('.xhs-text-regular').length,
     }));
-    assert.strictEqual(unboldState.weight, '700', 'first B click should change selected default text to weight 700');
+    assert.strictEqual(unboldState.weight, '550', 'first B click should change selected default text to weight 550');
     assert.ok(unboldState.regularMarks >= 1, 'first B click should persist an explicit unbold mark');
     assert.strictEqual(
       await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
       true,
-      '700 unbold formatting should be saved into the current page state',
+      '550 unbold formatting should be saved into the current page state',
     );
     assert.strictEqual(
       await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
       false,
-      '700 unbold selection should turn off the B control',
+      '550 unbold selection should turn off the B control',
     );
     await orderedPage.click('#boldBtn');
     await orderedPage.waitForTimeout(120);
@@ -3057,6 +3058,21 @@ async function main() {
     await page.waitForTimeout(120);
     assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 0, "clicking green text again must toggle it off");
     assert.strictEqual(await stackedP.locator('span:not([class]), span[class=""]').count(), 0, "full toggle-off must return plain text without bare spans");
+
+    // Regression: a selected structural block can be deleted with Backspace,
+    // including an emptied card whose caret is still inside the body.
+    await bodyFrame.evaluate((frame) => {
+      const card = document.createElement("section");
+      card.className = "xhs-callout xhs-block";
+      card.innerHTML = '<div class="xhs-callout-label">删除我</div><div class="xhs-callout-body" contenteditable="true"></div>';
+      frame.appendChild(card);
+      card.querySelector(".xhs-callout-body").focus();
+      selectFlowBlock(card);
+    });
+    await page.waitForTimeout(100);
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(500);
+    assert.strictEqual(await page.locator("#stageScale .xhs-callout").filter({ hasText: "删除我" }).count(), 0, "selected emptied card should be deleted with Backspace");
 
     // Regression: inserted/pasted images are downscaled before embedding, and
     // serialized editor state carries image tokens instead of base64 payloads.
