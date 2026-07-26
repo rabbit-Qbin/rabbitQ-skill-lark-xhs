@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.17";
+const VERSION = "0.9.18";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -551,7 +551,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     const strongOnly = text.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)$/);
     const strongLabel = plainMarkdownText(strongStart?.[1] || "").replace(/[:：\s]+$/g, "");
     const explicitCardStart = CARD_LABEL_EXACT.test(strongLabel);
-    if ((strongOnly || explicitCardStart) && plainMarkdownText(text).length >= 18) {
+    const plainLength = plainMarkdownText(text).length;
+    // Full-bold paragraphs become cards only within a sane length window;
+    // long ones stay ordinary bold paragraphs. Label-led cards have no cap.
+    const strongOnlyCard = Boolean(strongOnly) && plainLength >= 18 && plainLength <= 75;
+    if ((strongOnlyCard || explicitCardStart) && plainLength >= 18) {
       const label = inferCardLabel(text);
       blocks.push(`<section data-xhs-block-type="callout" style="border-left:4px solid #57b560;background:#f4faf3;"><strong>${escapeHtml(label)}</strong><p>${inlineMarkdownToHtml(text, markdownFile)}</p></section>`);
       return;
@@ -635,7 +639,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (/^`{3}/.test(line)) return "code";
     if (splitMarkdownTableRow(line).length >= 2) return "table";
     const strongOnly = line.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)$/);
-    if (strongOnly && plainMarkdownText(line).length >= 18) return "callout";
+    if (strongOnly && plainMarkdownText(line).length >= 18 && plainMarkdownText(line).length <= 75) return "callout";
     return "prose";
   }
   function shouldInsertMarkdownFlowBlank(upcoming) {
