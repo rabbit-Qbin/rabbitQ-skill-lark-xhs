@@ -314,7 +314,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.11"/);
+  assert.match(html, /"version":"0\.9\.12"/);
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);
@@ -2988,6 +2988,47 @@ async function main() {
     await page.waitForTimeout(120);
     assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 0, "clicking green text again must toggle it off");
     assert.strictEqual(await stackedP.locator('span:not([class]), span[class=""]').count(), 0, "full toggle-off must return plain text without bare spans");
+
+    // Regression: inserted/pasted images are downscaled before embedding, and
+    // serialized editor state carries image tokens instead of base64 payloads.
+    const imageOptProbe = await page.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 3000;
+      canvas.height = 2000;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#4d7fd2";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const bigSrc = canvas.toDataURL("image/png");
+      const optimized = await downscaleImageDataUrl(bigSrc);
+      const optimizedImg = await new Promise((resolve) => {
+        const probe = new Image();
+        probe.onload = () => resolve({ width: probe.naturalWidth, height: probe.naturalHeight });
+        probe.onerror = () => resolve(null);
+        probe.src = optimized;
+      });
+      const smallSrc = canvas.toDataURL("image/jpeg", 0.5);
+      const tiny = document.createElement("canvas");
+      tiny.width = 40;
+      tiny.height = 30;
+      tiny.getContext("2d").fillRect(0, 0, 40, 30);
+      const smallKept = await downscaleImageDataUrl(tiny.toDataURL("image/png"));
+      const stateJson = JSON.stringify(serializeStudioState());
+      return {
+        optimized,
+        optimizedImg,
+        smallKeptSame: smallKept === tiny.toDataURL("image/png"),
+        stateHasBase64: stateJson.includes("data:image"),
+        stateLength: stateJson.length,
+        smallSrc,
+      };
+    });
+    assert.ok(imageOptProbe.optimizedImg, "downscaled image should stay decodable");
+    assert.ok(Math.max(imageOptProbe.optimizedImg.width, imageOptProbe.optimizedImg.height) <= 1920, "inserted images must be capped at 1920 on the longest side");
+    assert.strictEqual(imageOptProbe.optimizedImg.width, 1920, "3000x2000 should downscale to 1920x1280");
+    assert.strictEqual(imageOptProbe.optimized.startsWith("data:image/jpeg"), true, "opaque downscaled images should re-encode as JPEG");
+    assert.ok(imageOptProbe.optimized.length < imageOptProbe.smallSrc.length * 20, "downscaled payload should be much smaller than the original");
+    assert.strictEqual(imageOptProbe.smallKeptSame, true, "small images must pass through untouched");
+    assert.strictEqual(imageOptProbe.stateHasBase64, false, "serialized editor state must not embed base64 image payloads");
 
     // Regression: images no longer have dedicated replace/delete buttons.
     // Double-click must open the native file chooser to replace locally,

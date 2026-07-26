@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.11";
+const VERSION = "0.9.12";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -3549,6 +3549,50 @@ function studioHtmlV2(payload, libs) {
         reader.readAsDataURL(file);
       });
     }
+    // Inserted/pasted images arrive as full-resolution base64 (phone photos can
+    // be 10MB+ each) and would bloat the single-file HTML back into crash
+    // territory. Downscale anything beyond what 2x export needs, keep alpha.
+    const INSERT_IMAGE_MAX_SIDE = 1920;
+    function downscaleImageDataUrl(dataUrl) {
+      return new Promise((resolve) => {
+        if (!/^data:image\\/(png|jpe?g|webp);base64,/i.test(dataUrl || '')) {
+          resolve(dataUrl);
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          const width = img.naturalWidth || 0;
+          const height = img.naturalHeight || 0;
+          const longest = Math.max(width, height);
+          if (!longest || longest <= INSERT_IMAGE_MAX_SIDE) {
+            resolve(dataUrl);
+            return;
+          }
+          const ratio = INSERT_IMAGE_MAX_SIDE / longest;
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(width * ratio));
+          canvas.height = Math.max(1, Math.round(height * ratio));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          let hasAlpha = false;
+          try {
+            const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            for (let i = 3; i < pixels.length; i += 4) {
+              if (pixels[i] < 255) {
+                hasAlpha = true;
+                break;
+              }
+            }
+          } catch (_) {}
+          resolve(hasAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.88));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+      });
+    }
+    function readImageFileAsOptimizedDataUrl(file) {
+      return readFileAsDataUrl(file).then((src) => (src ? downscaleImageDataUrl(src) : ''));
+    }
     function insertNodesAtSelection(nodes, editable) {
       const selection = window.getSelection();
       let range = null;
@@ -3584,7 +3628,7 @@ function studioHtmlV2(payload, libs) {
       const files = Array.from(event.clipboardData?.files || []).filter((file) => /^image\//i.test(file.type));
       if (files.length) {
         event.preventDefault();
-        const srcs = (await Promise.all(files.map(readFileAsDataUrl))).filter(Boolean);
+        const srcs = (await Promise.all(files.map(readImageFileAsOptimizedDataUrl))).filter(Boolean);
         if (!srcs.length) return;
         const blocks = srcs.map((src) => imageBlockFromSrc(src, '', { pasted: true }));
         const nodes = blocks.length > 1 ? [imageGridFromBlocks(blocks)] : blocks;
@@ -7218,9 +7262,11 @@ function studioHtmlV2(payload, libs) {
       const file = imageInput.files && imageInput.files[0];
       if (!file) return;
       const action = imageInputAction;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const nextSrc = String(reader.result || '');
+      readImageFileAsOptimizedDataUrl(file).then((nextSrc) => {
+        if (!nextSrc) {
+          imageInput.value = '';
+          return;
+        }
         if (action === 'insert') {
           const block = imageBlockFromSrc(nextSrc, file.name || '');
           if (!insertImageBlockAtSavedRange(block)) {
@@ -7269,8 +7315,7 @@ function studioHtmlV2(payload, libs) {
         syncImageTools();
         renderImageList();
         imageInput.value = '';
-      };
-      reader.readAsDataURL(file);
+      });
     });
     function applyFit(fit) {
       if (!selectedFrame) return;
@@ -7321,6 +7366,10 @@ function studioHtmlV2(payload, libs) {
     // in-memory registry, which is seeded from the source template at startup
     // and extended with every image seen during editing.
     const imageUriByToken = new Map();
+    // Tokens seeded from the source template are always recoverable after a
+    // reload; only tokens added later (pasted/inserted images) need to ride
+    // along with localStorage drafts.
+    const sourceImageTokens = new Set();
     const DATA_IMAGE_URI_RE = /data:image\\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
     const IMAGE_TOKEN_RE = /xhsimg:\\d+\\.[A-Za-z0-9+/=]{1,24}\\.[A-Za-z0-9+/=]{1,24}/g;
     function imageDataUriToken(uri) {
@@ -7334,8 +7383,16 @@ function studioHtmlV2(payload, libs) {
     function seedImageRegistryFromHtml(html) {
       String(html || '').replace(DATA_IMAGE_URI_RE, (uri) => {
         registerImageDataUri(uri);
+        sourceImageTokens.add(imageDataUriToken(uri));
         return uri;
       });
+    }
+    function pastedImageTokenMap() {
+      const extra = {};
+      imageUriByToken.forEach((uri, token) => {
+        if (!sourceImageTokens.has(token)) extra[token] = uri;
+      });
+      return Object.keys(extra).length ? extra : null;
     }
     function deflateImageUris(html) {
       return String(html || '').replace(DATA_IMAGE_URI_RE, (uri) => {
@@ -7392,13 +7449,19 @@ function studioHtmlV2(payload, libs) {
     function persistDraft() {
       if (restoringState || !pages.length) return;
       try {
-        localStorage.setItem(draftStorageKey(), JSON.stringify(serializeStudioState()));
+        const state = serializeStudioState();
+        const extraTokens = pastedImageTokenMap();
+        if (extraTokens) state.imageTokens = extraTokens;
+        localStorage.setItem(draftStorageKey(), JSON.stringify(state));
       } catch (_) {}
     }
     function persistDraftCheckpoint() {
       if (restoringState || !pages.length) return;
       try {
-        localStorage.setItem(draftCheckpointKey(), JSON.stringify(serializeStudioState()));
+        const state = serializeStudioState();
+        const extraTokens = pastedImageTokenMap();
+        if (extraTokens) state.imageTokens = extraTokens;
+        localStorage.setItem(draftCheckpointKey(), JSON.stringify(state));
       } catch (_) {}
     }
     function cloneEditorState() {
@@ -8033,6 +8096,7 @@ function studioHtmlV2(payload, libs) {
     window.addEventListener('resize', fitStage);
     seedImageRegistryFromHtml(document.getElementById('wechatTemplate')?.innerHTML || '');
     registerImageDataUri(config.coverImageSrc);
+    if (config.coverImageSrc) sourceImageTokens.add(imageDataUriToken(config.coverImageSrc));
     const restoredSavedState = restoreSavedStudioState();
     if (!restoredSavedState) {
       applyBackgroundTheme(DEFAULT_BG_THEME, false);
