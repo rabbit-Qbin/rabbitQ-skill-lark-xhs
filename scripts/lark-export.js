@@ -177,11 +177,13 @@ function downloadImages(imageTokens, assetsDir, body) {
 
 function pruneOrphanAssets(assetsDir, body) {
   // 重跑同一文档时，清理不再被 Markdown 引用的旧图（如文档里换过的图）。
+  // 注意：assets 目录里只有文件；用 unlinkSync 而不是 rmSync——
+  // Node 24 在含全角字符的路径上调用 fs.rmSync 会让进程直接崩溃。
   if (!fs.existsSync(assetsDir)) return 0;
   let removed = 0;
   for (const file of fs.readdirSync(assetsDir)) {
     if (!String(body).includes(`assets/${file}`)) {
-      fs.rmSync(path.join(assetsDir, file), { force: true });
+      fs.unlinkSync(path.join(assetsDir, file));
       removed += 1;
     }
   }
