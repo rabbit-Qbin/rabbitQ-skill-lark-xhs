@@ -324,7 +324,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.20"/);
+  assert.match(html, /"version":"0\.9\.21"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /<span class="xhs-green-underline">下划\+词<\/span>/, "++text++ should map to underline inline emphasis, allowing single + inside");
   assert.match(html, /还有~转义符/, "backslash-escaped punctuation should be unescaped");
@@ -419,6 +419,20 @@ async function main() {
   assert.doesNotMatch(larkMd, /<\/?(?:img|image|callout|grid|column|text|view|file|whiteboard|h3|p|b|u)\b/);
   const larkTokens = JSON.parse(fs.readFileSync(path.join(larkExportDir, "_image_tokens.json"), "utf8"));
   assert.deepStrictEqual(larkTokens, ["OegLb5brabcdef"]);
+
+  // rerun prunes unreferenced assets but keeps referenced ones
+  const larkAssetsDir = path.join(larkExportDir, "assets");
+  fs.mkdirSync(larkAssetsDir, { recursive: true });
+  fs.writeFileSync(path.join(larkAssetsDir, "img_001_OegLb5br.png"), "x");
+  fs.writeFileSync(path.join(larkAssetsDir, "orphan-old.png"), "x");
+  const larkExport2 = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "lark-export.js"), "--fetch-json", larkFetchFixture, "-o", larkExportDir],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(larkExport2.status, 0, larkExport2.stderr || larkExport2.stdout);
+  assert.ok(fs.existsSync(path.join(larkAssetsDir, "img_001_OegLb5br.png")), "referenced asset must be kept");
+  assert.ok(!fs.existsSync(path.join(larkAssetsDir, "orphan-old.png")), "unreferenced asset must be pruned on rerun");
   assert.doesNotMatch(html, /&lt;br&gt;/);
   assert.match(html, /data-xhs-heading-level="1"/);
   assert.match(html, /data-xhs-heading-level="2"/);

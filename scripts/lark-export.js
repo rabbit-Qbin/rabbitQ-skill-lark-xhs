@@ -175,6 +175,19 @@ function downloadImages(imageTokens, assetsDir, body) {
   return { body: nextBody, downloaded };
 }
 
+function pruneOrphanAssets(assetsDir, body) {
+  // 重跑同一文档时，清理不再被 Markdown 引用的旧图（如文档里换过的图）。
+  if (!fs.existsSync(assetsDir)) return 0;
+  let removed = 0;
+  for (const file of fs.readdirSync(assetsDir)) {
+    if (!String(body).includes(`assets/${file}`)) {
+      fs.rmSync(path.join(assetsDir, file), { force: true });
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function slugify(value) {
   const cleaned = String(value || "lark-doc")
     .replace(/[\\/:*?"<>|]/g, "")
@@ -232,6 +245,7 @@ function main() {
   }
 
   const slug = slugify(opts.slug || title || "lark-doc");
+  const pruned = pruneOrphanAssets(path.join(opts.outputDir, "assets"), finalBody);
   const markdownFile = path.join(opts.outputDir, `${slug}.md`);
   const frontmatter = [
     "---",
@@ -243,7 +257,7 @@ function main() {
   ].filter((line, index) => line !== "" || index > 2);
   fs.writeFileSync(markdownFile, `${frontmatter.join("\n")}${finalBody}`);
   fs.writeFileSync(path.join(opts.outputDir, "_image_tokens.json"), `${JSON.stringify(imageTokens, null, 2)}\n`);
-  console.log(JSON.stringify({ ok: true, markdownFile, images: downloaded, totalImages: imageTokens.length }));
+  console.log(JSON.stringify({ ok: true, markdownFile, images: downloaded, totalImages: imageTokens.length, prunedAssets: pruned }));
 }
 
 try {
