@@ -19,12 +19,12 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.16";
+const VERSION = "0.9.17";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
 const DEFAULT_ACCENT_THEME = "blue";
-const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点";
+const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点|总结|小结|一句话|建议|提示|技巧|要点|避坑|误区|须知|干货";
 // Trailing !/！ (0-2) is part of the recognized token, e.g. "注意！！" / "提醒!!".
 const CARD_LABEL_TOKEN = `(?:${CARD_LABEL_WORDS})[!！]{0,2}`;
 const CARD_LABEL_EXACT = new RegExp(`^${CARD_LABEL_TOKEN}$`);
@@ -231,12 +231,12 @@ function plainMarkdownText(value) {
 function inferCardLabel(text) {
   const plain = plainMarkdownText(text).replace(/\s+/g, "");
   if (!plain) return "卡片";
-  if (/注意|小心|切记|务必|千万|别忘|警告|风险|提醒/.test(plain)) return "注意";
-  if (/结论|总之|归根|一句话|所以|这就是/.test(plain)) return "结论";
+  if (/注意|小心|切记|务必|千万|别忘|警告|风险|提醒|避坑|误区|须知/.test(plain)) return "注意";
+  if (/结论|总之|归根|一句话|所以|这就是|总结|小结/.test(plain)) return "结论";
   if (/金句|名言|记住|必杀/.test(plain)) return "金句";
   if (/判断/.test(plain)) return "判断";
   if (/关键/.test(plain)) return "关键";
-  if (/重点|划重点|高亮|核心|真相|本质/.test(plain)) return "划重点";
+  if (/重点|划重点|高亮|核心|真相|本质|建议|提示|技巧|要点|干货/.test(plain)) return "划重点";
   if (plain.length <= 24 && /[。！？!?]$/.test(plain)) return "金句";
   if (plain.length <= 18) return "金句";
   return "划重点";

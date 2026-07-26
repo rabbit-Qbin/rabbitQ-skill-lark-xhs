@@ -58,6 +58,10 @@ async function main() {
     "",
     "**划重点：这是重点卡片需要保留的正文，开头标签不应该重复显示。**",
     "",
+    "**总结：这是总结卡片需要保留的正文，开头标签不应该重复显示。**",
+    "",
+    "**避坑：这是避坑卡片需要保留的正文，开头标签不应该重复显示。**",
+    "",
     "**时间价值**",
     "",
     "这件事花的时间 \\< 你本人核心时间的价值",
@@ -318,7 +322,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.16"/);
+  assert.match(html, /"version":"0\.9\.17"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /<span class="xhs-green-underline">下划词<\/span>/, "++text++ should map to underline inline emphasis");
   assert.match(html, /还有~转义符/, "backslash-escaped punctuation should be unescaped");
@@ -354,6 +358,8 @@ async function main() {
   assert.match(html, /--body-unbold-weight: 700;/);
   assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
+  assert.match(html, /<strong>结论<\/strong><p><strong>总结：这是总结卡片/, "总结 label should trigger a card with the inferred 结论 corner");
+  assert.match(html, /<strong>注意<\/strong><p><strong>避坑：这是避坑卡片/, "避坑 label should trigger a card with the inferred 注意 corner");
   assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-table thead th \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-heading\[data-level="2"\] \.xhs-heading-title \{[^}]*font-weight: var\(--body-bold-weight\)/);
