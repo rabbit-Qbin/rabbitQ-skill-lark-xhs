@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.7";
+const VERSION = "0.9.8";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -2093,11 +2093,13 @@ function studioHtmlV2(payload, libs) {
             changed = true;
           }
           const marker = item.querySelector('.xhs-list-marker');
+          const storedOrdinal = Math.max(1, Number.parseInt(item.dataset.listOrdinal || '', 10) || 0);
+          const displayOrdinal = listType === 'ordered' && storedOrdinal ? storedOrdinal : index + 1;
           const markerIsValid = listType === 'ordered'
-            ? Boolean(marker?.classList.contains('xhs-list-marker-ordered') && cleanText(marker.textContent) === String(index + 1) + '.')
+            ? Boolean(marker?.classList.contains('xhs-list-marker-ordered') && cleanText(marker.textContent) === String(displayOrdinal) + '.')
             : Boolean(marker?.classList.contains('xhs-list-marker-dot'));
           if (!markerIsValid) {
-            marker?.replaceWith(listMarkerElement(listType, index + 1));
+            marker?.replaceWith(listMarkerElement(listType, displayOrdinal));
             changed = true;
           }
         });
@@ -2119,6 +2121,8 @@ function studioHtmlV2(payload, libs) {
         const listType = block.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
         orderedIndex = previousWasList && previousType === listType ? orderedIndex + 1 : 1;
         block.dataset.listType = listType;
+        if (listType === 'ordered') block.dataset.listOrdinal = String(orderedIndex);
+        else delete block.dataset.listOrdinal;
         const body = block.querySelector('.xhs-list-body');
         if (body && !cleanText(body.textContent) && !body.querySelector('br')) body.innerHTML = '<br>';
         const marker = block.querySelector('.xhs-list-marker');
@@ -2984,7 +2988,10 @@ function studioHtmlV2(payload, libs) {
             pending = null;
             continue;
           }
-          if (current.length && fitHeight > remaining) {
+          const atomicFitGuard = block.classList.contains('xhs-list-line')
+            ? Math.max(8, Math.round(config.bodyFontSize * config.bodyLineHeight * 0.22))
+            : 0;
+          if (current.length && fitHeight + atomicFitGuard > remaining) {
             if (isSplittableTextBlock(block)) {
               const split = splitBlockToFit(block, remaining);
               if (split) {
@@ -3778,6 +3785,7 @@ function studioHtmlV2(payload, libs) {
       const p = document.createElement('p');
       p.className = 'xhs-p xhs-block xhs-list-line';
       p.dataset.listType = normalizedType;
+      if (normalizedType === 'ordered') p.dataset.listOrdinal = String(Math.max(1, Number(index) || 1));
       const body = document.createElement('span');
       body.className = 'xhs-list-body';
       body.innerHTML = options.preserveBodyHtml
@@ -3813,6 +3821,8 @@ function studioHtmlV2(payload, libs) {
       const listType = activeLine?.dataset?.listType === 'ordered' ? 'ordered' : 'unordered';
       collectContiguousListLines(activeLine).forEach((line, index) => {
         line.dataset.listType = listType;
+        if (listType === 'ordered') line.dataset.listOrdinal = String(index + 1);
+        else delete line.dataset.listOrdinal;
         const marker = line.querySelector('.xhs-list-marker');
         marker?.replaceWith(listMarkerElement(listType, index + 1));
       });
@@ -6449,7 +6459,10 @@ function studioHtmlV2(payload, libs) {
         return {
           type: 'list',
           el: list,
-          els: collectContiguousListLines(list),
+          // A list row is the editing unit. Pagination may display adjacent
+          // rows as one visual list, but toggling a style must affect only the
+          // row containing the caret.
+          els: [list],
           listType: list.dataset.listType || 'unordered',
         };
       }
@@ -6565,10 +6578,7 @@ function studioHtmlV2(payload, libs) {
         const range = selection.getRangeAt(0);
         const startInfo = activeFlowBlockAt(range.startContainer);
         const endInfo = activeFlowBlockAt(range.endContainer);
-        const sameListGroup = startInfo?.type === 'list' && endInfo?.type === 'list' &&
-          startInfo.listType === endInfo.listType &&
-          startInfo.els?.includes(endInfo.el) && endInfo.els?.includes(startInfo.el);
-        if (!startInfo || !endInfo || (startInfo.el !== endInfo.el && !sameListGroup)) return false;
+        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) return false;
       }
       const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
@@ -7297,6 +7307,9 @@ function studioHtmlV2(payload, libs) {
         if (block.dataset?.xhsPageBreak === '1' || block.classList?.contains('xhs-page-break')) return '⟦BREAK⟧';
         const signatureBlock = block.cloneNode(true);
         signatureBlock.querySelectorAll?.('thead').forEach((head) => head.remove());
+        // List markers are derived presentation. Renumbering a continuous list
+        // across page boundaries must not be treated as content corruption.
+        signatureBlock.querySelectorAll?.('.xhs-list-marker').forEach((marker) => marker.remove());
         const text = (signatureBlock.textContent || '').replace(/\s+/g, '');
         const images = Array.from(signatureBlock.querySelectorAll?.('img') || []).map((img) => {
           const src = img.getAttribute('src') || '';
@@ -7346,6 +7359,17 @@ function studioHtmlV2(payload, libs) {
       if (draftText.length < templateText.length * 0.9) return true;
       const sentinels = ['持续debug', '快速开始', '先在飞书云文档导出'];
       return sentinels.some((phrase) => templateText.includes(phrase) && !draftText.includes(phrase));
+    }
+    function isEmbeddedStateStructurallyCorrupted(state) {
+      if (!state || !Array.isArray(state.pages) || !state.pages.length) return true;
+      if (hasOrphanSplitBlocks(state.pages)) return true;
+      if (state.flowHtml) {
+        const holder = document.createElement('div');
+        holder.innerHTML = String(state.flowHtml || '');
+        return !(holder.textContent || '').trim() && !holder.querySelector('img');
+      }
+      return !studioPlainTextFromPages(state.pages)
+        && !state.pages.some((page) => /<img\b/i.test(String(page?.html || '') + String(page?.tailHtml || '')));
     }
     function applyStudioState(state, options = {}) {
       if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
@@ -7406,7 +7430,7 @@ function studioHtmlV2(payload, libs) {
     }
     function restoreSavedStudioState() {
       if (embeddedState) {
-        if (isDraftCorrupted(embeddedState)) {
+        if (isEmbeddedStateStructurallyCorrupted(embeddedState)) {
           showRuntimeNotice('检测到“保存编辑 HTML”中的正文不完整，已回退到源稿重新分页。');
         } else if (applyStudioState(embeddedState, { forceReflow: true })) {
           return true;

@@ -314,14 +314,15 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.7"/);
+  assert.match(html, /"version":"0\.9\.8"/);
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);
   assert.match(html, /resizing-image-frame\[data-resize-mode="s"\]/);
   assert.match(html, /\.selectable-image, #imageTools, #imageList/);
   assert.match(html, /node\.classList\.contains\('xhs-list-line'\)\) return false/);
-  assert.match(html, /const sameListGroup = startInfo\?\.type === 'list'/);
+  assert.match(html, /A list row is the editing unit/);
+  assert.match(html, /dataset\.listOrdinal/);
   assert.match(html, /function normalizeListNumbersAcrossBlocks\(blocks\)/);
   assert.doesNotMatch(html, /xhs-block-drop-preview/);
   assert.match(html, /xhs-overview-drop-indicator/);
@@ -754,7 +755,7 @@ async function main() {
     assert.strictEqual(inlineListState.afterUnderlineToggle, inlineListState.initialUnderlineCount, "clicking underline twice must cancel only the underline: " + JSON.stringify(inlineListState));
     assert.ok(inlineListState.lineText.endsWith(inlineListState.bodyText), "sequence body text must not be split into a separate flex column");
 
-    // Switching a style from any item converts the complete contiguous sequence.
+    // A block-style switch affects only the list row containing the caret.
     await orderedPage.locator('#stageScale .xhs-list-line[data-list-type="ordered"] .xhs-list-body').nth(1).evaluate((body) => {
       const range = document.createRange();
       range.selectNodeContents(body);
@@ -782,11 +783,8 @@ async function main() {
       return null;
     });
     assert.ok(sequenceCardState, "sequence should switch to a card");
-    assert.ok(
-      orderedAfterEnter.text.split(/\s+/).filter(Boolean).every((part) => sequenceCardState.text.includes(part)),
-      'sequence conversion lost list text: ' + JSON.stringify({ before: orderedAfterEnter.text, after: sequenceCardState.text }),
-    );
-    assert.strictEqual(sequenceCardState.listCount, 0);
+    assert.ok(sequenceCardState.text && orderedAfterEnter.text.includes(sequenceCardState.text));
+    assert.ok(sequenceCardState.listCount >= 1, "switching one list row must retain the other rows");
     assert.strictEqual(sequenceCardState.fontSize, "36px");
     const cardInlineState = await orderedPage.locator("#stageScale .xhs-callout-body").first().evaluate((body) => {
       const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
@@ -3140,21 +3138,25 @@ async function main() {
     assert.strictEqual(await flowPage.locator("#runtimeNotice").isVisible(), true, "draft self-heal must be visible to the user");
     assert.match(await flowPage.locator("#runtimeNotice").innerText(), /正文不完整/);
 
-    const corruptedEmbeddedState = await flowPage.evaluate(() => serializeStudioState());
-    let embeddedWasCorrupted = false;
-    for (const savedPage of corruptedEmbeddedState.pages) {
+    const editedEmbeddedState = await flowPage.evaluate(() => serializeStudioState());
+    let embeddedWasEdited = false;
+    for (const savedPage of editedEmbeddedState.pages) {
       for (const field of ["html", "tailHtml"]) {
         if (!savedPage[field] || !/持续debug/.test(savedPage[field])) continue;
         const nextHtml = savedPage[field].replace(/持续debug[\s\S]*?规则等等……/g, "");
         if (nextHtml !== savedPage[field]) {
           savedPage[field] = nextHtml;
-          embeddedWasCorrupted = true;
+          embeddedWasEdited = true;
         }
       }
     }
-    assert.strictEqual(embeddedWasCorrupted, true, "missing target page for embedded-state corruption test");
-    const embeddedHtmlPath = path.join(flowOutputDir, "xhs-studio-corrupted-embedded.html");
-    const embeddedPayload = JSON.stringify(corruptedEmbeddedState)
+    editedEmbeddedState.flowHtml = editedEmbeddedState.flowHtml.replace(
+      /持续debug[\s\S]*?规则等等……/g,
+      "",
+    );
+    assert.strictEqual(embeddedWasEdited, true, "missing target page for embedded-state edit test");
+    const embeddedHtmlPath = path.join(flowOutputDir, "xhs-studio-edited-embedded.html");
+    const embeddedPayload = JSON.stringify(editedEmbeddedState)
       .replace(/</g, "\\u003c")
       .replace(/>/g, "\\u003e")
       .replace(/&/g, "\\u0026");
@@ -3167,10 +3169,9 @@ async function main() {
     await embeddedPage.addInitScript(() => localStorage.clear());
     await embeddedPage.goto(`file://${embeddedHtmlPath}`);
     await embeddedPage.waitForTimeout(600);
-    const healedEmbeddedText = await collectAllBodyTextFrom(embeddedPage);
-    assert.match(healedEmbeddedText, /持续debug/, "corrupted embeddedState should fall back to the source template");
-    assert.strictEqual(await embeddedPage.locator("#runtimeNotice").isVisible(), true, "embeddedState self-heal must be visible to the user");
-    assert.match(await embeddedPage.locator("#runtimeNotice").innerText(), /保存编辑 HTML.*正文不完整/);
+    const restoredEmbeddedText = await collectAllBodyTextFrom(embeddedPage);
+    assert.doesNotMatch(restoredEmbeddedText, /持续debug/, "intentional edits in embeddedState must be preserved");
+    assert.strictEqual(await embeddedPage.locator("#runtimeNotice").isVisible(), false, "intentional embedded edits must not be reported as corruption");
     await embeddedPage.close();
     await flowPage.close();
   } finally {
