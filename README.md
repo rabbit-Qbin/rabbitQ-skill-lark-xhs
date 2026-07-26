@@ -4,7 +4,7 @@
 
 把飞书云文档导出的 Markdown、图片附件或完整 ZIP，转换成一个可在浏览器里继续编辑的 `xhs-studio.html`。默认只生成 HTML；确认排版后，再按需批量导出 1080 × 1440 PNG ZIP。
 
-当前版本：**v0.9.15**
+当前版本：**v0.9.16**
 
 ![rabbitQ 飞书 Markdown 转小红书 3:4 图文工作流](assets/rabbitq-xhs-workflow.svg)
 
@@ -144,6 +144,7 @@ CLI 参数 > frontmatter > 文首中文标签 > 文档标题 / AI 补充
 | fenced code | macOS 风格代码块 |
 | `- 项目` / `1. 项目` | 无序 / 有序列表 |
 | `==文字==` | 有色字（行内强调色） |
+| `++文字++` | 下划线（行内半高亮 + 底线） |
 | GFM 表格 / HTML `<table>` | 可编辑表格 |
 | Markdown 图片 | 可编辑图片块 |
 | 视频链接或附件 | 跳过并提示另行处理 |

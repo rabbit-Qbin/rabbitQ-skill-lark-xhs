@@ -64,6 +64,8 @@ async function main() {
     "",
     "这句包含==高亮词==强调。",
     "",
+    "这句包含++下划词++强调，还有\\~转义符。",
+    "",
     "| 模式 | 适合 | 页数 |",
     "| --- | --- | ---: |",
     "| 有封面图 | 视觉强、产品感 | 6 |",
@@ -316,8 +318,11 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.15"/);
+  assert.match(html, /"version":"0\.9\.16"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
+  assert.match(html, /<span class="xhs-green-underline">下划词<\/span>/, "++text++ should map to underline inline emphasis");
+  assert.match(html, /还有~转义符/, "backslash-escaped punctuation should be unescaped");
+  assert.ok(!/还有\\~转义符/.test(html), "escape backslash must not survive conversion");
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);
