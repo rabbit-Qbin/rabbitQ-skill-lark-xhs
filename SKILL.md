@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持全封面/半封面/无封面三种形式、AI 封面生成后直插、手动分页（---）、连续分页、主题组合、引用/卡片/序列/表格/macOS 代码块、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.9.18
+version: 0.9.19
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
@@ -35,7 +35,8 @@ metadata:
 
 1. 单个 `.md` 文件。
 2. 顶层包含一个 `.md` 文件和附件目录的飞书导出包。
-3. 包含上述结构的 `.zip`。
+3. 包含上述结构的 `.zip`（自动解压，无需用户手动解压）。
+4. **飞书云文档链接**（`/wiki/` 或 `/docx/` URL）——由 AI 先导出成 Markdown 包（见下节），再走主流程。
 
 典型目录：
 
@@ -58,6 +59,32 @@ metadata:
   - 文首中文行：`标题：…`、`大标题：…`、`副标题：…`（也支持 `封面标题：` / `封面副标题：`）
 - AI 的职责：发现已有字段就尊重，**仅缺副标题**时才读全文补一句。
 - 所有输出画布必须接近 3:4，否则转换器应报错而不是静默拉伸。
+
+## 飞书链接输入：AI 导出流程
+
+用户直接给飞书云文档链接时，AI 自己导出 Markdown 包，不需要用户手动导出：
+
+1. **环境检查**：运行 `lark-cli --version`。命令不存在时引导用户安装并登录：
+   ```bash
+   npm install -g @larksuite/cli
+   lark-cli auth login --scope "wiki:wiki:readonly docx:document:readonly"
+   ```
+   把授权链接发给用户，等用户在浏览器里完成后继续。
+2. **导出**：在 Skill 根目录运行：
+   ```bash
+   node scripts/lark-export.js <飞书URL> -o <输出目录>
+   ```
+   脚本自动完成：`docs +fetch` 取文档 → 清洗飞书私有标签（image/callout/grid/lark-table 等）→ `docs +media-download` 逐张下载图片到 `assets/` → 产出 `<输出目录>/<标题>.md + assets/ + _image_tokens.json`。
+3. **授权失败处理**：脚本以退出码 2 结束时，把下面这句发给用户并等其完成授权后重跑同一条命令：
+   `lark-cli auth login --scope "wiki:wiki:readonly docx:document:readonly"`
+   文档对当前账号不可见（403/权限不足）时，如实告知用户去文档分享设置里开权限，不要反复重试。
+4. 导出成功后，把输出目录当作标准输入包，回到主流程第 3 步继续（通读全文、两遍走样式判断、确认封面形式后转换）。
+
+规则：
+
+- 导出速度受图片数量影响，提前告知用户"图多的文档会慢一些"，不要静默卡在下载阶段。
+- 附件和视频不下载，Markdown 里以 `**[附件: 名称]**` 标注；画板保留 `*(画板: token)*` 占位。
+- 重跑同一文档时已下载的图片自动跳过。
 
 ## 执行流程
 
