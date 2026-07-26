@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.24";
+const VERSION = "0.9.25";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 0;
 const DEFAULT_BG_THEME = "white";
@@ -942,7 +942,7 @@ function studioHtmlV2(payload, libs) {
       --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
       --body-regular-weight: 720;
       --body-bold-weight: 720;
-      --body-unbold-weight: 550;
+      --body-unbold-weight: 500;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;

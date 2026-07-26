@@ -328,7 +328,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.24"/);
+  assert.match(html, /"version":"0\.9\.25"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /<span class="xhs-green-underline">下划\+词<\/span>/, "++text++ should map to underline inline emphasis, allowing single + inside");
   assert.match(html, /<code>\*\*粗\*\*<\/code>/, "code spans must protect literal ** markers");
@@ -366,7 +366,7 @@ async function main() {
   assert.match(html, /--body-line-px: 58px;/);
   assert.match(html, /--body-regular-weight: 720;/);
   assert.match(html, /--body-bold-weight: 720;/);
-  assert.match(html, /--body-unbold-weight: 550;/);
+  assert.match(html, /--body-unbold-weight: 500;/);
   assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /<strong>结论<\/strong><p><strong>总结：这是总结卡片/, "总结 label should trigger a card with the inferred 结论 corner");
@@ -591,7 +591,7 @@ async function main() {
     assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
 
     // Regression: body text starts at 720, but the B control must be a real
-    // two-state toggle: 720 default -> 550 unbold -> 720 default.
+    // two-state toggle: 720 default -> 500 unbold -> 720 default.
     const boldToggleBody = orderedPage.locator('#stageScale .xhs-list-body').first();
     await boldToggleBody.evaluate((body) => {
       const range = document.createRange();
@@ -613,17 +613,17 @@ async function main() {
       weight: getComputedStyle(body.querySelector('.xhs-text-regular') || body).fontWeight,
       regularMarks: body.querySelectorAll('.xhs-text-regular').length,
     }));
-    assert.strictEqual(unboldState.weight, '550', 'first B click should change selected default text to weight 550');
+    assert.strictEqual(unboldState.weight, '500', 'first B click should change selected default text to weight 500');
     assert.ok(unboldState.regularMarks >= 1, 'first B click should persist an explicit unbold mark');
     assert.strictEqual(
       await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
       true,
-      '550 unbold formatting should be saved into the current page state',
+      '500 unbold formatting should be saved into the current page state',
     );
     assert.strictEqual(
       await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
       false,
-      '550 unbold selection should turn off the B control',
+      '500 unbold selection should turn off the B control',
     );
     await orderedPage.click('#boldBtn');
     await orderedPage.waitForTimeout(120);
