@@ -314,7 +314,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.9"/);
+  assert.match(html, /"version":"0\.9\.10"/);
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);

@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.9";
+const VERSION = "0.9.10";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -561,7 +561,7 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
       const bodyHtml = inlineMarkdownToHtml(item.text, markdownFile);
       if (listType === "ordered") {
         const marker = String(item.marker || index + 1);
-        return `<section><span>${escapeHtml(marker)}.</span><span>${bodyHtml}</span></section>`;
+        return `<section data-list-source-ordinal="${escapeHtml(marker)}"><span>${escapeHtml(marker)}.</span><span>${bodyHtml}</span></section>`;
       }
       const marker = '<span style="border-radius:50%;display:inline-block;width:10px;height:10px;background:#57b560;"></span>';
       return `<section>${marker}<span>${bodyHtml}</span></section>`;
@@ -1986,9 +1986,11 @@ function studioHtmlV2(payload, libs) {
     }
     function buildReasonStackFromParagraphs(paragraphs, listType = 'unordered') {
       const items = paragraphs.map((node) => {
+        const markerText = cleanText(node.textContent || '');
+        const sourceOrdinal = Math.max(0, Number.parseInt((markerText.match(/^\s*(\d+)/) || [])[1] || '', 10) || 0);
         const html = stripListMarkerFromHtml(normalizeInlineHtml(node.innerHTML || node.textContent));
         const plain = stripLeadingListMarkerText(cleanText(node.textContent));
-        return plain ? { html, plain } : null;
+        return plain ? { html, plain, sourceOrdinal } : null;
       }).filter(Boolean);
       return items.length ? buildListLines(items, listType) : [];
     }
@@ -2034,13 +2036,19 @@ function studioHtmlV2(payload, libs) {
       const listType = el.dataset?.listType === 'ordered' ? 'ordered' : 'unordered';
       const items = Array.from(el.children).map((child) => {
         const spans = Array.from(child.querySelectorAll('span'));
+        const sourceOrdinal = Math.max(0, Number.parseInt(
+          child.dataset?.listSourceOrdinal ||
+          child.dataset?.listOrdinal ||
+          cleanText(spans[0]?.textContent || ''),
+          10,
+        ) || 0);
         const contentSpan = spans.find((span) => {
           const text = cleanText(span.textContent);
           return text.length > 0 && !/^\\d+[.)、．]?$/.test(text);
         });
         const textHtml = stripListMarkerFromHtml(normalizeInlineHtml(contentSpan ? contentSpan.innerHTML : child.innerHTML));
         const plain = stripLeadingListMarkerText(cleanText(textHtml.replace(/<[^>]*>/g, '')));
-        return plain ? { html: textHtml, plain } : null;
+        return plain ? { html: textHtml, plain, sourceOrdinal } : null;
       }).filter(Boolean);
       return buildListLines(items, listType);
     }
@@ -2123,7 +2131,10 @@ function studioHtmlV2(payload, libs) {
           return;
         }
         const listType = block.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
-        orderedIndex = previousWasList && previousType === listType ? orderedIndex + 1 : 1;
+        const sourceOrdinal = Math.max(0, Number.parseInt(block.dataset.listSourceOrdinal || '', 10) || 0);
+        orderedIndex = listType === 'ordered' && sourceOrdinal
+          ? sourceOrdinal
+          : (previousWasList && previousType === listType ? orderedIndex + 1 : 1);
         block.dataset.listType = listType;
         if (listType === 'ordered') block.dataset.listOrdinal = String(orderedIndex);
         else delete block.dataset.listOrdinal;
@@ -2136,6 +2147,62 @@ function studioHtmlV2(payload, libs) {
         if (!markerIsValid) marker?.replaceWith(listMarkerElement(listType, orderedIndex));
         previousWasList = true;
         previousType = listType;
+      });
+    }
+    function normalizeListNumbersAcrossPages(pageList) {
+      let previousWasList = false;
+      let previousType = '';
+      let orderedIndex = 0;
+      (pageList || []).forEach((page) => {
+        ['html', 'tailHtml'].forEach((key) => {
+          if (!page || !page[key]) return;
+          const frame = document.createElement('div');
+          frame.innerHTML = page[key];
+          let changed = false;
+          Array.from(frame.querySelectorAll('.xhs-list-line')).forEach((line) => {
+            const listType = line.dataset.listType === 'ordered' ? 'ordered' : 'unordered';
+            const manualBreak = line.dataset.manualPageBreak === '1' || line.previousElementSibling?.classList?.contains('xhs-manual-break');
+            if (manualBreak) {
+              previousWasList = false;
+              previousType = '';
+              orderedIndex = 0;
+            }
+            const sourceOrdinal = Math.max(0, Number.parseInt(line.dataset.listSourceOrdinal || '', 10) || 0);
+            orderedIndex = listType === 'ordered' && sourceOrdinal
+              ? sourceOrdinal
+              : (previousWasList && previousType === listType ? orderedIndex + 1 : 1);
+            if (line.dataset.listType !== listType) {
+              line.dataset.listType = listType;
+              changed = true;
+            }
+            const body = line.querySelector('.xhs-list-body');
+            if (body) {
+              const before = body.innerHTML;
+              body.innerHTML = stripListMarkerFromHtml(body.innerHTML || '<br>') || '<br>';
+              if (body.innerHTML !== before) changed = true;
+            }
+            if (listType === 'ordered') {
+              if (line.dataset.listOrdinal !== String(orderedIndex)) {
+                line.dataset.listOrdinal = String(orderedIndex);
+                changed = true;
+              }
+            } else if (line.dataset.listOrdinal) {
+              delete line.dataset.listOrdinal;
+              changed = true;
+            }
+            const marker = line.querySelector('.xhs-list-marker');
+            const markerIsValid = listType === 'ordered'
+              ? Boolean(marker?.classList.contains('xhs-list-marker-ordered') && cleanText(marker.textContent) === String(orderedIndex) + '.')
+              : Boolean(marker?.classList.contains('xhs-list-marker-dot'));
+            if (!markerIsValid) {
+              marker?.replaceWith(listMarkerElement(listType, orderedIndex));
+              changed = true;
+            }
+            previousWasList = true;
+            previousType = listType;
+          });
+          if (changed) page[key] = frame.innerHTML;
+        });
       });
     }
     function expandReasonStacksInFrame(frame) {
@@ -2390,6 +2457,7 @@ function studioHtmlV2(payload, libs) {
       pages = coverMode === 'none'
         ? [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover))
         : [cover].concat(paginateBlocks(flowBlocks));
+      normalizeListNumbersAcrossPages(pages);
       const nextIndex = selectedImageId
         ? pageIndexForImageId(selectedImageId)
         : pageIndexForFlowBlockId(selectedBlockId);
@@ -2593,7 +2661,7 @@ function studioHtmlV2(payload, libs) {
         const wrapper = nested.parentElement;
         if (hoistNestedBlockFromWrapper(nested, wrapper, frame)) changed = true;
       });
-      Array.from(frame.querySelectorAll('.xhs-callout-body > .xhs-callout, .xhs-callout-body > .xhs-quote, .xhs-callout-body > .xhs-reason-stack, .xhs-quote > .xhs-callout, .xhs-quote > .xhs-quote')).forEach((nested) => {
+      Array.from(frame.querySelectorAll('.xhs-callout-body > .xhs-callout, .xhs-callout-body > .xhs-quote, .xhs-callout-body > .xhs-reason-stack, .xhs-callout-body > .xhs-list-line, .xhs-callout-body > .xhs-code-block, .xhs-callout-body > .xhs-heading, .xhs-quote > .xhs-callout, .xhs-quote > .xhs-quote, .xhs-quote > .xhs-list-line, .xhs-quote > .xhs-code-block, .xhs-quote > .xhs-heading')).forEach((nested) => {
         const host = nested.parentElement;
         const outer = host?.closest?.('.xhs-callout, .xhs-quote');
         if (outer && frame.contains(outer)) {
@@ -3117,6 +3185,7 @@ function studioHtmlV2(payload, libs) {
       pages = [cover].concat(
         coverMode === 'none' ? paginateBlocksWithCoverTail(blocks, cover) : paginateBlocks(blocks)
       );
+      normalizeListNumbersAcrossPages(pages);
       pageIndex = Math.min(pageIndex, Math.max(0, pages.length - 1));
       selectedFrame = null;
       renderAll();
@@ -3816,6 +3885,9 @@ function studioHtmlV2(payload, libs) {
       p.className = 'xhs-p xhs-block xhs-list-line';
       p.dataset.listType = normalizedType;
       if (normalizedType === 'ordered') p.dataset.listOrdinal = String(Math.max(1, Number(index) || 1));
+      if (normalizedType === 'ordered' && entry.sourceOrdinal) {
+        p.dataset.listSourceOrdinal = String(Math.max(1, Number(entry.sourceOrdinal) || 1));
+      }
       const body = document.createElement('span');
       body.className = 'xhs-list-body';
       body.innerHTML = options.preserveBodyHtml
@@ -4262,6 +4334,7 @@ function studioHtmlV2(payload, libs) {
       pages = coverMode === 'none'
         ? [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover))
         : [cover].concat(paginateBlocks(flowBlocks));
+      normalizeListNumbersAcrossPages(pages);
       const caretPageIndex = pageIndexForCaretMarker(caretMarkerId);
       if (caretMarkerId && caretPageIndex < 0) {
         pages = previousPages;
@@ -6609,15 +6682,49 @@ function studioHtmlV2(payload, libs) {
       const target = block?.querySelector?.('.xhs-heading-title, .xhs-callout-body, .xhs-list-body, .xhs-code-content') || block;
       if (target) setCaretInside(target);
     }
+    function selectedListFlowInfoFromRange(range) {
+      if (!range || range.collapsed) return null;
+      const frame = (range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement)?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      if (!frame) return null;
+      const endpointLine = (container) => (container.nodeType === Node.ELEMENT_NODE
+        ? container
+        : container.parentElement)?.closest?.('.xhs-list-line');
+      const startLine = endpointLine(range.startContainer);
+      const endLine = endpointLine(range.endContainer);
+      // Batch list handling only applies when the selection actually starts and
+      // ends inside list rows; a range spanning plain paragraphs must fall
+      // through to the single-paragraph guards.
+      if (!startLine || !endLine || !frame.contains(startLine) || !frame.contains(endLine)) return null;
+      const lines = Array.from(frame.querySelectorAll('.xhs-list-line'))
+        .filter((line) => {
+          try { return range.intersectsNode(line); } catch (_) { return false; }
+        });
+      if (!lines.length) return null;
+      const listType = lines[0].dataset.listType || 'unordered';
+      if (!lines.every((line) => (line.dataset.listType || 'unordered') === listType)) return null;
+      if (!lines.every((line) => line.parentElement === lines[0].parentElement)) return null;
+      return {
+        type: 'list',
+        el: lines[0],
+        els: lines,
+        listType,
+      };
+    }
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
       const selection = window.getSelection();
+      let rangeInfo = null;
       if (selection?.rangeCount && !selection.isCollapsed) {
         const range = selection.getRangeAt(0);
         const startInfo = activeFlowBlockAt(range.startContainer);
         const endInfo = activeFlowBlockAt(range.endContainer);
-        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) return false;
+        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) {
+          rangeInfo = selectedListFlowInfoFromRange(range);
+          if (!rangeInfo) return false;
+        }
       }
-      const info = activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
+      const info = rangeInfo || activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
       if (!info) return false;
       const sameType = info.type === targetType &&
         (targetType === 'heading' ? info.level === targetLevel :
@@ -7452,6 +7559,7 @@ function studioHtmlV2(payload, libs) {
           pages = coverMode === 'none'
             ? [cover].concat(paginateBlocksWithCoverTail(flowBlocks, cover))
             : [cover].concat(paginateBlocks(flowBlocks));
+          normalizeListNumbersAcrossPages(pages);
           pageIndex = Math.max(0, Math.min(Number(state.pageIndex || 0), pages.length - 1));
         } else {
           refreshContinuousFlowHtmlFromPages();
@@ -7703,6 +7811,7 @@ function studioHtmlV2(payload, libs) {
         cover.tailHtml = '';
         pages = [cover].concat(paginateBlocks(flowBlocks));
       }
+      normalizeListNumbersAcrossPages(pages);
       const afterIntegrity = studioFlowIntegritySignature(pages);
       if (beforeIntegrity !== afterIntegrity) {
         pages = previousPages;
@@ -7751,6 +7860,11 @@ function studioHtmlV2(payload, libs) {
         recordEditorHistory();
       }, true);
     });
+    document.addEventListener('pointerdown', (event) => {
+      if (!selectedFrame) return;
+      if (event.target?.closest?.('.selectable-image, .xhs-resize-handle, .panel, .toolbar')) return;
+      clearSelectedFrame();
+    }, true);
     [document.getElementById('boldBtn'), italicBtn, headingBtn1, headingBtn2, greenTextBtn, greenUnderlineBtn, keypointBtn, codeBtn, listUnorderedBtn, listOrderedBtn, insertImageBtn].forEach((button) => {
       button?.addEventListener('mousedown', (event) => event.preventDefault());
       button?.addEventListener('click', () => recordEditorHistory(), true);

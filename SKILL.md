@@ -1,7 +1,7 @@
 ---
 name: rabbitQ-skill-lark-xhs
 description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持全封面/半封面/无封面三种形式、AI 封面生成后直插、手动分页（---）、连续分页、主题组合、引用/卡片/序列/表格/macOS 代码块、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.9.9
+version: 0.9.10
 metadata:
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
