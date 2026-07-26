@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.22";
+const VERSION = "0.9.23";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -421,7 +421,13 @@ function inlineMarkdownToHtml(text, markdownFile) {
   // Extract code spans first so their literal marker characters (**, ==, ++)
   // survive the inline style rules; restore them at the very end.
   const codeSpans = [];
-  let html = escapeHtml(unescaped).replace(/`([^`]+)`/g, (_, content) => {
+  // Raw <code> HTML (some exporters emit it when content would break
+  // backticks) gets the same protection as backtick code spans.
+  const withCodeMarks = unescaped.replace(/<code>([\s\S]*?)<\/code>/gi, (_, content) => {
+    codeSpans.push(escapeHtml(content));
+    return "CODE" + (codeSpans.length - 1) + "";
+  });
+  let html = escapeHtml(withCodeMarks).replace(/`([^`]+)`/g, (_, content) => {
     codeSpans.push(content);
     return "CODE" + (codeSpans.length - 1) + "";
   });

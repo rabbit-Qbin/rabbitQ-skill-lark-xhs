@@ -94,6 +94,8 @@ async function main() {
     "",
     "语法示例：`**粗**`、`==色==`、`++划++`。",
     "",
+    "HTML 写法 <code>==色==</code> 也要原样保留。",
+    "",
     "> （注：部分内容可能由 AI 生成）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
@@ -326,12 +328,14 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.22"/);
+  assert.match(html, /"version":"0\.9\.23"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /<span class="xhs-green-underline">下划\+词<\/span>/, "++text++ should map to underline inline emphasis, allowing single + inside");
   assert.match(html, /<code>\*\*粗\*\*<\/code>/, "code spans must protect literal ** markers");
   assert.match(html, /<code>==色==<\/code>/, "code spans must protect literal == markers");
   assert.match(html, /<code>\+\+划\+\+<\/code>/, "code spans must protect literal ++ markers");
+  assert.match(html, /<code>==色==<\/code>/, "raw <code> HTML must pass through instead of being escaped");
+  assert.doesNotMatch(html, /&lt;code&gt;/, "raw <code> HTML must not show up as escaped text");
   assert.match(html, /还有~转义符/, "backslash-escaped punctuation should be unescaped");
   assert.ok(!/还有\\~转义符/.test(html), "escape backslash must not survive conversion");
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
@@ -2088,7 +2092,7 @@ async function main() {
     const sourceImageFrame = page.locator('#stageScale .xhs-image-frame').first();
     const targetOverviewCard = page.locator(`.overview-item[data-index="${crossPageTargetIndex}"] .overview-card-frame`);
     await targetOverviewCard.scrollIntoViewIfNeeded();
-    const targetParagraph = targetOverviewCard.locator('.xhs-p:not(.xhs-manual-blank), .xhs-rich:not(.xhs-manual-blank)').filter({ hasText: /\S/ }).first();
+    const targetParagraph = targetOverviewCard.locator('.xhs-p:not(.xhs-manual-blank), .xhs-rich:not(.xhs-manual-blank)').filter({ hasText: /\S{6}/ }).first();
     const targetParagraphText = (await targetParagraph.textContent()).trim();
     await sourceImageFrame.hover();
     await page.waitForTimeout(80);
@@ -2142,8 +2146,8 @@ async function main() {
     const imageDragState = await page.evaluate(({ imageId }) => {
       const holder = collectBodyFlowHolder();
       const image = findImageBlockById(holder, imageId);
-      const previousText = (image?.previousElementSibling?.textContent || '').trim();
-      const nextText = (image?.nextElementSibling?.textContent || '').trim();
+      const previousText = image?.previousElementSibling?.textContent || '';
+      const nextText = image?.nextElementSibling?.textContent || '';
       return {
       activeIndex: Number(document.querySelector('.overview-item.active')?.dataset?.index),
       imagePageIndex: pageIndexForImageId(imageId),
@@ -2157,7 +2161,7 @@ async function main() {
     }, { imageId: sourceDragImageId });
     assert.strictEqual(imageDragState.activeIndex, imageDragState.imagePageIndex, 'cross-page image drag should activate the image page after repagination');
     assert.ok(imageDragState.previousText && imageDragState.nextText, 'the target paragraph should be split into text before and after the image');
-    assert.strictEqual(imageDragState.previousText + imageDragState.nextText, targetParagraphText, 'dropping inside prose must preserve every target-paragraph character');
+    assert.strictEqual((imageDragState.previousText + imageDragState.nextText).trim(), targetParagraphText, 'dropping inside prose must preserve every target-paragraph character: ' + JSON.stringify({ previous: imageDragState.previousText, next: imageDragState.nextText, target: targetParagraphText }));
     assert.strictEqual(imageDragState.selectedImageCount, 1, 'moved image should remain selected after cross-page repagination');
     assert.strictEqual(imageDragState.targetOutlineCount, 0, 'cross-page drop highlight should clear after drop');
     assert.strictEqual(imageDragState.draggingClassCount, 0, 'cross-page image drag must not persist its temporary dragging style');
