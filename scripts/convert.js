@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.21";
+const VERSION = "0.9.22";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -418,8 +418,14 @@ function boldMarkdownHtml(content) {
 
 function inlineMarkdownToHtml(text, markdownFile) {
   const unescaped = unescapeMarkdownEscapes(text);
-  let html = escapeHtml(unescaped)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
+  // Extract code spans first so their literal marker characters (**, ==, ++)
+  // survive the inline style rules; restore them at the very end.
+  const codeSpans = [];
+  let html = escapeHtml(unescaped).replace(/`([^`]+)`/g, (_, content) => {
+    codeSpans.push(content);
+    return "CODE" + (codeSpans.length - 1) + "";
+  });
+  html = html
     .replace(/\*\*([^*]+)\*\*/g, (_, content) => boldMarkdownHtml(content))
     .replace(/__([^_]+)__/g, (_, content) => boldMarkdownHtml(content))
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
@@ -434,7 +440,8 @@ function inlineMarkdownToHtml(text, markdownFile) {
     if (/\.(?:mp4|mov|m4v|webm|avi|mkv)(?:[?#].*)?$/i.test(cleanHref)) return "";
     return escapeHtml(label || cleanHref);
   });
-  return autoDecorateInlineHtml(html);
+  html = autoDecorateInlineHtml(html);
+  return html.replace(/CODE(\d+)/g, (_, index) => `<code>${codeSpans[Number(index)]}</code>`);
 }
 
 function isMarkdownVideoLine(line) {

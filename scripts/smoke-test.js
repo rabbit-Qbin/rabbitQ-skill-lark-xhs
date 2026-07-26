@@ -92,6 +92,8 @@ async function main() {
     "",
     "**这是超长加粗段落，用来验证整段加粗超过七十五个字时不再自动变成卡片，而是保持为普通的加粗正文段落，避免大段长文被误包成卡片块。**",
     "",
+    "语法示例：`**粗**`、`==色==`、`++划++`。",
+    "",
     "> （注：部分内容可能由 AI 生成）",
   ].join("\n");
   fs.writeFileSync(path.join(sourceDir, "article.md"), markdown, "utf8");
@@ -324,9 +326,12 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.21"/);
+  assert.match(html, /"version":"0\.9\.22"/);
   assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /<span class="xhs-green-underline">下划\+词<\/span>/, "++text++ should map to underline inline emphasis, allowing single + inside");
+  assert.match(html, /<code>\*\*粗\*\*<\/code>/, "code spans must protect literal ** markers");
+  assert.match(html, /<code>==色==<\/code>/, "code spans must protect literal == markers");
+  assert.match(html, /<code>\+\+划\+\+<\/code>/, "code spans must protect literal ++ markers");
   assert.match(html, /还有~转义符/, "backslash-escaped punctuation should be unescaped");
   assert.ok(!/还有\\~转义符/.test(html), "escape backslash must not survive conversion");
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
