@@ -62,6 +62,8 @@ async function main() {
     "",
     "这件事花的时间 \\< 你本人核心时间的价值",
     "",
+    "这句包含==高亮词==强调。",
+    "",
     "| 模式 | 适合 | 页数 |",
     "| --- | --- | ---: |",
     "| 有封面图 | 视觉强、产品感 | 6 |",
@@ -314,7 +316,8 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.12"/);
+  assert.match(html, /"version":"0\.9\.13"/);
+  assert.match(html, /<span class="xhs-green-text">高亮词<\/span>/, "==text== should map to accent-colored inline emphasis");
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);

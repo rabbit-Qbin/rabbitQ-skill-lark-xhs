@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.12";
+const VERSION = "0.9.13";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -420,7 +420,8 @@ function inlineMarkdownToHtml(text, markdownFile) {
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, (_, content) => boldMarkdownHtml(content))
     .replace(/__([^_]+)__/g, (_, content) => boldMarkdownHtml(content))
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/==([^=]+)==/g, '<span class="xhs-green-text">$1</span>');
   html = html.replace(/!?\[([^\]]*)\]\(([^)]+)\)/g, (_, label, href) => {
     const cleanHref = unescapeMarkdownUrl(href);
     if (/\.(?:png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i.test(cleanHref)) {
