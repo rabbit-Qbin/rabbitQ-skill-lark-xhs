@@ -19,7 +19,7 @@ const childProcess = require("child_process");
 const { pathToFileURL } = require("url");
 const cheerio = require("cheerio");
 
-const VERSION = "0.9.10";
+const VERSION = "0.9.11";
 const HEADING_LEVEL2_MARGIN_PX = 40;
 const HEADING_LEVEL2_PAGE_START_MARGIN_PX = 44;
 const DEFAULT_BG_THEME = "white";
@@ -1077,7 +1077,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-p strong, .xhs-p b, .xhs-rich strong, .xhs-rich b, .xhs-list-body strong, .xhs-list-body b, .xhs-callout-body strong, .xhs-callout-body b, .xhs-quote strong, .xhs-quote b { font-weight: var(--body-bold-weight) !important; }
     .xhs-card .xhs-text-regular, .xhs-card .xhs-text-regular * { font-weight: var(--body-unbold-weight) !important; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
-    .xhs-green-underline { font-weight: inherit; color:#111; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-green-underline { font-weight: inherit; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-split-head { margin-bottom: 0 !important; }
     .xhs-p.xhs-split-tail, .xhs-rich.xhs-split-tail { margin-top: 0 !important; }
     .xhs-callout.xhs-split-tail { padding-top: 0.72em; }
@@ -6400,10 +6400,14 @@ function studioHtmlV2(payload, libs) {
       });
       return Array.from(new Set(nodes));
     }
+    function spanIsNowBare(node) {
+      return node.tagName === 'SPAN' && !node.className &&
+        Array.from(node.attributes).every((attr) => attr.name === 'class');
+    }
     function removeClassFromFragment(fragment, className) {
       fragmentClassNodes(fragment, className).reverse().forEach((node) => {
         node.classList.remove(className);
-        if (node.tagName === 'SPAN' && !node.className && node.attributes.length === 0) unwrapElement(node);
+        if (spanIsNowBare(node)) unwrapElement(node);
       });
     }
     function fragmentHasInlineContent(fragment) {
@@ -6434,10 +6438,39 @@ function studioHtmlV2(payload, libs) {
       if (fragmentHasInlineContent(after)) replacement.appendChild(after);
       marked.replaceWith(replacement);
     }
+    function markedNodesCoveringRange(range, className) {
+      // Toggle-off semantics for nested/stacked marks: when every text node in
+      // the range already sits inside a className mark, clicking the button
+      // again must remove that mark instead of wrapping a fresh one outside.
+      const root = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+      if (!root) return null;
+      const marks = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        if ((node.textContent || '').length && rangeIntersectsNode(range, node)) {
+          const mark = node.parentElement?.closest?.('.' + className);
+          if (!mark || !rangeIntersectsNode(range, mark)) return null;
+          if (!marks.includes(mark)) marks.push(mark);
+        }
+        node = walker.nextNode();
+      }
+      return marks.length ? marks : null;
+    }
     function toggleInlineMarkInRange(range, className) {
       const marked = markedAncestorContainingRange(range, className);
       if (marked) {
         removeInlineMarkFromRange(range, marked, className);
+        return null;
+      }
+      const covering = markedNodesCoveringRange(range, className);
+      if (covering) {
+        covering.forEach((node) => {
+          node.classList.remove(className);
+          if (spanIsNowBare(node)) unwrapElement(node);
+        });
         return null;
       }
       const fragment = range.extractContents();
@@ -7282,6 +7315,37 @@ function studioHtmlV2(payload, libs) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
     let restoringState = false;
+    // Inline base64 images make serialized editor state huge (an 18MB document
+    // duplicated per undo snapshot and per localStorage draft crashes the tab).
+    // Serialize with content-derived tokens instead, and re-inflate from this
+    // in-memory registry, which is seeded from the source template at startup
+    // and extended with every image seen during editing.
+    const imageUriByToken = new Map();
+    const DATA_IMAGE_URI_RE = /data:image\\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
+    const IMAGE_TOKEN_RE = /xhsimg:\\d+\\.[A-Za-z0-9+/=]{1,24}\\.[A-Za-z0-9+/=]{1,24}/g;
+    function imageDataUriToken(uri) {
+      const text = String(uri || '');
+      const payload = text.slice(text.indexOf(',') + 1);
+      return 'xhsimg:' + payload.length + '.' + payload.slice(0, 24) + '.' + payload.slice(-24);
+    }
+    function registerImageDataUri(uri) {
+      if (uri) imageUriByToken.set(imageDataUriToken(uri), uri);
+    }
+    function seedImageRegistryFromHtml(html) {
+      String(html || '').replace(DATA_IMAGE_URI_RE, (uri) => {
+        registerImageDataUri(uri);
+        return uri;
+      });
+    }
+    function deflateImageUris(html) {
+      return String(html || '').replace(DATA_IMAGE_URI_RE, (uri) => {
+        registerImageDataUri(uri);
+        return imageDataUriToken(uri);
+      });
+    }
+    function inflateImageUris(html) {
+      return String(html || '').replace(IMAGE_TOKEN_RE, (token) => imageUriByToken.get(token) || token);
+    }
     function showRuntimeNotice(message) {
       if (!runtimeNotice || !message) return;
       runtimeNotice.textContent = message;
@@ -7308,8 +7372,8 @@ function studioHtmlV2(payload, libs) {
         savedAt: new Date().toISOString(),
         sourceFingerprint: config.sourceFingerprint || '',
         pageIndex,
-        flowHtml: continuousFlowHtml,
-        pages: pages.map((page) => ({ type: page.type, html: page.html, tailHtml: page.tailHtml || '' })),
+        flowHtml: deflateImageUris(continuousFlowHtml),
+        pages: pages.map((page) => ({ type: page.type, html: deflateImageUris(page.html), tailHtml: deflateImageUris(page.tailHtml || '') })),
         currentBgTheme,
         currentAccentTheme,
         currentCoverTheme,
@@ -7519,11 +7583,16 @@ function studioHtmlV2(payload, libs) {
       if (!state || !Array.isArray(state.pages) || !state.pages.length) return false;
       restoringState = true;
       try {
+        if (state.imageTokens && typeof state.imageTokens === 'object') {
+          Object.keys(state.imageTokens).forEach((token) => {
+            if (state.imageTokens[token]) imageUriByToken.set(token, state.imageTokens[token]);
+          });
+        }
         stageScale.innerHTML = '';
         let shouldReflowSavedDraft = Boolean(options.forceReflow) || state.version !== config.version;
         function sanitizeStoredHtml(html) {
           const holder = document.createElement('div');
-          holder.innerHTML = String(html || '');
+          holder.innerHTML = inflateImageUris(String(html || ''));
           if (holder.querySelector('br[data-xhs-wrap="1"]')) shouldReflowSavedDraft = true;
           removeAutoLineBreaks(holder);
           normalizeUnderlineDecorations(holder);
@@ -7616,6 +7685,9 @@ function studioHtmlV2(payload, libs) {
     function saveEditedHtml() {
       saveCurrentPage();
       const state = serializeStudioState();
+      // The saved file is self-contained: embed the token registry so pasted
+      // images (not present in the source template) survive a reload.
+      state.imageTokens = Object.fromEntries(imageUriByToken);
       let html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
       const replacement = 'const embeddedState = /* XHS_EMBEDDED_STATE */ ' + jsonForInlineScript(state) + ';\\n    let pages = [];';
       html = html.replace(/const embeddedState = \\/\\* XHS_EMBEDDED_STATE \\*\\/ [\\s\\S]*?\\n    let pages = \\[\\];/, replacement);
@@ -7959,6 +8031,8 @@ function studioHtmlV2(payload, libs) {
       }
     });
     window.addEventListener('resize', fitStage);
+    seedImageRegistryFromHtml(document.getElementById('wechatTemplate')?.innerHTML || '');
+    registerImageDataUri(config.coverImageSrc);
     const restoredSavedState = restoreSavedStudioState();
     if (!restoredSavedState) {
       applyBackgroundTheme(DEFAULT_BG_THEME, false);

@@ -314,7 +314,7 @@ async function main() {
 
   const htmlPath = path.join(outputDir, "xhs-studio.html");
   const html = fs.readFileSync(htmlPath, "utf8");
-  assert.match(html, /"version":"0\.9\.10"/);
+  assert.match(html, /"version":"0\.9\.11"/);
   assert.match(html, /function pastedImageWidthPercent\(dims\)/);
   assert.match(html, /imageBlockFromSrc\(src, '', \{ pasted: true \}\)/);
   assert.match(html, /xhs-block-drag-handle/);
@@ -2925,6 +2925,69 @@ async function main() {
     await page.waitForTimeout(200);
     assert.strictEqual(await page.locator("#stageScale .xhs-quote").filter({ hasText: "互切样式测试" }).count(), 0);
     assert.strictEqual(await page.locator("#stageScale .xhs-p").filter({ hasText: "互切样式测试" }).count(), 1, "clicking the same style again should cancel back to paragraph");
+
+    // Regression: 有色字 and 下划线 are stackable inline styles. Applying one
+    // after the other must keep both (and keep the accent color), and toggling
+    // one off must leave the other intact without leftover empty spans.
+    await bodyFrame.evaluate((frame) => {
+      const p = document.createElement("p");
+      p.className = "xhs-p xhs-block";
+      p.textContent = "叠加样式测试";
+      frame.appendChild(p);
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("greenTextBtn").click();
+    });
+    await page.waitForTimeout(120);
+    const stackedP = page.locator("#stageScale .xhs-p").filter({ hasText: "叠加样式测试" }).first();
+    assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 1, "green text should apply first");
+    await stackedP.evaluate((p) => {
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("greenUnderlineBtn").click();
+    });
+    await page.waitForTimeout(120);
+    assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 1, "green text must survive underline stacking");
+    assert.strictEqual(await stackedP.locator(".xhs-green-underline").count(), 1, "underline should stack onto green text");
+    const stackedColor = await stackedP.locator(".xhs-green-text").first().evaluate((node) => getComputedStyle(node).color);
+    const accentColor = await page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--xhs-accent-strong").trim();
+      document.body.appendChild(probe);
+      const resolved = getComputedStyle(probe).color;
+      probe.remove();
+      return resolved;
+    });
+    assert.strictEqual(stackedColor, accentColor, "stacked text must keep the accent color instead of being forced back to #111");
+    await stackedP.evaluate((p) => {
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("greenUnderlineBtn").click();
+    });
+    await page.waitForTimeout(120);
+    assert.strictEqual(await stackedP.locator(".xhs-green-underline").count(), 0, "clicking underline again must toggle it off");
+    assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 1, "green text must stay after underline toggles off");
+    assert.strictEqual(await stackedP.locator('span:not([class]), span[class=""]').count(), 0, "toggle-off must not leave bare spans behind");
+    await stackedP.evaluate((p) => {
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("greenTextBtn").click();
+    });
+    await page.waitForTimeout(120);
+    assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 0, "clicking green text again must toggle it off");
+    assert.strictEqual(await stackedP.locator('span:not([class]), span[class=""]').count(), 0, "full toggle-off must return plain text without bare spans");
 
     // Regression: images no longer have dedicated replace/delete buttons.
     // Double-click must open the native file chooser to replace locally,
