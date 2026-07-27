@@ -366,7 +366,7 @@ async function main() {
   assert.match(html, /--body-line-px: 58px;/);
   assert.match(html, /--body-regular-weight: 720;/);
   assert.match(html, /--body-bold-weight: 720;/);
-  assert.match(html, /--body-unbold-weight: 500;/);
+  assert.match(html, /--body-unbold-weight: 550;/);
   assert.doesNotMatch(html, /RabbitQ Songti SC|STSongti-SC-/);
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /<strong>结论<\/strong><p><strong>总结：这是总结卡片/, "总结 label should trigger a card with the inferred 结论 corner");
@@ -591,7 +591,7 @@ async function main() {
     assert.strictEqual(bodyWeights.bold, "720", "bold body text should use weight 720");
 
     // Regression: body text starts at 720, but the B control must be a real
-    // two-state toggle: 720 default -> 500 unbold -> 720 default.
+    // two-state toggle: 720 default -> 550 unbold -> 720 default.
     const boldToggleBody = orderedPage.locator('#stageScale .xhs-list-body').first();
     await boldToggleBody.evaluate((body) => {
       const range = document.createRange();
@@ -613,17 +613,17 @@ async function main() {
       weight: getComputedStyle(body.querySelector('.xhs-text-regular') || body).fontWeight,
       regularMarks: body.querySelectorAll('.xhs-text-regular').length,
     }));
-    assert.strictEqual(unboldState.weight, '500', 'first B click should change selected default text to weight 500');
+    assert.strictEqual(unboldState.weight, '550', 'first B click should change selected default text to weight 550');
     assert.ok(unboldState.regularMarks >= 1, 'first B click should persist an explicit unbold mark');
     assert.strictEqual(
       await orderedPage.evaluate(() => pages[pageIndex].html.includes('xhs-text-regular')),
       true,
-      '500 unbold formatting should be saved into the current page state',
+      '550 unbold formatting should be saved into the current page state',
     );
     assert.strictEqual(
       await orderedPage.locator('#boldBtn').evaluate((button) => button.classList.contains('active')),
       false,
-      '500 unbold selection should turn off the B control',
+      '550 unbold selection should turn off the B control',
     );
     await orderedPage.click('#boldBtn');
     await orderedPage.waitForTimeout(120);
@@ -2611,6 +2611,81 @@ async function main() {
     assert.ok(content.tables.every((table) => JSON.stringify(table.headers) === JSON.stringify(["模式", "适合", "页数"])));
     assert.strictEqual(content.tables.reduce((total, table) => total + table.rows, 0), 21);
     assert.ok(content.tables.some((table) => table.text.includes("无封面图")));
+    const tableProbePage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await tableProbePage.addInitScript(() => localStorage.clear());
+    await tableProbePage.goto(`file://${htmlPath}`);
+    const tableFormattingPageIndex = await tableProbePage.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#pageTabs button"));
+      for (let index = 0; index < tabs.length; index += 1) {
+        tabs[index].click();
+        const table = Array.from(document.querySelectorAll("#stageScale .xhs-table"))
+          .find((item) => item.querySelectorAll("tbody td").length >= 2);
+        if (table) return index;
+      }
+      return -1;
+    });
+    assert.ok(tableFormattingPageIndex >= 0);
+    await activateStudioPage(tableProbePage, tableFormattingPageIndex);
+    const tableFormattingState = await tableProbePage.evaluate(() => {
+      const table = Array.from(document.querySelectorAll("#stageScale .xhs-table"))
+        .find((item) => item.querySelectorAll("tbody td").length >= 2);
+      const cells = Array.from(table?.querySelectorAll("tbody td") || []);
+      if (cells.length < 2) throw new Error("expected at least two body cells");
+      const alerts = [];
+      const originalAlert = window.alert;
+      window.alert = (message) => alerts.push(String(message));
+      const selectAcrossCells = () => {
+        const firstText = cells[0].firstChild;
+        const secondText = cells[1].firstChild;
+        const range = document.createRange();
+        range.setStart(firstText, 0);
+        range.setEnd(secondText, Math.min(2, secondText.textContent.length));
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      };
+      const before = {
+        rows: table.querySelectorAll("tr").length,
+        cells: table.querySelectorAll("th, td").length,
+        text: table.textContent,
+      };
+      ["boldBtn", "greenTextBtn", "greenUnderlineBtn", "keypointBtn"].forEach((id) => {
+        selectAcrossCells();
+        document.getElementById(id).click();
+      });
+      const afterBlocked = {
+        rows: table.querySelectorAll("tr").length,
+        cells: table.querySelectorAll("th, td").length,
+        text: table.textContent,
+        illegalCellWraps: table.querySelectorAll("span > th, span > td").length,
+        cards: table.querySelectorAll(".xhs-callout").length,
+      };
+      const firstText = cells[0].firstChild;
+      const singleCellRange = document.createRange();
+      singleCellRange.setStart(firstText, 0);
+      singleCellRange.setEnd(firstText, Math.min(2, firstText.textContent.length));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(singleCellRange);
+      document.getElementById("greenTextBtn").click();
+      const singleCellMarks = cells[0].querySelectorAll(".xhs-green-text").length;
+      document.getElementById("greenTextBtn").click();
+      const singleCellMarksAfterCleanup = cells[0].querySelectorAll(".xhs-green-text").length;
+      const finalCellCount = table.querySelectorAll("th, td").length;
+      window.alert = originalAlert;
+      return { before, afterBlocked, alerts, singleCellMarks, singleCellMarksAfterCleanup, finalCellCount };
+    });
+    assert.deepStrictEqual(tableFormattingState.afterBlocked, {
+      ...tableFormattingState.before,
+      illegalCellWraps: 0,
+      cards: 0,
+    }, "cross-cell formatting must leave the table DOM and text unchanged");
+    assert.strictEqual(tableFormattingState.alerts.length, 4, "every cross-cell style action should be rejected");
+    assert.ok(tableFormattingState.alerts.every((message) => message.includes("一个单元格")));
+    assert.strictEqual(tableFormattingState.singleCellMarks, 1, "inline styling inside one table cell should still work");
+    assert.strictEqual(tableFormattingState.singleCellMarksAfterCleanup, 0, "table formatting test should restore its fixture state");
+    assert.strictEqual(tableFormattingState.finalCellCount, tableFormattingState.before.cells);
+    await tableProbePage.close();
     assert.ok(headingPageIndex >= 0);
     await activateStudioPage(page, headingPageIndex);
     await page.locator("#stageScale .xhs-heading").first().evaluate((heading) => {
@@ -3059,6 +3134,178 @@ async function main() {
     assert.strictEqual(await stackedP.locator(".xhs-green-text").count(), 0, "clicking green text again must toggle it off");
     assert.strictEqual(await stackedP.locator('span:not([class]), span[class=""]').count(), 0, "full toggle-off must return plain text without bare spans");
 
+    // Regression: inline emphasis may stack inside one structural block, while
+    // structural styles themselves must cross-switch instead of nesting. The
+    // three inline marks must survive paragraph → card → quote → heading →
+    // code → list → card → paragraph.
+    await bodyFrame.evaluate((frame) => {
+      const p = document.createElement("p");
+      p.className = "xhs-p xhs-block";
+      p.textContent = "块内叠加互切测试";
+      frame.appendChild(p);
+      const selectAll = () => {
+        const range = document.createRange();
+        range.selectNodeContents(p);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      };
+      selectAll();
+      document.getElementById("greenTextBtn").click();
+      selectAll();
+      document.getElementById("greenUnderlineBtn").click();
+      selectAll();
+      document.getElementById("boldBtn").click();
+    });
+    await page.waitForTimeout(150);
+    let richSwitchBlock = page.locator("#stageScale .xhs-p").filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await richSwitchBlock.locator(".xhs-green-text").count(), 1, "green text should stack with the other inline marks");
+    assert.strictEqual(await richSwitchBlock.locator(".xhs-green-underline").count(), 1, "underline should stack with the other inline marks");
+    assert.strictEqual(await richSwitchBlock.locator(".xhs-text-regular").count(), 1, "the B toggle should stack its 550 mark with color and underline");
+    assert.strictEqual(
+      await richSwitchBlock.locator(".xhs-text-regular").evaluate((node) => getComputedStyle(node).fontWeight),
+      "550",
+      "the stacked unbold mark should render at weight 550",
+    );
+
+    await richSwitchBlock.evaluate((p) => {
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await page.waitForTimeout(200);
+    let switchedBlock = page.locator("#stageScale .xhs-callout").filter({ hasText: "块内叠加互切测试" }).first();
+    if (await switchedBlock.count() === 0) {
+      const switchedPageIndex = await page.evaluate(() => pages.findIndex((savedPage) => {
+        const savedHtml = String(savedPage.html || savedPage.tailHtml || "");
+        return savedHtml.includes("xhs-callout") && savedHtml.includes("块内叠加互切测试");
+      }));
+      assert.ok(switchedPageIndex >= 0, "converted card should remain in the continuous saved flow");
+      await activateStudioPage(page, switchedPageIndex);
+      switchedBlock = page.locator("#stageScale .xhs-callout").filter({ hasText: "块内叠加互切测试" }).first();
+    }
+    assert.strictEqual(await switchedBlock.count(), 1, "paragraph should become one card");
+    assert.strictEqual(await switchedBlock.locator(".xhs-callout, .xhs-quote, .xhs-code-block, .xhs-heading, .xhs-list-line").count(), 0, "card must not contain a nested structural block");
+    assert.deepStrictEqual(await switchedBlock.evaluate((block) => ({
+      color: block.querySelectorAll(".xhs-green-text").length,
+      underline: block.querySelectorAll(".xhs-green-underline").length,
+      unbold: block.querySelectorAll(".xhs-text-regular").length,
+    })), { color: 1, underline: 1, unbold: 1 }, "card conversion must preserve all inline marks");
+
+    await switchedBlock.evaluate((card) => {
+      const body = card.querySelector(".xhs-callout-body");
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("italicBtn").click();
+    });
+    await page.waitForTimeout(200);
+    switchedBlock = page.locator("#stageScale .xhs-quote").filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await switchedBlock.count(), 1, "card should cross-switch into one quote");
+    assert.strictEqual(await page.locator("#stageScale .xhs-callout").filter({ hasText: "块内叠加互切测试" }).count(), 0, "cross-switch must remove the old card");
+    assert.deepStrictEqual(await switchedBlock.evaluate((block) => ({
+      color: block.querySelectorAll(".xhs-green-text").length,
+      underline: block.querySelectorAll(".xhs-green-underline").length,
+      unbold: block.querySelectorAll(".xhs-text-regular").length,
+    })), { color: 1, underline: 1, unbold: 1 }, "quote conversion must preserve all inline marks");
+
+    await switchedBlock.evaluate((quote) => {
+      const range = document.createRange();
+      range.selectNodeContents(quote);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("headingBtn2").click();
+    });
+    await page.waitForTimeout(200);
+    switchedBlock = page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await switchedBlock.count(), 1, "quote should cross-switch into one heading");
+    assert.deepStrictEqual(await switchedBlock.evaluate((block) => ({
+      color: block.querySelectorAll(".xhs-green-text").length,
+      underline: block.querySelectorAll(".xhs-green-underline").length,
+      unbold: block.querySelectorAll(".xhs-text-regular").length,
+    })), { color: 1, underline: 1, unbold: 1 }, "heading normalization must preserve all inline marks");
+
+    await switchedBlock.evaluate((heading) => {
+      const title = heading.querySelector(".xhs-heading-title");
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("codeBtn").click();
+    });
+    await page.waitForTimeout(200);
+    switchedBlock = page.locator("#stageScale .xhs-code-block").filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await switchedBlock.count(), 1, "heading should cross-switch into one code block");
+    assert.deepStrictEqual(await switchedBlock.evaluate((block) => ({
+      color: block.querySelectorAll(".xhs-green-text").length,
+      underline: block.querySelectorAll(".xhs-green-underline").length,
+      unbold: block.querySelectorAll(".xhs-text-regular").length,
+    })), { color: 1, underline: 1, unbold: 1 }, "code conversion must preserve all inline marks");
+
+    await switchedBlock.evaluate((code) => {
+      const content = code.querySelector(".xhs-code-content");
+      const range = document.createRange();
+      range.selectNodeContents(content);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("listOrderedBtn").click();
+    });
+    await page.waitForTimeout(200);
+    switchedBlock = page.locator('#stageScale .xhs-list-line[data-list-type="ordered"]').filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await switchedBlock.count(), 1, "code block should cross-switch into one ordered list item");
+    assert.deepStrictEqual(await switchedBlock.evaluate((block) => ({
+      color: block.querySelectorAll(".xhs-green-text").length,
+      underline: block.querySelectorAll(".xhs-green-underline").length,
+      unbold: block.querySelectorAll(".xhs-text-regular").length,
+    })), { color: 1, underline: 1, unbold: 1 }, "list conversion must preserve all inline marks");
+
+    await switchedBlock.evaluate((line) => {
+      const body = line.querySelector(".xhs-list-body");
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await page.waitForTimeout(200);
+    switchedBlock = page.locator("#stageScale .xhs-callout").filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await switchedBlock.count(), 1, "list item should cross-switch into one card");
+    assert.strictEqual(await switchedBlock.locator(".xhs-list-line").count(), 0, "card must not wrap the old list structure");
+
+    await switchedBlock.evaluate((card) => {
+      const body = card.querySelector(".xhs-callout-body");
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await page.waitForTimeout(200);
+    richSwitchBlock = page.locator("#stageScale .xhs-p").filter({ hasText: "块内叠加互切测试" }).first();
+    assert.strictEqual(await richSwitchBlock.count(), 1, "clicking the active card style again should return one paragraph");
+    assert.deepStrictEqual(await richSwitchBlock.evaluate((block) => ({
+      color: block.querySelectorAll(".xhs-green-text").length,
+      underline: block.querySelectorAll(".xhs-green-underline").length,
+      unbold: block.querySelectorAll(".xhs-text-regular").length,
+      nestedBlocks: block.querySelectorAll(".xhs-callout, .xhs-quote, .xhs-code-block, .xhs-heading, .xhs-list-line").length,
+    })), { color: 1, underline: 1, unbold: 1, nestedBlocks: 0 }, "canceling a block style must keep inline marks without nesting");
+
     // Regression: a selected structural block can be deleted with Backspace,
     // including an emptied card whose caret is still inside the body.
     await bodyFrame.evaluate((frame) => {
@@ -3130,6 +3377,19 @@ async function main() {
     assert.ok(imagePageIndex >= 0, "expected to find a page containing the fixture image");
     const imageFrame = page.locator("#stageScale .xhs-image-frame").first();
     assert.strictEqual(await imageFrame.count(), 1, "expected the fixture image to render as an image block");
+    const imageTransformBeforeWheel = await imageFrame.locator("img").evaluate((img) => img.style.transform);
+    await imageFrame.evaluate((frame) => {
+      frame.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
+    });
+    const imageTransformAfterWheel = await imageFrame.locator("img").evaluate((img) => img.style.transform);
+    assert.notStrictEqual(imageTransformAfterWheel, imageTransformBeforeWheel, "wheel should change image zoom");
+    await page.keyboard.press("Control+z");
+    await page.waitForTimeout(180);
+    assert.strictEqual(
+      await page.locator("#stageScale .xhs-image-frame img").first().evaluate((img) => img.style.transform),
+      imageTransformBeforeWheel,
+      "Ctrl+Z should restore image zoom to the state before the wheel gesture",
+    );
     const filechooserPromise = page.waitForEvent("filechooser", { timeout: 3000 }).then(() => true).catch(() => false);
     await imageFrame.dblclick();
     assert.strictEqual(await filechooserPromise, true, "double-clicking an image should open the local file chooser to replace it");
