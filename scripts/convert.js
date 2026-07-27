@@ -3382,6 +3382,7 @@ function studioHtmlV2(payload, libs) {
           blockWidth: block.getBoundingClientRect().width / Math.max(0.1, scale),
           parentWidth: imageFrameParentWidth(block, scale),
           frameHeight: frame.getBoundingClientRect().height / Math.max(0.1, scale),
+          historyRecorded: false,
         };
         frame.dataset.resizing = '1';
         frame.dataset.resizeMode = drag.mode;
@@ -3393,6 +3394,10 @@ function studioHtmlV2(payload, libs) {
         if (!drag || event.pointerId !== drag.id) return;
         event.preventDefault();
         event.stopPropagation();
+        if (!drag.historyRecorded) {
+          recordEditorHistory();
+          drag.historyRecorded = true;
+        }
         applyFrameSizeFromDrag(frame, frame.closest('.xhs-image-block'), drag, drag.mode, event);
       });
       function finishResize(event) {
@@ -5989,6 +5994,17 @@ function studioHtmlV2(payload, libs) {
     }, true);
     function bindImageDrag(frame) {
       let drag = null;
+      let adjustmentHistoryActive = false;
+      let adjustmentHistoryTimer = null;
+      function beginImageAdjustmentHistory() {
+        if (!adjustmentHistoryActive) recordEditorHistory();
+        adjustmentHistoryActive = true;
+        window.clearTimeout(adjustmentHistoryTimer);
+        adjustmentHistoryTimer = window.setTimeout(() => {
+          adjustmentHistoryActive = false;
+          adjustmentHistoryTimer = null;
+        }, 450);
+      }
       frame.tabIndex = 0;
       frame.addEventListener('pointerdown', (event) => {
         if (event.target?.closest?.('.xhs-resize-handle')) return;
@@ -6006,6 +6022,7 @@ function studioHtmlV2(payload, libs) {
           x: offsets.x,
           y: offsets.y,
           scale: stageLocalScale(frame),
+          historyRecorded: false,
         };
         frame.setPointerCapture?.(event.pointerId);
         frame.classList.add('dragging');
@@ -6013,6 +6030,10 @@ function studioHtmlV2(payload, libs) {
       frame.addEventListener('pointermove', (event) => {
         if (!drag || event.pointerId !== drag.id) return;
         event.preventDefault();
+        if (!drag.historyRecorded) {
+          recordEditorHistory();
+          drag.historyRecorded = true;
+        }
         const dx = (event.clientX - drag.startX) / Math.max(0.1, drag.scale);
         const dy = (event.clientY - drag.startY) / Math.max(0.1, drag.scale);
         updateImageOffset(drag.x + dx, drag.y + dy);
@@ -6030,6 +6051,7 @@ function studioHtmlV2(payload, libs) {
         const img = frame.querySelector('img');
         if (!img) return;
         event.preventDefault();
+        beginImageAdjustmentHistory();
         selectFrame(frame);
         const delta = event.deltaY > 0 ? -6 : 6;
         updateImageZoom(Number(imageZoomRange.value || 100) + delta);
@@ -6039,6 +6061,7 @@ function studioHtmlV2(payload, libs) {
         const img = frame.querySelector('img');
         if (!img) return;
         event.preventDefault();
+        beginImageAdjustmentHistory();
         selectFrame(frame);
         const step = event.shiftKey ? 24 : 8;
         const offsets = imageOffset(img);
@@ -6441,7 +6464,23 @@ function studioHtmlV2(payload, libs) {
       const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       const listLine = el?.closest?.('.xhs-list-line');
       if (listLine) return listLine.querySelector('.xhs-list-body');
-      return el?.closest?.('.xhs-list-body, .xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-code-content, .xhs-heading-title') || null;
+      return el?.closest?.('.xhs-list-body, .xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-code-content, .xhs-heading-title, .xhs-table th, .xhs-table td') || null;
+    }
+    function tableCellAt(node) {
+      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      return el?.closest?.('.xhs-table th, .xhs-table td') || null;
+    }
+    function rangeCrossesTableCells(range) {
+      if (!range) return false;
+      const startCell = tableCellAt(range.startContainer);
+      const endCell = tableCellAt(range.endContainer);
+      if (!startCell && !endCell) return false;
+      return !startCell || !endCell || startCell !== endCell;
+    }
+    function rejectCrossTableCellSelection(range) {
+      if (!rangeCrossesTableCells(range)) return false;
+      alert('表格样式一次只能处理一个单元格，请缩小选区后再试。');
+      return true;
     }
     function restrictRangeToInlineHost(range) {
       const startHost = inlineFormattingHost(range.startContainer);
@@ -6594,7 +6633,9 @@ function studioHtmlV2(payload, libs) {
         alert('请先选中要处理的文字。');
         return;
       }
-      let range = restrictRangeToInlineHost(selection.getRangeAt(0));
+      const sourceRange = selection.getRangeAt(0);
+      if (rejectCrossTableCellSelection(sourceRange)) return;
+      let range = restrictRangeToInlineHost(sourceRange);
       const parent = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
@@ -6637,6 +6678,7 @@ function studioHtmlV2(payload, libs) {
       saveCurrentPage();
     }
     function applyFormattingMultiBlock(range, className) {
+      if (rejectCrossTableCellSelection(range)) return true;
       const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content, .xhs-heading-title';
       const frame = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
@@ -6866,6 +6908,7 @@ function studioHtmlV2(payload, libs) {
       let rangeInfo = null;
       if (selection?.rangeCount && !selection.isCollapsed) {
         const range = selection.getRangeAt(0);
+        if (rejectCrossTableCellSelection(range)) return true;
         const startInfo = activeFlowBlockAt(range.startContainer);
         const endInfo = activeFlowBlockAt(range.endContainer);
         if (!startInfo || !endInfo || startInfo.el !== endInfo.el) {
@@ -7344,6 +7387,7 @@ function studioHtmlV2(payload, libs) {
           imageInput.value = '';
           return;
         }
+        recordEditorHistory();
         if (action === 'insert') {
           const block = imageBlockFromSrc(nextSrc, file.name || '');
           if (!insertImageBlockAtSavedRange(block)) {
