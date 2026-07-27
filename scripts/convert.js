@@ -942,7 +942,7 @@ function studioHtmlV2(payload, libs) {
       --body-list-item-gap: ${Math.round(BODY_LIST_ITEM_GAP * width / DEFAULT_WIDTH)}px;
       --body-regular-weight: 720;
       --body-bold-weight: 720;
-      --body-unbold-weight: 500;
+      --body-unbold-weight: 550;
       --body-text-width: 100%;
       --cover-title-size: ${coverTitleSize}px;
       --cover-subtitle-size: ${coverSubtitleSize}px;
@@ -1797,7 +1797,8 @@ function studioHtmlV2(payload, libs) {
       if (level === '2') {
         const titleEl = heading.querySelector('.xhs-heading-title') || heading.querySelector('strong');
         const titleText = titleEl ? cleanText(textWithBreaksPreservingSpaces(titleEl)) : cleanText(heading.textContent);
-        return { number: '', titleText, level };
+        const titleHtml = titleEl && cleanText(titleEl.textContent) === cleanText(titleText) ? titleEl.innerHTML : '';
+        return { number: '', titleText, titleHtml, level };
       }
       const numberEl = heading.querySelector('.xhs-heading-number') ||
         Array.from(heading.children).find((child) => /^\\d{2}$/.test(cleanText(child.textContent)));
@@ -1815,7 +1816,8 @@ function studioHtmlV2(payload, libs) {
       if (cleanText(titleFromEl)) titleText = stripHeadingNumberPrefix(titleFromEl, number);
       else if (spaced) titleText = spaced[2].trim();
       else titleText = stripHeadingNumberPrefix(raw, number);
-      return { number, titleText, level: '1' };
+      const titleHtml = titleEl && cleanText(titleFromEl) === cleanText(titleText) ? titleEl.innerHTML : '';
+      return { number, titleText, titleHtml, level: '1' };
     }
     function isHeadingBlock(el) {
       if (el.querySelector('img')) return false;
@@ -1832,36 +1834,38 @@ function studioHtmlV2(payload, libs) {
       const titleChild = directChildren.find((child) => child.tagName?.toLowerCase() === 'strong' && cleanText(child.textContent));
       return Boolean(numberChild && titleChild);
     }
-    function headingHtml(number, titleText, level) {
+    function headingHtml(number, titleText, level, titleHtml = '') {
       // Caret markers use zero-width spaces; if a rebuild ever captured one
       // into the title text, drop it here so it cannot persist visibly.
       const cleanTitle = String(titleText || '').replace(/\\u200b/g, '');
+      const cleanTitleHtml = String(titleHtml || '').replace(/\\u200b/g, '');
+      const renderedTitle = cleanTitleHtml ? normalizeInlineHtml(cleanTitleHtml) : escWithBreaks(cleanTitle.trim());
       if (String(level) === '2') {
-        const safeTitle = cleanTitle.trim();
-        return '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + escWithBreaks(safeTitle) + '</span>';
+        return '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + renderedTitle + '</span>';
       }
       const safeNumber = String(number || '00').match(/^(\\d{2})/)?.[1] || '00';
       const safeTitle = stripHeadingNumberPrefix(cleanTitle, safeNumber);
+      const renderedLevel1Title = cleanTitleHtml ? normalizeInlineHtml(cleanTitleHtml) : escWithBreaks(safeTitle);
       return '<span class="xhs-heading-number" contenteditable="true" spellcheck="false">' + esc(safeNumber) + '</span>' +
         '<span class="xhs-heading-space" aria-hidden="true">&nbsp;</span>' +
-        '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + escWithBreaks(safeTitle) + '</span>';
+        '<span class="xhs-heading-title" contenteditable="true" spellcheck="false">' + renderedLevel1Title + '</span>';
     }
-    function makeNewHeadingBlock(number = '00', titleText = '', level = '1') {
+    function makeNewHeadingBlock(number = '00', titleText = '', level = '1', titleHtml = '') {
       const block = makeElement('section', 'xhs-heading xhs-block');
       block.setAttribute('contenteditable', 'false');
       block.dataset.level = String(level) === '2' ? '2' : '1';
-      block.innerHTML = headingHtml(number, String(titleText || '').replace(/\\u200b/g, ''), block.dataset.level);
+      block.innerHTML = headingHtml(number, String(titleText || '').replace(/\\u200b/g, ''), block.dataset.level, titleHtml);
       return block;
     }
     function headingFromElement(el) {
-      const { number, titleText, level } = parseHeadingParts(el);
-      return makeNewHeadingBlock(number, titleText, level);
+      const { number, titleText, titleHtml, level } = parseHeadingParts(el);
+      return makeNewHeadingBlock(number, titleText, level, titleHtml);
     }
     function normalizeHeadingBlock(heading) {
-      const { number, titleText, level } = parseHeadingParts(heading);
+      const { number, titleText, titleHtml, level } = parseHeadingParts(heading);
       heading.setAttribute('contenteditable', 'false');
       heading.dataset.level = level;
-      heading.innerHTML = headingHtml(number, titleText, level);
+      heading.innerHTML = headingHtml(number, titleText, level, titleHtml);
     }
     function activeHeadingEditField() {
       const sel = window.getSelection();
@@ -6437,7 +6441,7 @@ function studioHtmlV2(payload, libs) {
       const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
       const listLine = el?.closest?.('.xhs-list-line');
       if (listLine) return listLine.querySelector('.xhs-list-body');
-      return el?.closest?.('.xhs-list-body, .xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-heading-title') || null;
+      return el?.closest?.('.xhs-list-body, .xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-code-content, .xhs-heading-title') || null;
     }
     function restrictRangeToInlineHost(range) {
       const startHost = inlineFormattingHost(range.startContainer);
@@ -6633,7 +6637,7 @@ function studioHtmlV2(payload, libs) {
       saveCurrentPage();
     }
     function applyFormattingMultiBlock(range, className) {
-      const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-heading-title';
+      const BLOCK_SELS = '.xhs-p, .xhs-rich, .xhs-callout-body, .xhs-quote, .xhs-list-body, .xhs-code-content, .xhs-heading-title';
       const frame = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
@@ -6734,7 +6738,11 @@ function studioHtmlV2(payload, libs) {
           .map((body) => stripListMarkerFromHtml(normalizeInlineHtml(body.innerHTML)))
           .join('<br>');
       }
-      if (info.type === 'code') return escWithBreaks(flowBlockPlainText(info));
+      if (info.type === 'code') {
+        const content = info.el.querySelector('.xhs-code-content');
+        const code = content?.querySelector('code');
+        return normalizeInlineHtml(code?.innerHTML || content?.innerHTML || escWithBreaks(flowBlockPlainText(info)));
+      }
       return info.el.innerHTML;
     }
     function flowBlockPlainText(info) {
@@ -6755,9 +6763,11 @@ function studioHtmlV2(payload, libs) {
     }
     function buildFlowBlocksFromContent(targetType, targetLevel, info) {
       if (targetType === 'heading') {
-        const plain = stripHeadingNumberPrefix(flowBlockPlainText(info), '00').replace(/\\u200b/g, '');
+        const sourcePlain = flowBlockPlainText(info).replace(/\\u200b/g, '');
+        const plain = stripHeadingNumberPrefix(sourcePlain, '00');
+        const titleHtml = plain === sourcePlain.trim() ? normalizeInlineHtml(flowBlockContentHtml(info)) : '';
         const number = targetLevel === '1' ? nextAutoHeadingNumber() : '';
-        return [makeNewHeadingBlock(number, plain, targetLevel)];
+        return [makeNewHeadingBlock(number, plain, targetLevel, titleHtml)];
       }
       if (targetType === 'quote') {
         const block = document.createElement('section');
@@ -6774,7 +6784,10 @@ function studioHtmlV2(payload, libs) {
         return [block];
       }
       if (targetType === 'code') {
-        return [makeNewCodeBlock(flowBlockPlainText(info), info.el?.dataset?.codeLanguage || 'Code')];
+        const block = makeNewCodeBlock(flowBlockPlainText(info), info.el?.dataset?.codeLanguage || 'Code');
+        const code = block.querySelector('.xhs-code-content code');
+        if (code) code.innerHTML = normalizeInlineHtml(flowBlockContentHtml(info));
+        return [block];
       }
       if (targetType === 'list') {
         const listType = targetLevel === 'ordered' ? 'ordered' : 'unordered';
@@ -6909,8 +6922,11 @@ function studioHtmlV2(payload, libs) {
         const fragment = item.range.extractContents();
         const holder = document.createElement('div');
         holder.appendChild(fragment);
-        const titleText = stripHeadingNumberPrefix(textWithBreaks(holder), '00');
-        heading.querySelector('.xhs-heading-title').innerHTML = escWithBreaks(titleText);
+        const sourceText = textWithBreaks(holder);
+        const titleText = stripHeadingNumberPrefix(sourceText, '00');
+        heading.querySelector('.xhs-heading-title').innerHTML = titleText === sourceText.trim()
+          ? normalizeInlineHtml(holder.innerHTML)
+          : escWithBreaks(titleText);
         const sourceBlock = parent?.closest?.('.xhs-p, .xhs-rich');
         if (sourceBlock && stageScale.contains(sourceBlock) && rangeCoversEntireBlock(item.range, sourceBlock)) {
           sourceBlock.replaceWith(heading);
@@ -6990,6 +7006,8 @@ function studioHtmlV2(payload, libs) {
       const holder = document.createElement('div');
       holder.appendChild(fragment);
       const block = makeNewCodeBlock(textWithBreaks(holder), 'Code');
+      const code = block.querySelector('.xhs-code-content code');
+      if (code) code.innerHTML = normalizeInlineHtml(holder.innerHTML);
       if (coversEntireBlock) sourceBlock.replaceWith(block);
       else item.range.insertNode(block);
       item.selection.removeAllRanges();
@@ -7021,7 +7039,7 @@ function studioHtmlV2(payload, libs) {
         const range = restrictRangeToInlineHost(selection.getRangeAt(0));
         if (applyFormattingMultiBlock(range, 'xhs-text-regular')) return;
       }
-      toggleInlineClass('xhs-text-regular', 'font-weight:700');
+      toggleInlineClass('xhs-text-regular', 'font-weight:550');
     }
     function italicSelection() {
       if (tryToggleOrSwitchFlowBlock('quote')) return;
