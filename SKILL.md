@@ -1,8 +1,8 @@
 ---
 name: rabbitQ-skill-lark-xhs
-description: 小兔Q彬 · 将飞书云文档导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。支持全封面/半封面/无封面三种形式、AI 封面生成后直插、手动分页（---）、连续分页、主题组合、引用/卡片/序列/表格/macOS 代码块、图片裁剪与并排、草稿保存、一键复原及 PNG ZIP 批量导出。
-version: 0.9.25
+description: 小兔Q彬 · 将飞书云文档链接、导出的 Markdown、图片附件或完整 ZIP 包，独立解析为可编辑的小红书 3:4 图文 Studio。适用于用户提供飞书 /wiki/ 或 /docx/ 链接、本地 Markdown、导出目录或 ZIP，并要求生成、修复或验证小红书图文 HTML 的场景。支持 AI 自行下载飞书 Markdown、全封面/半封面/无封面、AI 封面直插、手动与连续分页、主题组合、引用/卡片/序列/表格/macOS 代码块、图片编辑、草稿保存、复原及 PNG ZIP 批量导出。
 metadata:
+  version: 0.9.25
   author: 小兔Q彬 / rabbitQ
   category: xiaohongshu
   platform: xiaohongshu
@@ -19,14 +19,14 @@ metadata:
 
 ## 定位与边界
 
-- 输入是飞书导出的 Markdown 文件、包含 Markdown 与附件的目录，或完整 ZIP。
+- 输入是飞书 `/wiki/` 或 `/docx/` 链接、飞书导出的 Markdown 文件、包含 Markdown 与附件的目录，或完整 ZIP。
 - 输出是本地 Studio 和 manifest，不会自动发布到小红书。
 - 小红书图文只放图片。视频链接和视频附件必须移除，并向用户明确提示“视频未放入图文，需要另行上传或先截帧”。
 
 ## 触发条件
 
 - 用户调用 `/rabbitQ-skill-lark-xhs`、`/rabbitq-xhs`、`/xhs-studio`。
-- 用户提供飞书 Markdown、导出目录或 ZIP，要求生成小红书 3:4 图文、编辑 HTML 或 PNG 图组。
+- 用户提供飞书云文档链接、Markdown、导出目录或 ZIP，要求生成小红书 3:4 图文、编辑 HTML 或 PNG 图组。
 - 用户要求重新运行、修复或验证由本 Skill 生成的 `xhs-studio.html`。
 
 ## 输入契约
@@ -246,7 +246,7 @@ node "scripts/convert.js" article.md -o "/path/to/output-xhs"
 
 ### 表格与输入细则
 
-表格识别、手动分页、图片路径等 Markdown 约定见 `references/markdown-patterns.md`。列数过多时优先建议精简，不得静默删列；确需改卡片堆叠须先征得用户同意。表格单元格内可使用加粗、有色字和下划线；跨单元格选区会被拦截并提示缩小选区，禁止为套行内样式破坏表格行列结构。
+表格识别、手动分页、图片路径等 Markdown 约定见 `references/markdown-patterns.md`。列数过多时优先建议精简，不得静默删列；确需改卡片堆叠须先征得用户同意。表格单元格内只可使用加粗、有色字和下划线；跨单元格选区会被拦截并提示缩小选区，单个单元格内也禁止应用一级/二级标题、引用、卡片、代码块或序列，避免破坏表格行列结构。
 
 ## 连续分页原则
 
@@ -380,5 +380,5 @@ node --check scripts/convert.js
 
 - 不负责把图文发布到小红书账号。
 - 不负责视频转 GIF、视频上传或视频笔记发布。
-- 不负责把飞书在线文档直接下载为 Markdown；本 Skill 从已导出的本地包开始。
+- 支持 AI 接收用户提供的飞书 `/wiki/` 或 `/docx/` 链接，并通过 `scripts/lark-export.js` 自行下载为本地 Markdown 包；不绕过飞书登录授权或文档访问权限。
 - 不承诺所有浏览器渲染一致；开发与验收优先使用当前版 Chrome / Chromium。

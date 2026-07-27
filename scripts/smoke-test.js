@@ -2671,9 +2671,56 @@ async function main() {
       const singleCellMarks = cells[0].querySelectorAll(".xhs-green-text").length;
       document.getElementById("greenTextBtn").click();
       const singleCellMarksAfterCleanup = cells[0].querySelectorAll(".xhs-green-text").length;
+      const blockAlerts = [];
+      window.alert = (message) => blockAlerts.push(String(message));
+      const beforeBlockCellHtml = cells[0].innerHTML;
+      const selectFirstCell = () => {
+        const range = document.createRange();
+        range.selectNodeContents(cells[0]);
+        const currentSelection = window.getSelection();
+        currentSelection.removeAllRanges();
+        currentSelection.addRange(range);
+      };
+      [
+        "headingBtn1",
+        "headingBtn2",
+        "italicBtn",
+        "keypointBtn",
+        "codeBtn",
+        "listUnorderedBtn",
+        "listOrderedBtn",
+      ].forEach((id) => {
+        selectFirstCell();
+        document.getElementById(id).click();
+      });
+      const caretAlerts = [];
+      window.alert = (message) => caretAlerts.push(String(message));
+      selectFirstCell();
+      const caretSelection = window.getSelection();
+      const caretRange = caretSelection.getRangeAt(0);
+      caretRange.collapse(true);
+      caretSelection.removeAllRanges();
+      caretSelection.addRange(caretRange);
+      document.getElementById("headingBtn1").click();
+      const afterBlockCellHtml = cells[0].innerHTML;
+      const illegalBlockCount = cells[0].querySelectorAll(
+        ".xhs-heading, .xhs-quote, .xhs-callout, .xhs-code-block, .xhs-list-line",
+      ).length;
       const finalCellCount = table.querySelectorAll("th, td").length;
       window.alert = originalAlert;
-      return { before, afterBlocked, alerts, singleCellMarks, singleCellMarksAfterCleanup, finalCellCount };
+      return {
+        before,
+        afterBlocked,
+        alerts,
+        singleCellMarks,
+        singleCellMarksAfterCleanup,
+        blockAlerts,
+        caretAlerts,
+        beforeBlockCellHtml,
+        afterBlockCellHtml,
+        illegalBlockCount,
+        finalCellCount,
+      };
     });
     assert.deepStrictEqual(tableFormattingState.afterBlocked, {
       ...tableFormattingState.before,
@@ -2684,6 +2731,12 @@ async function main() {
     assert.ok(tableFormattingState.alerts.every((message) => message.includes("一个单元格")));
     assert.strictEqual(tableFormattingState.singleCellMarks, 1, "inline styling inside one table cell should still work");
     assert.strictEqual(tableFormattingState.singleCellMarksAfterCleanup, 0, "table formatting test should restore its fixture state");
+    assert.strictEqual(tableFormattingState.blockAlerts.length, 7, "every block style action inside one table cell should be rejected");
+    assert.ok(tableFormattingState.blockAlerts.every((message) => message.includes("只支持加粗、有色字和下划线")));
+    assert.strictEqual(tableFormattingState.caretAlerts.length, 1, "a collapsed caret inside a table cell should reject block styles");
+    assert.ok(tableFormattingState.caretAlerts[0].includes("只支持加粗、有色字和下划线"));
+    assert.strictEqual(tableFormattingState.afterBlockCellHtml, tableFormattingState.beforeBlockCellHtml);
+    assert.strictEqual(tableFormattingState.illegalBlockCount, 0, "block styles must not be inserted inside table cells");
     assert.strictEqual(tableFormattingState.finalCellCount, tableFormattingState.before.cells);
     await tableProbePage.close();
     assert.ok(headingPageIndex >= 0);

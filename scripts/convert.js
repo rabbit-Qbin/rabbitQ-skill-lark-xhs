@@ -6482,6 +6482,12 @@ function studioHtmlV2(payload, libs) {
       alert('表格样式一次只能处理一个单元格，请缩小选区后再试。');
       return true;
     }
+    function rejectTableBlockStyleSelection(range) {
+      if (!range) return false;
+      if (!tableCellAt(range.startContainer) && !tableCellAt(range.endContainer)) return false;
+      alert('表格单元格内只支持加粗、有色字和下划线，不能应用标题、引用、卡片、代码块或序列。');
+      return true;
+    }
     function restrictRangeToInlineHost(range) {
       const startHost = inlineFormattingHost(range.startContainer);
       const endHost = inlineFormattingHost(range.endContainer);
@@ -6906,14 +6912,17 @@ function studioHtmlV2(payload, libs) {
     function tryToggleOrSwitchFlowBlock(targetType, targetLevel) {
       const selection = window.getSelection();
       let rangeInfo = null;
-      if (selection?.rangeCount && !selection.isCollapsed) {
+      if (selection?.rangeCount) {
         const range = selection.getRangeAt(0);
-        if (rejectCrossTableCellSelection(range)) return true;
-        const startInfo = activeFlowBlockAt(range.startContainer);
-        const endInfo = activeFlowBlockAt(range.endContainer);
-        if (!startInfo || !endInfo || startInfo.el !== endInfo.el) {
-          rangeInfo = selectedListFlowInfoFromRange(range);
-          if (!rangeInfo) return false;
+        if (!selection.isCollapsed && rejectCrossTableCellSelection(range)) return true;
+        if (rejectTableBlockStyleSelection(range)) return true;
+        if (!selection.isCollapsed) {
+          const startInfo = activeFlowBlockAt(range.startContainer);
+          const endInfo = activeFlowBlockAt(range.endContainer);
+          if (!startInfo || !endInfo || startInfo.el !== endInfo.el) {
+            rangeInfo = selectedListFlowInfoFromRange(range);
+            if (!rangeInfo) return false;
+          }
         }
       }
       const info = rangeInfo || activeFlowBlockAt(selection?.anchorNode) || activeFlowBlockAt(selectedFlowBlock);
