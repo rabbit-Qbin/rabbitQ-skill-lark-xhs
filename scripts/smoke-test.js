@@ -456,6 +456,7 @@ async function main() {
   assert.match(html, /id="overviewRail" class="overview-rail"/);
   assert.doesNotMatch(html, /id="overviewModeBtn"|id="editModeBtn"|单页编辑/);
   assert.match(html, /\.xhs-quote \{[^}]*background: transparent;/);
+  assert.match(html, /\.cover-subtitle \{[^}]*white-space: pre-line;/);
   assert.doesNotMatch(html, /id="headingBtn"/);
   assert.doesNotMatch(html, /id="replaceImageBtn"/);
   assert.doesNotMatch(html, /id="deleteImageBtn"/);
@@ -1386,8 +1387,8 @@ async function main() {
     assert.strictEqual(virtualDragCommitted.selected, true, 'moved block should remain selected after repagination');
 
     // A boundary blank visually occupies the rest of a page but is not real
-    // content. Dropping an image inside that visible blank must insert before
-    // the blank and shrink the image frame to the fixed page remainder.
+    // content. A user-resized image that fits the visible body frame must drop
+    // before that blank without changing its size.
     await page.evaluate(() => {
       cancelPendingReflow();
       const fixtureImage = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-image-block'));
@@ -1402,8 +1403,14 @@ async function main() {
       sourceImage.dataset.imageId = 'boundary-tail-drag-source';
       sourceImage.dataset.noAutoGrid = '1';
       const sourceFrame = sourceImage.querySelector('.xhs-image-frame');
-      sourceFrame.style.height = '650px';
+      sourceFrame.style.height = '220px';
       sourceFrame.dataset.userHeight = '1';
+      const oversizedImage = fixtureImage.cloneNode(true);
+      oversizedImage.dataset.imageId = 'boundary-tail-oversized-source';
+      oversizedImage.dataset.noAutoGrid = '1';
+      const oversizedFrame = oversizedImage.querySelector('.xhs-image-frame');
+      oversizedFrame.style.height = '650px';
+      oversizedFrame.dataset.userHeight = '1';
       const firstLine = document.createElement('p');
       firstLine.className = 'xhs-p xhs-block';
       firstLine.textContent = '第二步：让 AI 调用 skill，生成可编辑 HTML。';
@@ -1417,7 +1424,7 @@ async function main() {
       pages = [
         { ...cover },
         { type: 'body', html: targetImage.outerHTML + firstLine.outerHTML + secondLine.outerHTML + boundaryBlank.outerHTML },
-        { type: 'body', html: sourceImage.outerHTML },
+        { type: 'body', html: sourceImage.outerHTML + oversizedImage.outerHTML },
       ];
       pageIndex = 2;
       renderAll();
@@ -1467,31 +1474,43 @@ async function main() {
       };
     });
     assert.strictEqual(boundaryTailCommitted.imagePageIndex, 1, 'the image should remain in the visible target-page remainder');
-    assert.ok(boundaryTailCommitted.sourceHeight < 650, 'the image frame should shrink until it fits the target page');
+    assert.strictEqual(boundaryTailCommitted.sourceHeight, 220, 'dropping must preserve the user-resized image height');
     assert.strictEqual(boundaryTailCommitted.insideBodyFrame, true, 'a dropped image must be accepted when its resized block is inside the body-frame boundary');
     assert.strictEqual(boundaryTailCommitted.boundaryAfterImage, true, 'the original boundary blank should remain after the inserted image');
 
-    const imageTailFitState = await page.evaluate(() => {
-      const image = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-image-block'))?.cloneNode(true);
-      if (!image) return null;
-      const beforeHeight = parseFloat(image.querySelector('.xhs-image-frame')?.style.height || '0');
-      const beforeFit = measureBlockMetrics(image).fit;
-      const available = beforeFit - 24;
-      const changed = fitImageBlockIntoTailSpace(image, available);
-      return {
-        changed,
-        available,
-        beforeHeight,
-        afterHeight: parseFloat(image.querySelector('.xhs-image-frame')?.style.height || '0'),
-        afterFit: measureBlockMetrics(image).fit,
-        userHeight: image.querySelector('.xhs-image-frame')?.dataset.userHeight || '',
-      };
+    const oversizedBeforeDrop = await page.evaluate(() => ({
+      pageIndex: pageIndexForImageId('boundary-tail-oversized-source'),
+      height: parseFloat(findImageBlockById(collectBodyFlowHolder(), 'boundary-tail-oversized-source')
+        ?.querySelector('.xhs-image-frame')?.style.height || '0'),
+    }));
+    await page.evaluate(() => {
+      pageIndex = pageIndexForImageId('boundary-tail-oversized-source');
+      renderAll();
     });
-    assert.ok(imageTailFitState, 'expected an image fixture for tail-space fitting');
-    assert.strictEqual(imageTailFitState.changed, true, 'an image that narrowly misses the target page should shrink to the tail space');
-    assert.ok(imageTailFitState.afterHeight < imageTailFitState.beforeHeight, 'tail fitting must adjust only the image frame height');
-    assert.ok(imageTailFitState.afterFit <= imageTailFitState.available + 1, 'the adjusted image must fit the target tail');
-    assert.strictEqual(imageTailFitState.userHeight, '1', 'tail-fitted image height must survive later repagination');
+    await page.waitForTimeout(100);
+    const oversizedSourceImage = page.locator('#stageScale [data-image-id="boundary-tail-oversized-source"] .xhs-image-frame');
+    await oversizedSourceImage.hover();
+    await page.waitForTimeout(80);
+    const oversizedDragHandle = page.locator('#blockHalo .xhs-block-drag-handle');
+    const oversizedHandleBox = await oversizedDragHandle.boundingBox();
+    const resizedTargetFrameBox = await page.locator('.overview-item[data-index="1"] .xhs-body-frame').boundingBox();
+    assert.ok(oversizedHandleBox && resizedTargetFrameBox, 'oversized image fixture should expose a source handle and target body frame');
+    await page.mouse.move(oversizedHandleBox.x + oversizedHandleBox.width / 2, oversizedHandleBox.y + oversizedHandleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      resizedTargetFrameBox.x + resizedTargetFrameBox.width / 2,
+      resizedTargetFrameBox.y + resizedTargetFrameBox.height - 12,
+      { steps: 8 },
+    );
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    const oversizedAfterDrop = await page.evaluate(() => ({
+      pageIndex: pageIndexForImageId('boundary-tail-oversized-source'),
+      height: parseFloat(findImageBlockById(collectBodyFlowHolder(), 'boundary-tail-oversized-source')
+        ?.querySelector('.xhs-image-frame')?.style.height || '0'),
+    }));
+    assert.strictEqual(oversizedAfterDrop.pageIndex, oversizedBeforeDrop.pageIndex, 'an oversized image should remain on its original page');
+    assert.strictEqual(oversizedAfterDrop.height, oversizedBeforeDrop.height, 'an oversized image must never be auto-resized');
 
     await page.evaluate(() => {
       cancelPendingReflow();
@@ -3152,6 +3171,193 @@ async function main() {
     });
     await page.waitForTimeout(200);
     assert.strictEqual(await page.locator("#stageScale .xhs-heading").filter({ hasText: "临时二级标题" }).count(), 0);
+
+    // Regression: selecting inline-formatted text must create a top-level
+    // structural block without losing the text. Broad list selections switch
+    // marker type as rows, never by wrapping an old list inside a new one.
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      window.__styleInteractionOriginalPages = pages.map((savedPage) => ({ ...savedPage }));
+      const cover = pages.find((savedPage) => savedPage.type === "cover");
+      const headingSource = document.createElement("p");
+      headingSource.className = "xhs-p xhs-block";
+      headingSource.innerHTML = "<strong>封面样式稳定测试</strong>";
+      const codeSource = document.createElement("p");
+      codeSource.className = "xhs-p xhs-block";
+      codeSource.textContent = "双击整段代码块测试";
+      const listLines = buildListLines([
+        { html: "全封面：首张为图文一体封面", plain: "全封面：首张为图文一体封面" },
+        { html: "半封面：上半页为配图", plain: "半封面：上半页为配图" },
+        { html: "无封面：下半页接续正文", plain: "无封面：下半页接续正文" },
+      ], "unordered");
+      const blank = makeManualBlank();
+      pages = [
+        { ...cover },
+        { type: "body", html: headingSource.outerHTML + codeSource.outerHTML + listLines.map((line) => line.outerHTML).join("") + blank.outerHTML },
+      ];
+      pageIndex = 1;
+      renderAll();
+      const strong = document.querySelector("#stageScale strong");
+      const range = document.createRange();
+      range.selectNodeContents(strong);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("headingBtn2").click();
+    });
+    await page.waitForTimeout(500);
+    const inlineHeadingState = await page.evaluate(() => {
+      const holder = collectBodyFlowHolder();
+      const heading = Array.from(holder.querySelectorAll('.xhs-heading[data-level="2"]'))
+        .find((node) => (node.textContent || "").includes("封面样式稳定测试"));
+      return {
+        headingCount: heading ? 1 : 0,
+        headingText: heading?.querySelector(".xhs-heading-title")?.textContent || "",
+        nestedStructures: heading?.querySelectorAll(".xhs-heading, .xhs-callout, .xhs-quote, .xhs-code-block, .xhs-list-line").length || 0,
+        listCount: holder.querySelectorAll(".xhs-list-line").length,
+        blankCount: holder.querySelectorAll(".xhs-manual-blank").length,
+      };
+    });
+    assert.deepStrictEqual(inlineHeadingState, {
+      headingCount: 1,
+      headingText: "封面样式稳定测试",
+      nestedStructures: 0,
+      listCount: 3,
+      blankCount: 1,
+    }, "inline-formatted text must become one visible H2 without changing lists or blanks");
+
+    await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "封面样式稳定测试" }).evaluate((heading) => {
+      const title = heading.querySelector(".xhs-heading-title");
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await page.waitForTimeout(350);
+    const headingCardState = await page.evaluate(() => {
+      const holder = collectBodyFlowHolder();
+      const card = Array.from(holder.querySelectorAll(".xhs-callout"))
+        .find((node) => (node.textContent || "").includes("封面样式稳定测试"));
+      return {
+        cardCount: card ? 1 : 0,
+        bodyText: card?.querySelector(".xhs-callout-body")?.textContent || "",
+        nestedStructures: card?.querySelectorAll(".xhs-heading, .xhs-callout, .xhs-quote, .xhs-code-block, .xhs-list-line").length || 0,
+        blankCount: holder.querySelectorAll(".xhs-manual-blank").length,
+      };
+    });
+    assert.deepStrictEqual(headingCardState, {
+      cardCount: 1,
+      bodyText: "封面样式稳定测试",
+      nestedStructures: 0,
+      blankCount: 1,
+    }, "H2 must cross-switch to a non-empty card without moving blank rows");
+
+    await page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll("#stageScale .xhs-list-line"));
+      const firstBody = lines[0].querySelector(".xhs-list-body");
+      const lastBody = lines[lines.length - 1].querySelector(".xhs-list-body");
+      const range = document.createRange();
+      range.setStart(firstBody, 0);
+      range.setEnd(lastBody, lastBody.childNodes.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("listOrderedBtn").click();
+    });
+    await page.waitForTimeout(350);
+    const orderedSwitchState = await page.evaluate(() => {
+      const holder = collectBodyFlowHolder();
+      const lines = Array.from(holder.querySelectorAll(".xhs-list-line"));
+      return {
+        types: lines.map((line) => line.dataset.listType),
+        bodies: lines.map((line) => line.querySelector(".xhs-list-body")?.textContent || ""),
+        childCounts: lines.map((line) => line.children.length),
+        nestedLists: lines.reduce((total, line) => total + line.querySelectorAll(".xhs-list-line").length, 0),
+        bodyMarkers: lines.reduce((total, line) => total + line.querySelectorAll(".xhs-list-body .xhs-list-marker").length, 0),
+        blankCount: holder.querySelectorAll(".xhs-manual-blank").length,
+      };
+    });
+    assert.deepStrictEqual(orderedSwitchState, {
+      types: ["ordered", "ordered", "ordered"],
+      bodies: ["全封面：首张为图文一体封面", "半封面：上半页为配图", "无封面：下半页接续正文"],
+      childCounts: [2, 2, 2],
+      nestedLists: 0,
+      bodyMarkers: 0,
+      blankCount: 1,
+    }, "unordered rows must switch to ordered rows without marker or list nesting");
+
+    await page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll("#stageScale .xhs-list-line"));
+      const firstBody = lines[0].querySelector(".xhs-list-body");
+      const lastBody = lines[lines.length - 1].querySelector(".xhs-list-body");
+      const range = document.createRange();
+      range.setStart(firstBody, 0);
+      range.setEnd(lastBody, lastBody.childNodes.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("keypointBtn").click();
+    });
+    await page.waitForTimeout(350);
+    const listCardState = await page.evaluate(() => {
+      const holder = collectBodyFlowHolder();
+      const card = Array.from(holder.querySelectorAll(".xhs-callout"))
+        .find((node) => (node.textContent || "").includes("全封面：首张为图文一体封面"));
+      return {
+        bodyText: card?.querySelector(".xhs-callout-body")?.innerText || "",
+        listCount: holder.querySelectorAll(".xhs-list-line").length,
+        nestedStructures: card?.querySelectorAll(".xhs-list-line, .xhs-callout, .xhs-heading, .xhs-quote, .xhs-code-block").length || 0,
+        blankCount: holder.querySelectorAll(".xhs-manual-blank").length,
+      };
+    });
+    assert.ok(listCardState.bodyText.includes("全封面：首张为图文一体封面"));
+    assert.ok(listCardState.bodyText.includes("半封面：上半页为配图"));
+    assert.ok(listCardState.bodyText.includes("无封面：下半页接续正文"));
+    assert.strictEqual(listCardState.listCount, 0, "selected list rows should be replaced by the card");
+    assert.strictEqual(listCardState.nestedStructures, 0, "card conversion must not nest old list rows");
+    assert.strictEqual(listCardState.blankCount, 1, "block-style switching must preserve manual blank count");
+
+    await page.evaluate(() => {
+      const paragraph = Array.from(document.querySelectorAll("#stageScale .xhs-p"))
+        .find((node) => (node.textContent || "").trim() === "双击整段代码块测试");
+      if (!paragraph) throw new Error("missing paragraph-boundary selection fixture");
+      const range = document.createRange();
+      range.selectNode(paragraph);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.getElementById("codeBtn").click();
+    });
+    await page.waitForTimeout(350);
+    const paragraphBoundaryCodeState = await page.evaluate(() => {
+      const holder = collectBodyFlowHolder();
+      const block = Array.from(holder.querySelectorAll(".xhs-code-block"))
+        .find((node) => (node.textContent || "").includes("双击整段代码块测试"));
+      return {
+        codeCount: block ? 1 : 0,
+        codeText: block?.querySelector("code")?.textContent || "",
+        nestedParagraphs: block?.querySelectorAll(".xhs-p, .xhs-rich").length || 0,
+        blankCount: holder.querySelectorAll(".xhs-manual-blank").length,
+      };
+    });
+    assert.deepStrictEqual(paragraphBoundaryCodeState, {
+      codeCount: 1,
+      codeText: "双击整段代码块测试",
+      nestedParagraphs: 0,
+      blankCount: 1,
+    }, "paragraph-boundary selection must convert to code without a false cross-paragraph alert");
+
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      pages = window.__styleInteractionOriginalPages.map((savedPage) => ({ ...savedPage }));
+      delete window.__styleInteractionOriginalPages;
+      pageIndex = Math.min(1, pages.length - 1);
+      renderAll();
+    });
+    await page.waitForTimeout(150);
 
     // Regression: block styles can cross-switch (二级 → 卡片 → 引用) and cancel.
     await bodyFrame.evaluate((frame) => {
