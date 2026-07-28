@@ -1385,6 +1385,92 @@ async function main() {
     assert.strictEqual(virtualDragCommitted.manualBlankCount, 0, 'drop feedback must not persist as blank paragraphs');
     assert.strictEqual(virtualDragCommitted.selected, true, 'moved block should remain selected after repagination');
 
+    // A boundary blank visually occupies the rest of a page but is not real
+    // content. Dropping an image inside that visible blank must insert before
+    // the blank and shrink the image frame to the fixed page remainder.
+    await page.evaluate(() => {
+      cancelPendingReflow();
+      const fixtureImage = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-image-block'));
+      if (!fixtureImage) throw new Error('image fixture missing for boundary-tail drag');
+      const targetImage = fixtureImage.cloneNode(true);
+      targetImage.dataset.imageId = 'boundary-tail-static-image';
+      targetImage.dataset.noAutoGrid = '1';
+      const targetFrame = targetImage.querySelector('.xhs-image-frame');
+      targetFrame.style.height = '650px';
+      targetFrame.dataset.userHeight = '1';
+      const sourceImage = fixtureImage.cloneNode(true);
+      sourceImage.dataset.imageId = 'boundary-tail-drag-source';
+      sourceImage.dataset.noAutoGrid = '1';
+      const sourceFrame = sourceImage.querySelector('.xhs-image-frame');
+      sourceFrame.style.height = '650px';
+      sourceFrame.dataset.userHeight = '1';
+      const firstLine = document.createElement('p');
+      firstLine.className = 'xhs-p xhs-block';
+      firstLine.textContent = '第二步：让 AI 调用 skill，生成可编辑 HTML。';
+      const secondLine = document.createElement('p');
+      secondLine.className = 'xhs-p xhs-block';
+      secondLine.textContent = '第三步：浏览器打开 HTML 继续编辑。';
+      const boundaryBlank = makeManualBlank();
+      boundaryBlank.classList.add('xhs-boundary-blank', 'xhs-page-end');
+      boundaryBlank.style.setProperty('--xhs-boundary-blank-height', '400px');
+      const cover = window.__virtualRowOriginalPages.find((savedPage) => savedPage.type === 'cover');
+      pages = [
+        { ...cover },
+        { type: 'body', html: targetImage.outerHTML + firstLine.outerHTML + secondLine.outerHTML + boundaryBlank.outerHTML },
+        { type: 'body', html: sourceImage.outerHTML },
+      ];
+      pageIndex = 2;
+      renderAll();
+    });
+    await page.waitForTimeout(120);
+    const boundarySourceImage = page.locator('.overview-item[data-index="2"] [data-image-id="boundary-tail-drag-source"] .xhs-image-frame');
+    await boundarySourceImage.hover();
+    await page.waitForTimeout(80);
+    const boundaryDragHandle = page.locator('#blockHalo .xhs-block-drag-handle');
+    const boundaryHandleBox = await boundaryDragHandle.boundingBox();
+    const boundaryBlankBox = await page.locator('.overview-item[data-index="1"] .xhs-boundary-blank').boundingBox();
+    assert.ok(boundaryHandleBox && boundaryBlankBox, 'boundary-tail drag fixture should expose a source handle and visible blank area');
+    await page.mouse.move(boundaryHandleBox.x + boundaryHandleBox.width / 2, boundaryHandleBox.y + boundaryHandleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      boundaryBlankBox.x + boundaryBlankBox.width / 2,
+      boundaryBlankBox.y + boundaryBlankBox.height * 0.25,
+      { steps: 8 },
+    );
+    const boundaryTailFeedback = await page.evaluate(() => ({
+      tailDrop: Boolean(blockReorderDrag?.crossPage?.tailDrop),
+      targetPageIndex: blockReorderDrag?.crossPage?.pageIndex,
+      targetBlockIndex: blockReorderDrag?.crossPage?.blockIndex,
+      availableHeight: Number(blockReorderDrag?.crossPage?.availableHeight || 0),
+    }));
+    assert.strictEqual(boundaryTailFeedback.tailDrop, true, 'a visible trailing boundary blank should resolve as page-tail space');
+    assert.strictEqual(boundaryTailFeedback.targetPageIndex, 1, 'boundary-tail drop should target the visible page');
+    assert.strictEqual(boundaryTailFeedback.targetBlockIndex, 3, 'the insertion point must stay before the trailing boundary blank');
+    assert.ok(boundaryTailFeedback.availableHeight > 90, 'the visible page tail should expose its real remaining height');
+    await page.mouse.up();
+    await page.waitForTimeout(850);
+    const boundaryTailCommitted = await page.evaluate(() => {
+      const holder = collectBodyFlowHolder();
+      const source = findImageBlockById(holder, 'boundary-tail-drag-source');
+      const blocks = Array.from(holder.children);
+      const sourceIndex = blocks.indexOf(source);
+      const renderedSource = findImageBlockById(stageScale, 'boundary-tail-drag-source');
+      const renderedFrame = renderedSource?.closest('.xhs-body-frame');
+      const sourceRect = renderedSource?.getBoundingClientRect();
+      const frameRect = renderedFrame?.getBoundingClientRect();
+      return {
+        imagePageIndex: pageIndexForImageId('boundary-tail-drag-source'),
+        sourceHeight: parseFloat(source?.querySelector('.xhs-image-frame')?.style.height || '0'),
+        boundaryAfterImage: Boolean(blocks[sourceIndex + 1]?.classList?.contains('xhs-manual-blank')),
+        insideBodyFrame: Boolean(sourceRect && frameRect &&
+          sourceRect.top >= frameRect.top - 1 && sourceRect.bottom <= frameRect.bottom + 1),
+      };
+    });
+    assert.strictEqual(boundaryTailCommitted.imagePageIndex, 1, 'the image should remain in the visible target-page remainder');
+    assert.ok(boundaryTailCommitted.sourceHeight < 650, 'the image frame should shrink until it fits the target page');
+    assert.strictEqual(boundaryTailCommitted.insideBodyFrame, true, 'a dropped image must be accepted when its resized block is inside the body-frame boundary');
+    assert.strictEqual(boundaryTailCommitted.boundaryAfterImage, true, 'the original boundary blank should remain after the inserted image');
+
     const imageTailFitState = await page.evaluate(() => {
       const image = extractBlocksFromTemplate().find((node) => node.classList?.contains('xhs-image-block'))?.cloneNode(true);
       if (!image) return null;

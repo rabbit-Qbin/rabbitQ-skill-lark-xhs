@@ -5497,6 +5497,50 @@ function studioHtmlV2(payload, libs) {
         availableHeight: Math.max(0, (frameRect.bottom - baseTop) / Math.max(0.1, stageLocalScale(frame))),
       };
     }
+    function tailDropPosition(frame, blocks, clientY) {
+      if (!frame) return null;
+      const frameRect = frame.getBoundingClientRect();
+      const contentBlocks = Array.from(blocks || []);
+      let blockIndex = contentBlocks.length;
+      while (blockIndex > 0) {
+        const block = contentBlocks[blockIndex - 1];
+        const isBoundaryBlank = block.classList?.contains('xhs-manual-blank') &&
+          (block.classList.contains('xhs-boundary-blank') || block.classList.contains('xhs-page-end'));
+        if (!isBoundaryBlank) break;
+        blockIndex -= 1;
+      }
+      const visibleBlocks = contentBlocks.slice(0, blockIndex);
+      const baseTop = dropInsertionTop(frame, visibleBlocks, visibleBlocks.length);
+      const lastRect = visibleBlocks[visibleBlocks.length - 1]?.getBoundingClientRect();
+      const tailStart = lastRect?.bottom ?? frameRect.top;
+      if (clientY < tailStart || clientY > frameRect.bottom) return null;
+      return {
+        baseTop,
+        contentBlocks,
+        blockIndex,
+        insertionTop: baseTop,
+        availableHeight: Math.max(0, (frameRect.bottom - baseTop) / Math.max(0.1, stageLocalScale(frame))),
+      };
+    }
+    function measuredTailAvailableHeight(blocks, targetPageIndex) {
+      const probes = Array.from(blocks || []).map((block) => {
+        const probe = block.cloneNode(true);
+        wrapBodyTextLines(probe);
+        return probe;
+      });
+      const used = probes.reduce((total, block, index) =>
+        total + measureBlockMetrics(block, probes[index + 1] || null).outer, 0);
+      const limit = pages[targetPageIndex]?.type === 'cover'
+        ? Number(config.coverTailLimit || config.pageLimit)
+        : Number(config.pageLimit);
+      return Math.max(0, limit - used);
+    }
+    function resolvedTailAvailableHeight(tailTarget, targetPageIndex) {
+      if (!tailTarget) return 0;
+      const precedingBlocks = tailTarget.contentBlocks.slice(0, tailTarget.blockIndex);
+      const measured = measuredTailAvailableHeight(precedingBlocks, targetPageIndex);
+      return Math.max(0, Math.min(Number(tailTarget.availableHeight || 0), measured));
+    }
     function focusBodyGapCursor(frame, clientY) {
       const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
       const target = tailGapPosition(frame, blocks, clientY);
@@ -5690,16 +5734,16 @@ function studioHtmlV2(payload, libs) {
       const frame = item.querySelector('.xhs-cover-tail-frame, .xhs-body-frame');
       if (!frame) return null;
       const blocks = flowBlocksInBody(frame).filter((node) => !node.classList.contains('xhs-caret-anchor'));
-      const tailTarget = tailGapPosition(frame, blocks, clientY);
+      const tailTarget = tailDropPosition(frame, blocks, clientY);
       if (tailTarget) {
         return {
           item,
           frame,
           insertionTop: tailTarget.insertionTop,
           pageIndex: targetPageIndex,
-          blockIndex: tailTarget.contentBlocks.length,
+          blockIndex: tailTarget.blockIndex,
           tailDrop: true,
-          availableHeight: tailTarget.availableHeight,
+          availableHeight: resolvedTailAvailableHeight(tailTarget, targetPageIndex),
         };
       }
       const textTarget = textDropPosition(frame, blocks, clientX, clientY);
@@ -5761,14 +5805,18 @@ function studioHtmlV2(payload, libs) {
       const indicator = ensureBlockDropIndicator();
       const cardRect = stageScale.getBoundingClientRect();
       const scale = stageLocalScale(bodyFrame);
-      const tailTarget = tailGapPosition(bodyFrame, blocks, clientY);
+      const tailTarget = tailDropPosition(bodyFrame, blocks, clientY);
       if (tailTarget) {
         indicator.hidden = false;
         indicator.style.top = ((tailTarget.insertionTop - cardRect.top) / scale) + 'px';
-        blockReorderDrag.insertBefore = null;
+        blockReorderDrag.insertBefore = tailTarget.contentBlocks[tailTarget.blockIndex] || null;
         blockReorderDrag.textDrop = null;
+        blockReorderDrag.tailDrop = {
+          availableHeight: resolvedTailAvailableHeight(tailTarget, pageIndex),
+        };
         return;
       }
+      blockReorderDrag.tailDrop = null;
       const textTarget = textDropPosition(bodyFrame, blocks, clientX, clientY);
       if (textTarget) {
         indicator.hidden = false;
@@ -5900,6 +5948,8 @@ function studioHtmlV2(payload, libs) {
       if (blockReorderDrag.textDrop?.block?.isConnected) {
         samePageAnchor = splitTextBlockForDrop(blockReorderDrag.textDrop.block, blockReorderDrag.textDrop.offset);
       }
+      const fittedToTail = Boolean(blockReorderDrag.tailDrop &&
+        fitImageBlockIntoTailSpace(flowNode, Number(blockReorderDrag.tailDrop.availableHeight)));
       if (samePageAnchor) movingNodes.forEach((node) => parent.insertBefore(node, samePageAnchor));
       else movingNodes.forEach((node) => parent.appendChild(node));
       movingNodes.forEach((node) => node.classList.remove('reorder-dragging'));
@@ -5909,6 +5959,7 @@ function studioHtmlV2(payload, libs) {
       const selectedBlockId = blockReorderDrag.blockId || ensureFlowBlockId(flowNode);
       const { holder } = collectBodyFlowHolderWithPageNodes();
       repaginateBodyBlocks(Array.from(holder.children), selectedImageId, selectedBlockId);
+      if (fittedToTail) showRuntimeNotice('图片已按目标页剩余空间自动调整高度，可继续拖动控制点修改。');
     }
     function beginFlowBlockReorder(event, candidate, bodyFrame, captureTarget) {
       if (blockReorderDrag || event.button !== 0) return false;
@@ -5930,6 +5981,7 @@ function studioHtmlV2(payload, libs) {
         crossPage: null,
         hasDropTarget: false,
         textDrop: null,
+        tailDrop: null,
         startX: event.clientX,
         startY: event.clientY,
         moved: false,
