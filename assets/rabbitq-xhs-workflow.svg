@@ -1,6 +1,6 @@
-﻿<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
   <title id="title">rabbitQ 飞书 Markdown 转小红书图文工作流</title>
-  <desc id="desc">飞书导出 Markdown 和附件，AI 补充副标题，用户选择全封面、半封面或无封面，转换为可编辑的小红书三比四 Studio，最后保存 HTML 或按需导出 PNG。</desc>
+  <desc id="desc">支持飞书云文档链接、单文件、附件目录和 ZIP 四种输入，AI 两遍处理（符号转换加样式判断）并补充副标题，用户选择全封面、半封面或无封面，转换为可编辑的小红书三比四 Studio，最后保存 HTML 或按需导出 PNG。</desc>
   <rect width="1600" height="900" fill="#f2f5f7"/>
   <rect x="52" y="48" width="1496" height="804" rx="8" fill="#ffffff" stroke="#d9e1e7" stroke-width="2"/>
 
@@ -17,13 +17,14 @@
     <path d="M105 45h30M105 59h30M105 73h21" stroke="#5fa66a" stroke-width="3" stroke-linecap="round"/>
     <rect x="160" y="47" width="72" height="54" rx="4" fill="#f1f5fd" stroke="#4d7fd2" stroke-width="3"/>
     <path d="M169 88l18-18 12 12 10-9 14 15" fill="none" stroke="#4d7fd2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="28" y="145" fill="#17202a" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="28" font-weight="800">飞书导出</text>
-    <text x="28" y="184" fill="#66727d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">Markdown + 全部图片附件</text>
+    <text x="28" y="145" fill="#17202a" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="28" font-weight="800">四种输入</text>
+    <text x="28" y="184" fill="#66727d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">链接 / Markdown / 目录 / ZIP</text>
     <rect x="28" y="220" width="254" height="1" fill="#e1e7eb"/>
-    <text x="28" y="260" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 单个 .md 文件</text>
-    <text x="28" y="298" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• Markdown + 附件目录</text>
-    <text x="28" y="336" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 完整飞书 ZIP 包</text>
-    <text x="28" y="380" fill="#8a5b1f" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">视频跳过并明确提示</text>
+    <text x="28" y="250" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 飞书云文档链接直达</text>
+    <text x="28" y="286" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 单个 .md 文件</text>
+    <text x="28" y="322" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• Markdown + 附件目录</text>
+    <text x="28" y="358" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 完整飞书 ZIP 包</text>
+    <text x="28" y="392" fill="#8a5b1f" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">链接由 AI 自动导出，视频跳过并提示</text>
   </g>
 
   <path d="M405 423h46" stroke="#5fa66a" stroke-width="5" stroke-linecap="round"/>
@@ -37,13 +38,14 @@
     <rect x="155" y="32" width="78" height="64" rx="4" fill="#f7f2fb" stroke="#a05bb8" stroke-width="3"/>
     <circle cx="175" cy="51" r="7" fill="#d99542"/>
     <path d="M163 86l20-20 13 12 11-10 18 18" fill="none" stroke="#a05bb8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="28" y="145" fill="#17202a" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="28" font-weight="800">AI 处理</text>
-    <text x="28" y="184" fill="#66727d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">尊重原稿，只补缺少的内容</text>
+    <text x="28" y="145" fill="#17202a" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="28" font-weight="800">AI 两遍处理</text>
+    <text x="28" y="184" fill="#66727d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">先按符号照实转，再判断样式</text>
     <rect x="28" y="220" width="254" height="1" fill="#e1e7eb"/>
-    <text x="28" y="260" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 通读全文补副标题</text>
-    <text x="28" y="298" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 选择全 / 半 / 无封面</text>
-    <text x="28" y="336" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 生图可用时生成并直插 HTML</text>
-    <text x="28" y="380" fill="#2e5fb2" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">不可用时给出替代方案</text>
+    <text x="28" y="250" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 第一遍：按符号照实转换</text>
+    <text x="28" y="286" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 第二遍：AI 判断强调与结构</text>
+    <text x="28" y="322" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 通读全文补副标题、选封面</text>
+    <text x="28" y="358" fill="#2c3740" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="19">• 生图可用时生成并直插 HTML</text>
+    <text x="28" y="392" fill="#2e5fb2" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="17">无标记原稿也能自动补结构</text>
   </g>
 
   <path d="M789 423h46" stroke="#4d7fd2" stroke-width="5" stroke-linecap="round"/>
