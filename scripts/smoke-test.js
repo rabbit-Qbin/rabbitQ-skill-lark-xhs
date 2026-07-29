@@ -114,6 +114,7 @@ async function main() {
   const coverHtml = fs.readFileSync(path.join(outputDir, "xhs-studio.html"), "utf8");
   assert.match(coverHtml, /"coverImageSrc":"data:image\/png;base64,/);
   assert.match(coverHtml, /"coverMode":"half"/);
+  assert.match(coverHtml, /"sourceFingerprint":"[^"]+:0\.9\.25:[a-f0-9]{16}"/);
   assert.match(coverHtml, /alt="封面图"/);
   assert.match(coverHtml, /id="coverModeFullBtn"/);
   assert.match(coverHtml, /id="coverModeHalfBtn"/);
@@ -1204,7 +1205,7 @@ async function main() {
       version: config.version,
     }));
     assert.ok(draftIdentity.key.includes(draftIdentity.fingerprint));
-    assert.ok(draftIdentity.fingerprint.endsWith(`:${draftIdentity.version}`));
+    assert.match(draftIdentity.fingerprint, new RegExp(`:${draftIdentity.version}:[a-f0-9]{16}$`));
 
     // A body page with no prose exposes one real editable line. Clicking lower
     // empty canvas moves the selection to that line; it must not manufacture

@@ -13,6 +13,7 @@
  */
 
 const fs = require("fs");
+const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
 const childProcess = require("child_process");
@@ -8404,7 +8405,8 @@ function main() {
     const bodyPadTop = Math.round(BODY_PAD_TOP * scaleY);
     const bodyPadBottom = Math.round(BODY_PAD_BOTTOM * scaleY);
     const stat = fs.statSync(resolved.markdownFile);
-    const sourceFingerprint = `${stat.mtimeMs}:${stat.size}:${VERSION}`;
+    const renderedSourceHash = crypto.createHash("sha256").update(sourceHtml).digest("hex").slice(0, 16);
+    const sourceFingerprint = `${stat.mtimeMs}:${stat.size}:${VERSION}:${renderedSourceHash}`;
     const payload = {
       title: extracted.title || title,
       subtitle,
