@@ -64,6 +64,8 @@ async function main() {
     "",
     "**时间价值**",
     "",
+    "**提示词：**",
+    "",
     "这件事花的时间 \\< 你本人核心时间的价值",
     "",
     "这句包含==高亮词==强调。",
@@ -372,6 +374,8 @@ async function main() {
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /<strong>结论<\/strong><p><strong>总结：这是总结卡片/, "总结 label should trigger a card with the inferred 结论 corner");
   assert.match(html, /<strong>注意<\/strong><p><strong>避坑：这是避坑卡片/, "避坑 label should trigger a card with the inferred 注意 corner");
+  assert.match(html, /<p><strong>时间价值<\/strong><\/p>/, "short full-bold paragraphs must stay plain bold paragraphs");
+  assert.match(html, /<p><strong>提示词：<\/strong><\/p>/, "提示词 is not an exact card label and must stay plain bold text");
   assert.match(html, /<p><strong>这是超长加粗段落/, "full-bold paragraphs over 75 chars must stay plain bold paragraphs, not cards");
   assert.match(html, /\.xhs-callout-label \{[^}]*font-weight: var\(--body-bold-weight\)/);
   assert.match(html, /\.xhs-table thead th \{[^}]*font-weight: var\(--body-bold-weight\)/);
@@ -1594,6 +1598,26 @@ async function main() {
   assert.strictEqual(sourceCodeProbe?.codeFontSize, '32px', 'code content should use 32px text');
   assert.ok(Math.abs(parseFloat(sourceCodeProbe?.codeLineHeight) - 49.6) < 0.2, '32px code text should use a 1.55 line height');
   assert.strictEqual(sourceCodeProbe?.languageFontSize, '19px', 'code language label should retain its original size');
+
+  const singleParagraphBoundaryProbe = await page.evaluate(() => {
+    const frame = document.querySelector('#stageScale .xhs-body-frame, #stageScale .xhs-cover-tail-frame');
+    if (!frame) throw new Error('missing body frame for selection-boundary probe');
+    const first = document.createElement('p');
+    first.className = 'xhs-p xhs-block';
+    first.textContent = '视觉上只选中这一段';
+    const second = document.createElement('p');
+    second.className = 'xhs-p xhs-block';
+    second.textContent = '下一段不能被算进选区';
+    frame.append(first, second);
+    const range = document.createRange();
+    range.setStart(first.firstChild, 0);
+    range.setEnd(second.firstChild, 0);
+    const resolved = proseBlockForRange(range);
+    first.remove();
+    second.remove();
+    return resolved === first;
+  });
+  assert.strictEqual(singleParagraphBoundaryProbe, true, 'a selection ending at the next paragraph offset 0 must still resolve to the first paragraph');
 
   const codeSelectionGuard = await page.evaluate(() => {
     const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
@@ -3207,6 +3231,9 @@ async function main() {
       const codeSource = document.createElement("p");
       codeSource.className = "xhs-p xhs-block";
       codeSource.textContent = "双击整段代码块测试";
+      const doubleClickSource = document.createElement("p");
+      doubleClickSource.className = "xhs-p xhs-block";
+      doubleClickSource.innerHTML = "双击<strong>选中文字</strong>切换样式";
       const listLines = buildListLines([
         { html: "全封面：首张为图文一体封面", plain: "全封面：首张为图文一体封面" },
         { html: "半封面：上半页为配图", plain: "半封面：上半页为配图" },
@@ -3215,7 +3242,7 @@ async function main() {
       const blank = makeManualBlank();
       pages = [
         { ...cover },
-        { type: "body", html: headingSource.outerHTML + codeSource.outerHTML + listLines.map((line) => line.outerHTML).join("") + blank.outerHTML },
+        { type: "body", html: headingSource.outerHTML + codeSource.outerHTML + doubleClickSource.outerHTML + listLines.map((line) => line.outerHTML).join("") + blank.outerHTML },
       ];
       pageIndex = 1;
       renderAll();
@@ -3247,6 +3274,39 @@ async function main() {
       listCount: 3,
       blankCount: 1,
     }, "inline-formatted text must become one visible H2 without changing lists or blanks");
+
+    const doubleClickStrong = page.locator("#stageScale .xhs-p strong").filter({ hasText: "选中文字" });
+    assert.strictEqual(await doubleClickStrong.count(), 1, "double-click style fixture should be visible once");
+    await doubleClickStrong.dblclick();
+    const doubleClickSelectionProbe = await page.evaluate(() => {
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      const selectedText = selection?.toString() || "";
+      const sourceBlockFound = Boolean(proseBlockForRange(range));
+      window.__doubleClickStyleAlert = "";
+      window.__doubleClickOriginalAlert = window.alert;
+      window.alert = (message) => { window.__doubleClickStyleAlert = String(message || ""); };
+      return { selectedText, sourceBlockFound };
+    });
+    await page.locator("#headingBtn1").click();
+    await page.waitForTimeout(350);
+    const doubleClickAlertText = await page.evaluate(() => {
+      const alertText = window.__doubleClickStyleAlert || "";
+      window.alert = window.__doubleClickOriginalAlert;
+      delete window.__doubleClickStyleAlert;
+      delete window.__doubleClickOriginalAlert;
+      return alertText;
+    });
+    assert.ok(doubleClickSelectionProbe.selectedText, "double-clicking text should create a non-empty selection");
+    assert.strictEqual(doubleClickSelectionProbe.sourceBlockFound, true, `double-click selection should resolve to one prose block: ${JSON.stringify(doubleClickSelectionProbe)}`);
+    assert.strictEqual(doubleClickAlertText, "", `double-click selection must not trigger a false cross-paragraph alert: ${doubleClickAlertText}`);
+    const doubleClickHeadingState = await page.evaluate((selectedText) => {
+      const holder = collectBodyFlowHolder();
+      return Array.from(holder.querySelectorAll('.xhs-heading[data-level="1"]'))
+        .filter((node) => cleanText(node.querySelector(".xhs-heading-title")?.textContent || "") === cleanText(selectedText))
+        .length;
+    }, doubleClickSelectionProbe.selectedText);
+    assert.strictEqual(doubleClickHeadingState, 1, "double-clicked text should convert into exactly one level-1 heading");
 
     await page.locator('#stageScale .xhs-heading[data-level="2"]').filter({ hasText: "封面样式稳定测试" }).evaluate((heading) => {
       const title = heading.querySelector(".xhs-heading-title");

@@ -28,7 +28,7 @@ const DEFAULT_ACCENT_THEME = "blue";
 const CARD_LABEL_WORDS = "高亮|划重点|卡片|注意|结论|金句|关键|判断|提醒|重点|总结|小结|一句话|建议|提示|技巧|要点|避坑|误区|须知|干货";
 // Trailing !/！ (0-2) is part of the recognized token, e.g. "注意！！" / "提醒!!".
 const CARD_LABEL_TOKEN = `(?:${CARD_LABEL_WORDS})[!！]{0,2}`;
-const CARD_LABEL_EXACT = new RegExp(`^${CARD_LABEL_TOKEN}$`);
+const CARD_LABEL_PREFIX = new RegExp(`^${CARD_LABEL_TOKEN}(?:\\s*[:：]\\s*|\\s*[—–-]\\s*|\\s+)`);
 const DEFAULT_WIDTH = 1080;
 const DEFAULT_HEIGHT = 1440;
 const BODY_PAD_X = 72;
@@ -580,14 +580,11 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     paragraph = [];
     if (!text) return;
     const strongStart = text.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)([\s\S]*)$/);
-    const strongOnly = text.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)$/);
-    const strongLabel = plainMarkdownText(strongStart?.[1] || "").replace(/[:：\s]+$/g, "");
-    const explicitCardStart = CARD_LABEL_EXACT.test(strongLabel);
+    const strongContent = plainMarkdownText(strongStart?.[1] || "");
+    const explicitCardStart = CARD_LABEL_PREFIX.test(strongContent);
     const plainLength = plainMarkdownText(text).length;
-    // Full-bold paragraphs become cards only within a sane length window;
-    // long ones stay ordinary bold paragraphs. Label-led cards have no cap.
-    const strongOnlyCard = Boolean(strongOnly) && plainLength >= 18 && plainLength <= 75;
-    if ((strongOnlyCard || explicitCardStart) && plainLength >= 18) {
+    const cardLength = plainLength >= 18 && plainLength <= 75;
+    if (explicitCardStart && cardLength) {
       const label = inferCardLabel(text);
       blocks.push(`<section data-xhs-block-type="callout" style="border-left:4px solid #57b560;background:#f4faf3;"><strong>${escapeHtml(label)}</strong><p>${inlineMarkdownToHtml(text, markdownFile)}</p></section>`);
       return;
@@ -670,8 +667,10 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (/^>\s?/.test(line)) return "quote";
     if (/^`{3}/.test(line)) return "code";
     if (splitMarkdownTableRow(line).length >= 2) return "table";
-    const strongOnly = line.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)$/);
-    if (strongOnly && plainMarkdownText(line).length >= 18 && plainMarkdownText(line).length <= 75) return "callout";
+    const strongStart = line.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)([\s\S]*)$/);
+    const strongContent = plainMarkdownText(strongStart?.[1] || "");
+    const plainLength = plainMarkdownText(line).length;
+    if (CARD_LABEL_PREFIX.test(strongContent) && plainLength >= 18 && plainLength <= 75) return "callout";
     return "prose";
   }
   function shouldInsertMarkdownFlowBlank(upcoming) {
@@ -6299,8 +6298,37 @@ function studioHtmlV2(payload, libs) {
         if (index < 0 || index >= container.childNodes.length) return null;
         return closestProse(container.childNodes[index]);
       };
-      const startBlock = boundaryProse(range.startContainer, range.startOffset, false);
-      const endBlock = boundaryProse(range.endContainer, range.endOffset, true);
+      const boundaryMatchesBlockEdge = (container, offset, block, atStart) => {
+        if (!container || !block) return false;
+        if (container.nodeType === Node.TEXT_NODE) {
+          const edgeOffset = atStart ? 0 : (container.textContent || '').length;
+          if (offset !== edgeOffset) return false;
+        } else if (container.nodeType === Node.ELEMENT_NODE) {
+          const edgeOffset = atStart ? 0 : container.childNodes.length;
+          if (offset !== edgeOffset) return false;
+        } else {
+          return false;
+        }
+        let node = container;
+        while (node && node !== block) {
+          const parent = node.parentNode;
+          if (!parent) return false;
+          const siblings = Array.from(parent.childNodes);
+          const index = siblings.indexOf(node);
+          if (atStart ? index !== 0 : index !== siblings.length - 1) return false;
+          node = parent;
+        }
+        return node === block;
+      };
+      let startBlock = boundaryProse(range.startContainer, range.startOffset, false);
+      let endBlock = boundaryProse(range.endContainer, range.endOffset, true);
+      if (startBlock && endBlock && startBlock !== endBlock) {
+        if (boundaryMatchesBlockEdge(range.endContainer, range.endOffset, endBlock, true)) {
+          endBlock = startBlock;
+        } else if (boundaryMatchesBlockEdge(range.startContainer, range.startOffset, startBlock, false)) {
+          startBlock = endBlock;
+        }
+      }
       if (!startBlock || startBlock !== endBlock || !stageScale.contains(startBlock)) return null;
       return startBlock;
     }
