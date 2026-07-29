@@ -541,9 +541,27 @@ function stripTrailingAiGeneratedDisclaimer(markdownBody) {
   return lines.slice(0, start).join("\n").replace(/\s+$/, "");
 }
 
+function normalizeHtmlBlockquotes(markdownBody) {
+  return String(markdownBody || "").replace(
+    /<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi,
+    (_, inner) => {
+      const content = String(inner || "")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>\s*<p\b[^>]*>/gi, "\n\n")
+        .replace(/<\/?p\b[^>]*>/gi, "")
+        .trim();
+      if (!content) return "";
+      return content
+        .split(/\r?\n/)
+        .map((line) => (line.trim() ? `> ${line.trim()}` : ">"))
+        .join("\n");
+    },
+  );
+}
+
 function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) {
   const { body } = prepareMarkdownBody(markdown);
-  const cleanedBody = stripTrailingAiGeneratedDisclaimer(body);
+  const cleanedBody = stripTrailingAiGeneratedDisclaimer(normalizeHtmlBlockquotes(body));
   const lines = cleanedBody.replace(/\r\n/g, "\n").split("\n");
   const blocks = [];
   let paragraph = [];

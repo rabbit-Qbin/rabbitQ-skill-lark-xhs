@@ -401,12 +401,32 @@ async function main() {
   assert.doesNotMatch(html, /\.xhs-heading\[data-level="1"\] \+ \.xhs-heading\[data-level="2"\]/, "标题间距应使用统一的单向节奏规则");
   assert.match(html, /\.xhs-body-frame > \.xhs-page-end \{ margin-bottom: 0 !important; \}/);
 
+  // Raw HTML blockquotes are valid inside Markdown and must become quote blocks.
+  const htmlQuoteSourceDir = path.join(root, "html-quote-source");
+  const htmlQuoteOutputDir = path.join(root, "html-quote-output");
+  fs.mkdirSync(htmlQuoteSourceDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(htmlQuoteSourceDir, "article.md"),
+    "# HTML 引用回归\n\n<blockquote>\n\nHTML blockquote 也必须渲染成真正的引用块。\n\n</blockquote>\n",
+    "utf8",
+  );
+  const htmlQuoteConvert = childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "convert.js"), htmlQuoteSourceDir, "-o", htmlQuoteOutputDir, "--cover-mode", "none"],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(htmlQuoteConvert.status, 0, htmlQuoteConvert.stderr || htmlQuoteConvert.stdout);
+  const htmlQuoteStudio = fs.readFileSync(path.join(htmlQuoteOutputDir, "xhs-studio.html"), "utf8");
+  assert.match(htmlQuoteStudio, /HTML blockquote 也必须渲染成真正的引用块。/);
+  assert.match(htmlQuoteStudio, /data-xhs-block-type="quote"/);
+  assert.doesNotMatch(htmlQuoteStudio, /&lt;\/?blockquote&gt;/, "HTML blockquote tags must not appear as visible text");
+
   // lark-export offline cleaning: fetch JSON -> standard markdown package.
   const larkFetchFixture = path.join(root, "lark-fetch.json");
   fs.writeFileSync(larkFetchFixture, JSON.stringify({
     data: {
       document: {
-        content: '<title>导出清洗回归</title><h3>01 章节</h3><p>正文<b>加粗</b>与<u>下划</u><u>线+符号</u>。</p><img name="image.png" href="https://internal" mime="image/png" scale="1.0" src="OegLb5brabcdef"/><p></p><callout emoji="bulb"><p>这是高亮块内容</p></callout><grid cols="2"><column width="50">左栏内容</column><column width="50">右栏内容</column></grid><view type="1"><file token="T123" name="演示.mp4"/></view><whiteboard token="WB999"/><p>结尾</p>',
+        content: '<title>导出清洗回归</title><h3>01 章节</h3><p>正文<b>加粗</b>与<u>下划</u><u>线+符号</u>。</p><img name="image.png" href="https://internal" mime="image/png" scale="1.0" src="OegLb5brabcdef"/><p></p><callout emoji="bulb"><p>这是高亮块内容</p></callout><blockquote><p>这是 HTML 引用内容</p></blockquote><grid cols="2"><column width="50">左栏内容</column><column width="50">右栏内容</column></grid><view type="1"><file token="T123" name="演示.mp4"/></view><whiteboard token="WB999"/><p>结尾</p>',
       },
     },
   }));
@@ -423,10 +443,11 @@ async function main() {
   assert.match(larkMd, /正文\*\*加粗\*\*与\+\+下划线\+符号\+\+。/);
   assert.match(larkMd, /!\[图片 1\]\(assets\/img_001_OegLb5br\.png\)/);
   assert.match(larkMd, /^> 这是高亮块内容$/m);
+  assert.match(larkMd, /^> 这是 HTML 引用内容$/m);
   assert.match(larkMd, /左栏内容\n\n右栏内容/);
   assert.match(larkMd, /\*\*\[附件: 演示\.mp4\]\*\*/);
   assert.match(larkMd, /\*\(画板: WB999\)\*/);
-  assert.doesNotMatch(larkMd, /<\/?(?:img|image|callout|grid|column|text|view|file|whiteboard|h3|p|b|u)\b/);
+  assert.doesNotMatch(larkMd, /<\/?(?:img|image|callout|blockquote|grid|column|text|view|file|whiteboard|h3|p|b|u)\b/);
   const larkTokens = JSON.parse(fs.readFileSync(path.join(larkExportDir, "_image_tokens.json"), "utf8"));
   assert.deepStrictEqual(larkTokens, ["OegLb5brabcdef"]);
 

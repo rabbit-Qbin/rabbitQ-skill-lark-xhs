@@ -117,6 +117,7 @@ function cleanLarkMarkdown(markdown) {
   // 引用类容器统一成 Markdown 引用块。
   body = body.replace(/<callout\b[^>]*>([\s\S]*?)<\/callout>/g, (_, inner) => `\n\n${prefixBlockquote(stripTags(inner))}\n\n`);
   body = body.replace(/<quote-container\b[^>]*>([\s\S]*?)<\/quote-container>/g, (_, inner) => `\n\n${prefixBlockquote(stripTags(inner))}\n\n`);
+  body = body.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, inner) => `\n\n${prefixBlockquote(stripTags(inner))}\n\n`);
 
   // 标题层级照原样映射。
   body = body.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/g, (_, depth, inner) => `\n\n${"#".repeat(Number(depth))} ${stripTags(inner)}\n\n`);
