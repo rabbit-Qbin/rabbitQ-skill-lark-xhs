@@ -4068,6 +4068,36 @@ async function main() {
     await page.waitForTimeout(300);
     assert.strictEqual(await page.locator("#stageScale .xhs-image-frame").count(), 0, "Backspace should delete the selected image block");
 
+    // Regression: pasting an image triggers reflow, but the newly inserted
+    // image must stay selected so its editing controls appear immediately.
+    const pastedImageSelection = await page.evaluate(async () => {
+      const editable = document.querySelector("#stageScale .xhs-body-frame, #stageScale .xhs-cover-tail-frame");
+      const canvas = document.createElement("canvas");
+      canvas.width = 96;
+      canvas.height = 64;
+      canvas.getContext("2d").fillRect(0, 0, 96, 64);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      const file = new File([blob], "clipboard.png", { type: "image/png" });
+      let prevented = false;
+      await handleImagePaste({
+        clipboardData: { files: [file] },
+        preventDefault() { prevented = true; },
+      }, editable);
+      return {
+        prevented,
+        selectedCount: document.querySelectorAll("#stageScale .selected-image-frame").length,
+        imageToolsVisible: !document.getElementById("imageTools").hidden,
+      };
+    });
+    assert.deepStrictEqual(pastedImageSelection, {
+      prevented: true,
+      selectedCount: 1,
+      imageToolsVisible: true,
+    }, "pasted image should remain selected and expose image tools after reflow");
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(300);
+    assert.strictEqual(await page.locator("#stageScale .xhs-image-frame").count(), 0, "pasted image should still support selected-image deletion");
+
     await activateStudioPage(page, 0);
     const coverSubtitle = page.locator("#stageScale .cover-subtitle");
     await coverSubtitle.fill("");

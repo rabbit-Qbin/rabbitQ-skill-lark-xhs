@@ -3777,23 +3777,30 @@ function studioHtmlV2(payload, libs) {
       selection.addRange(range);
     }
     async function handleImagePaste(event, editable) {
-      const files = Array.from(event.clipboardData?.files || []).filter((file) => /^image\//i.test(file.type));
+      const files = Array.from(event.clipboardData?.files || []).filter((file) => String(file.type || '').toLowerCase().startsWith('image/'));
       if (files.length) {
         event.preventDefault();
         const srcs = (await Promise.all(files.map(readImageFileAsOptimizedDataUrl))).filter(Boolean);
         if (!srcs.length) return;
         const blocks = srcs.map((src) => imageBlockFromSrc(src, '', { pasted: true }));
         const nodes = blocks.length > 1 ? [imageGridFromBlocks(blocks)] : blocks;
+        const preferredImageId = ensureImageId(blocks[0]);
         insertNodesAtSelection(nodes, editable);
         stageScale.querySelectorAll('.selectable-image').forEach(bindSelectableFrame);
         saveCurrentPage();
-        reflow();
+        reflow(preferredImageId);
         return;
       }
+      const existingImageIds = new Set(
+        Array.from(editable.querySelectorAll('.xhs-image-block')).map(ensureImageId).filter(Boolean)
+      );
       window.setTimeout(() => {
         if (normalizeLooseImages(editable)) {
+          const preferredImageId = Array.from(editable.querySelectorAll('.xhs-image-block'))
+            .map(ensureImageId)
+            .find((id) => id && !existingImageIds.has(id)) || '';
           saveCurrentPage();
-          reflow();
+          reflow(preferredImageId);
         }
       }, 30);
     }
