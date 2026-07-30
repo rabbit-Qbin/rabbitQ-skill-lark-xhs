@@ -914,6 +914,7 @@ function studioHtmlV2(payload, libs) {
     width,
     height,
     coverSplitY,
+    noCoverSplitY,
     bodyPadX,
     bodyPadTop,
     bodyPadBottom,
@@ -1022,7 +1023,7 @@ function studioHtmlV2(payload, libs) {
     .cover-title strong, .cover-title b, .cover-title .xhs-cover-bold { font-weight: 900 !important; }
     .cover-title-bar { flex: 0 0 auto; width: ${Math.round(width * 0.12)}px; height: ${Math.max(5, Math.round(width * 0.005))}px; background: var(--xhs-accent); border-radius: 999px; margin: ${Math.round(height * 0.006)}px 0 ${Math.round(height * 0.014)}px; }
     .xhs-cover-card.no-cover-image .cover-media { display: none; }
-    .xhs-cover-card.no-cover-image .cover-text { top: 0; height: ${coverSplitY}px; padding-bottom: ${coverNoImagePadBottom}px; z-index: 2; justify-content: flex-start; }
+    .xhs-cover-card.no-cover-image .cover-text { top: 0; height: ${noCoverSplitY}px; padding-bottom: ${coverNoImagePadBottom}px; z-index: 2; justify-content: flex-start; }
     .xhs-cover-card.full-cover-image .cover-media { height: 100%; }
     .xhs-cover-card.full-cover-image .cover-text { display: none; }
     .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; white-space: pre-line; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
@@ -1033,7 +1034,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-page-break { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; visibility: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-body-frame > .xhs-page-break + .xhs-page-break { display: none; }
     .xhs-body-frame { position: absolute; left: var(--body-pad-x); top: var(--body-pad-top); width: var(--body-content-width); height: var(--body-content-height); overflow: hidden; outline: none; background: transparent; font-family: var(--xhs-font); -webkit-font-smoothing: antialiased; }
-    .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${coverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - coverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
+    .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${noCoverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - noCoverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
     .xhs-block { width: 100%; }
     .xhs-body-frame > div { min-height: 1.9em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
@@ -1284,13 +1285,14 @@ function studioHtmlV2(payload, libs) {
       width,
       height,
       coverSplitY,
+      noCoverSplitY,
       coverZoneHeight: height - coverSplitY,
       coverGap,
       coverPadTop,
       coverPadBottom,
       coverTailPadTop,
       coverSubtitleMaxChars: 48,
-      coverTailLimit: Math.max(240, height - coverSplitY - coverTailPadTop - bodyPadBottom),
+      coverTailLimit: Math.max(240, height - noCoverSplitY - coverTailPadTop - bodyPadBottom),
       pageLimit: bodyContentHeight,
       imageFrameHeight,
       bodyPadX,
@@ -8552,6 +8554,7 @@ function main() {
       width: opts.width,
       height: opts.height,
       coverSplitY: Math.round(opts.height * 0.5),
+      noCoverSplitY: Math.round(opts.height * 662 / DEFAULT_HEIGHT),
       bodyPadX,
       bodyPadTop,
       bodyPadBottom,
@@ -8587,6 +8590,7 @@ function main() {
       height: opts.height,
       layout: {
         coverSplitY: payload.coverSplitY,
+        noCoverSplitY: payload.noCoverSplitY,
         bodyPadX: payload.bodyPadX,
         bodyPadTop: payload.bodyPadTop,
         bodyPadBottom: payload.bodyPadBottom,

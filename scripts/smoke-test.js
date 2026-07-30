@@ -147,7 +147,13 @@ async function main() {
   );
   assert.strictEqual(noCoverConvert.status, 0, noCoverConvert.stderr || noCoverConvert.stdout);
   const noCoverManifest = JSON.parse(fs.readFileSync(path.join(noCoverOutputDir, "manifest.json"), "utf8"));
+  const noCoverHtml = fs.readFileSync(path.join(noCoverOutputDir, "xhs-studio.html"), "utf8");
   assert.strictEqual(noCoverManifest.coverMode, "none");
+  assert.strictEqual(noCoverManifest.layout.coverSplitY, 720);
+  assert.strictEqual(noCoverManifest.layout.noCoverSplitY, 662);
+  assert.match(noCoverHtml, /\.xhs-cover-card\.no-cover-image \.cover-text \{ top: 0; height: 662px;/);
+  assert.match(noCoverHtml, /\.xhs-card \.xhs-body-frame\.xhs-cover-tail-frame \{ top: 662px;[^}]*height: 778px;/);
+  assert.match(noCoverHtml, /\.cover-media \{[^}]*height: 720px;/);
 
   const explicitSourceDir = path.join(root, "explicit-cover-source");
   const explicitOutputDir = path.join(root, "explicit-cover-output");
@@ -2152,6 +2158,18 @@ async function main() {
     assert.match(await page.locator("#pageInfo").innerText(), /正文已接入封面下半区/);
     assert.ok(await page.locator("#stageScale .xhs-cover-tail-frame").count());
     assert.ok(await page.locator("#stageScale .xhs-cover-tail-frame").evaluate((node) => node.children.length >= 2));
+    const noCoverBoundary = await page.evaluate(() => {
+      const card = document.querySelector("#stageScale .xhs-cover-card");
+      const title = card?.querySelector(".cover-text");
+      const tail = card?.querySelector(".xhs-cover-tail-frame");
+      if (!card || !title || !tail) throw new Error("missing no-cover layout regions");
+      return {
+        titleHeight: title.offsetHeight,
+        tailTop: tail.offsetTop,
+        tailHeight: tail.offsetHeight,
+      };
+    });
+    assert.deepStrictEqual(noCoverBoundary, { titleHeight: 662, tailTop: 662, tailHeight: 778 });
     const coverTailRepaginationState = await page.evaluate(() => {
       const before = studioFlowIntegritySignature(pages);
       const beforeTailText = (document.querySelector('#stageScale .xhs-cover-tail-frame')?.textContent || '').replace(/\s+/g, '');
@@ -2165,6 +2183,7 @@ async function main() {
     assert.strictEqual(coverTailRepaginationState.afterTailText, coverTailRepaginationState.beforeTailText, 'cover-tail content must survive image/block repagination');
     await page.click("#coverModeHalfBtn");
     await page.waitForTimeout(500);
+    assert.strictEqual(await page.locator("#stageScale .cover-media").evaluate((node) => node.offsetHeight), 720);
     const flowOrderAfterCoverToggle = await collectFlowOrder();
     assert.deepStrictEqual(flowOrderAfterCoverToggle, flowOrderBeforeCoverToggle);
 
