@@ -1433,7 +1433,7 @@ function studioHtmlV2(payload, libs) {
       mint: { shell: '#eef5ef', card: '#fbfff9' },
       gray: { shell: '#eff1ef', card: '#fbfbfa' },
       sand: { shell: '#f5f1e8', card: '#fffaf0' },
-      blue: { shell: '#eef3f6', card: '#fbfdff' },
+      blue: { shell: '#eef3f6', card: '#f4f8ff' },
       yellow: { shell: '#f8f4e8', card: '#fffdf2' },
       pink: { shell: '#f7eff2', card: '#fff9fb' },
       purple: { shell: '#f3eff8', card: '#fcf9ff' },
