@@ -151,8 +151,9 @@ async function main() {
   assert.strictEqual(noCoverManifest.coverMode, "none");
   assert.strictEqual(noCoverManifest.layout.coverSplitY, 720);
   assert.strictEqual(noCoverManifest.layout.noCoverSplitY, 662);
-  assert.match(noCoverHtml, /\.xhs-cover-card\.no-cover-image \.cover-text \{ top: 0; height: 662px;/);
-  assert.match(noCoverHtml, /\.xhs-card \.xhs-body-frame\.xhs-cover-tail-frame \{ top: 662px;[^}]*height: 778px;/);
+  assert.strictEqual(noCoverManifest.layout.noCoverBodyGap, 40);
+  assert.match(noCoverHtml, /\.xhs-cover-card\.no-cover-image \.cover-text \{ top: 0; height: var\(--xhs-no-cover-subtitle-bottom, 662px\); padding-bottom: 0;/);
+  assert.match(noCoverHtml, /\.xhs-card \.xhs-body-frame\.xhs-cover-tail-frame \{ top: var\(--xhs-no-cover-body-top, 662px\);[^}]*height: calc\(1440px - var\(--xhs-no-cover-body-top, 662px\)\); padding-top: 0;/);
   assert.match(noCoverHtml, /\.cover-media \{[^}]*height: 720px;/);
 
   const explicitSourceDir = path.join(root, "explicit-cover-source");
@@ -2232,7 +2233,36 @@ async function main() {
         tailHeight: tail.offsetHeight,
       };
     });
-    assert.deepStrictEqual(noCoverBoundary, { titleHeight: 662, tailTop: 662, tailHeight: 778 });
+    assert.strictEqual(noCoverBoundary.tailTop - noCoverBoundary.titleHeight, 40);
+    assert.strictEqual(noCoverBoundary.tailHeight, 1440 - noCoverBoundary.tailTop);
+    await activateStudioPage(page, 1);
+    await page.waitForTimeout(300);
+    const noCoverBoundaryOnNextPage = await page.evaluate(() => {
+      const card = document.querySelector('.overview-item[data-index="0"] .xhs-cover-card');
+      const title = card?.querySelector('.cover-text');
+      const tail = card?.querySelector('.xhs-cover-tail-frame');
+      if (!card || !title || !tail) throw new Error("missing no-cover preview after page switch");
+      return {
+        titleHeight: title.offsetHeight,
+        tailTop: tail.offsetTop,
+        tailHeight: tail.offsetHeight,
+      };
+    });
+    assert.deepStrictEqual(noCoverBoundaryOnNextPage, noCoverBoundary);
+    await activateStudioPage(page, 0);
+    await page.waitForTimeout(300);
+    const noCoverBoundaryAfterReturn = await page.evaluate(() => {
+      const card = document.querySelector("#stageScale .xhs-cover-card");
+      const title = card?.querySelector(".cover-text");
+      const tail = card?.querySelector(".xhs-cover-tail-frame");
+      if (!card || !title || !tail) throw new Error("missing no-cover layout after returning");
+      return {
+        titleHeight: title.offsetHeight,
+        tailTop: tail.offsetTop,
+        tailHeight: tail.offsetHeight,
+      };
+    });
+    assert.deepStrictEqual(noCoverBoundaryAfterReturn, noCoverBoundary);
     const coverTailRepaginationState = await page.evaluate(() => {
       const before = studioFlowIntegritySignature(pages);
       const beforeTailText = (document.querySelector('#stageScale .xhs-cover-tail-frame')?.textContent || '').replace(/\s+/g, '');

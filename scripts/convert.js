@@ -933,7 +933,7 @@ function studioHtmlV2(payload, libs) {
   const coverPadBottom = Math.round(height * 0.052);
   const coverGap = Math.round(height * 0.02);
   const coverTailPadTop = Math.max(20, Math.round(bodyPadTop * 0.32));
-  const coverNoImagePadBottom = Math.max(18, Math.round(coverPadBottom * 0.36));
+  const noCoverBodyGap = Math.max(1, Math.round(height * 40 / DEFAULT_HEIGHT));
   const coverTitleSize = Math.round(width * 0.112);
   const coverSubtitleSize = Math.max(28, Math.round(width * 34 / DEFAULT_WIDTH));
   const imageFrameHeight = Math.round(height * 0.31);
@@ -1023,7 +1023,7 @@ function studioHtmlV2(payload, libs) {
     .cover-title strong, .cover-title b, .cover-title .xhs-cover-bold { font-weight: 900 !important; }
     .cover-title-bar { flex: 0 0 auto; width: ${Math.round(width * 0.12)}px; height: ${Math.max(5, Math.round(width * 0.005))}px; background: var(--xhs-accent); border-radius: 999px; margin: ${Math.round(height * 0.006)}px 0 ${Math.round(height * 0.014)}px; }
     .xhs-cover-card.no-cover-image .cover-media { display: none; }
-    .xhs-cover-card.no-cover-image .cover-text { top: 0; height: ${noCoverSplitY}px; padding-bottom: ${coverNoImagePadBottom}px; z-index: 2; justify-content: flex-start; }
+    .xhs-cover-card.no-cover-image .cover-text { top: 0; height: var(--xhs-no-cover-subtitle-bottom, ${noCoverSplitY}px); padding-bottom: 0; z-index: 2; justify-content: flex-start; }
     .xhs-cover-card.full-cover-image .cover-media { height: 100%; }
     .xhs-cover-card.full-cover-image .cover-text { display: none; }
     .cover-subtitle { flex: 0 0 auto; display: block; position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: calc(1.62em * 2); overflow: hidden; padding-left: ${Math.max(5, Math.round(width * 0.006)) + Math.round(width * 0.022)}px; color: #111; font-family: var(--xhs-font); font-size: var(--cover-subtitle-size); line-height: 1.62; font-weight: 650; white-space: pre-line; word-break: normal; overflow-wrap: anywhere; outline: none; letter-spacing: 2px; font-kerning: normal; text-rendering: geometricPrecision; }
@@ -1035,7 +1035,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-page-break { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; visibility: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-body-frame > .xhs-page-break + .xhs-page-break { display: none; }
     .xhs-body-frame { position: absolute; left: var(--body-pad-x); top: var(--body-pad-top); width: var(--body-content-width); height: var(--body-content-height); overflow: hidden; outline: none; background: transparent; font-family: var(--xhs-font); -webkit-font-smoothing: antialiased; }
-    .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: ${noCoverSplitY}px; left: var(--body-pad-x); width: var(--body-content-width); height: ${height - noCoverSplitY}px; padding-top: ${coverTailPadTop}px; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
+    .xhs-card .xhs-body-frame.xhs-cover-tail-frame { top: var(--xhs-no-cover-body-top, ${noCoverSplitY}px); left: var(--body-pad-x); width: var(--body-content-width); height: calc(${height}px - var(--xhs-no-cover-body-top, ${noCoverSplitY}px)); padding-top: 0; padding-bottom: ${bodyPadBottom}px; box-sizing: border-box; z-index: 1; }
     .xhs-cover-card:not(.no-cover-image) .xhs-cover-tail-frame { display: none; }
     .xhs-block { width: 100%; }
     .xhs-body-frame > div { min-height: 1.9em; color: #111; font-size: var(--body-font); line-height: var(--body-line); word-break: normal; overflow-wrap: break-word; }
@@ -1287,13 +1287,15 @@ function studioHtmlV2(payload, libs) {
       height,
       coverSplitY,
       noCoverSplitY,
+      noCoverInitialSplitY: noCoverSplitY,
       coverZoneHeight: height - coverSplitY,
       coverGap,
       coverPadTop,
       coverPadBottom,
       coverTailPadTop,
+      noCoverBodyGap,
       coverSubtitleMaxChars: 48,
-      coverTailLimit: Math.max(240, height - noCoverSplitY - coverTailPadTop - bodyPadBottom),
+      coverTailLimit: Math.max(240, height - noCoverSplitY - bodyPadBottom),
       pageLimit: bodyContentHeight,
       imageFrameHeight,
       bodyPadX,
@@ -1330,6 +1332,11 @@ function studioHtmlV2(payload, libs) {
     let selectedFrame = null;
     let selectedFlowBlock = null;
     let coverMode = ['full', 'half', 'none'].includes(config.coverMode) ? config.coverMode : 'half';
+    const noCoverLayoutRoot = document.documentElement.style;
+    let noCoverLayoutReflowTimer = null;
+    let lockedNoCoverSubtitleBottom = Number(config.noCoverSplitY || 662) - Number(config.noCoverBodyGap || 40);
+    let lockedNoCoverBodyTop = Number(config.noCoverSplitY || 662);
+    resetLockedNoCoverLayout();
     let blockReorderDrag = null;
     let blockDropIndicator = null;
     let overviewBlockDropIndicator = null;
@@ -4702,6 +4709,7 @@ function studioHtmlV2(payload, libs) {
         if (editable.classList.contains('cover-subtitle')) {
           enforceCoverSubtitleLimit(editable);
           balanceCoverSubtitle();
+          if (coverMode === 'none') balanceCoverTitle();
         }
         saveCurrentPage();
       }, 0);
@@ -5126,7 +5134,10 @@ function studioHtmlV2(payload, libs) {
           editable.addEventListener('blur', () => {
             if (editable.classList.contains('cover-title')) sanitizeCoverTitleNode(editable);
             if (editable.classList.contains('cover-title')) balanceCoverTitle();
-            if (editable.classList.contains('cover-subtitle')) balanceCoverSubtitle();
+            if (editable.classList.contains('cover-subtitle')) {
+              balanceCoverSubtitle();
+              if (coverMode === 'none') balanceCoverTitle();
+            }
             saveCurrentPage();
           });
         }
@@ -5140,6 +5151,7 @@ function studioHtmlV2(payload, libs) {
           if (editable.classList.contains('cover-subtitle')) {
             enforceCoverSubtitleLimit(editable);
             balanceCoverSubtitle();
+            if (coverMode === 'none') balanceCoverTitle();
           }
           if (editable.classList.contains('xhs-body-frame') || editable.classList.contains('xhs-cover-tail-frame')) {
             normalizeFilledCaretAnchors(editable);
@@ -5179,10 +5191,65 @@ function studioHtmlV2(payload, libs) {
       const pad = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
       return Math.max(80, coverText.clientHeight - pad);
     }
+    function setLockedNoCoverLayout(subtitleBottom, bodyTop) {
+      const nextSubtitleBottom = Math.round(Number(subtitleBottom) || lockedNoCoverSubtitleBottom);
+      const nextBodyTop = Math.round(Number(bodyTop) || lockedNoCoverBodyTop);
+      lockedNoCoverSubtitleBottom = nextSubtitleBottom;
+      lockedNoCoverBodyTop = nextBodyTop;
+      noCoverLayoutRoot.setProperty('--xhs-no-cover-subtitle-bottom', nextSubtitleBottom + 'px');
+      noCoverLayoutRoot.setProperty('--xhs-no-cover-body-top', nextBodyTop + 'px');
+      config.noCoverSplitY = nextBodyTop;
+      config.coverTailLimit = Math.max(
+        240,
+        config.height - nextBodyTop - Number(config.bodyPadBottom || 72)
+      );
+    }
+    function resetLockedNoCoverLayout() {
+      const bodyTop = Number(config.noCoverInitialSplitY || config.noCoverSplitY || 662);
+      const gap = Number(config.noCoverBodyGap || 40);
+      setLockedNoCoverLayout(bodyTop - gap, bodyTop);
+    }
+    function clearNoCoverLayoutVariables() {
+      noCoverLayoutRoot.removeProperty('--xhs-no-cover-subtitle-bottom');
+      noCoverLayoutRoot.removeProperty('--xhs-no-cover-body-top');
+    }
+    function applyDynamicNoCoverLayout() {
+      const card = stageScale.querySelector('.xhs-cover-card.no-cover-image');
+      if (!card || coverMode !== 'none') return false;
+      const subtitle = card.querySelector('.cover-subtitle');
+      const tail = card.querySelector('.xhs-cover-tail-frame');
+      if (!subtitle || !tail) return false;
+      const cardRect = card.getBoundingClientRect();
+      const subtitleRect = subtitle.getBoundingClientRect();
+      const scale = cardRect.height / config.height || 1;
+      const subtitleBottom = Math.ceil((subtitleRect.bottom - cardRect.top) / scale);
+      const bodyTop = Math.min(
+        config.height - 240,
+        subtitleBottom + Number(config.noCoverBodyGap || 40)
+      );
+      const nextTailLimit = Math.max(
+        240,
+        config.height - bodyTop - Number(config.bodyPadBottom || 72)
+      );
+      const changed = lockedNoCoverSubtitleBottom !== subtitleBottom ||
+        lockedNoCoverBodyTop !== bodyTop ||
+        config.coverTailLimit !== nextTailLimit;
+      setLockedNoCoverLayout(subtitleBottom, bodyTop);
+      return changed;
+    }
+    function scheduleDynamicNoCoverReflow() {
+      window.clearTimeout(noCoverLayoutReflowTimer);
+      noCoverLayoutReflowTimer = window.setTimeout(() => {
+        if (coverMode === 'none') reflow();
+      }, 0);
+    }
     function balanceCoverTitle() {
       const title = stageScale.querySelector('.cover-title');
       const coverText = stageScale.querySelector('.cover-text');
       if (!title || !coverText) return;
+      const dynamicNoCover = coverMode === 'none' &&
+        Boolean(stageScale.querySelector('.xhs-cover-card.no-cover-image'));
+      if (dynamicNoCover) clearNoCoverLayoutVariables();
       balanceCoverSubtitle();
       void coverText.offsetHeight;
       const maxSize = Number(coverTitleRange.value || config.coverTitleSize || 121);
@@ -5209,6 +5276,7 @@ function studioHtmlV2(payload, libs) {
         }
       }
       title.style.fontSize = fitted + 'px';
+      if (dynamicNoCover && applyDynamicNoCoverLayout()) scheduleDynamicNoCoverReflow();
     }
     function coverTextRects(node) {
       const range = document.createRange();
@@ -5488,7 +5556,10 @@ function studioHtmlV2(payload, libs) {
         sanitizeCoverTitleNode(editable);
         balanceCoverTitle();
       }
-      if (editable?.classList?.contains('cover-subtitle')) balanceCoverSubtitle();
+      if (editable?.classList?.contains('cover-subtitle')) {
+        balanceCoverSubtitle();
+        if (coverMode === 'none') balanceCoverTitle();
+      }
       saveCurrentPage();
     }
     function inlineStyleState(className, bold = false) {
@@ -6563,6 +6634,7 @@ function studioHtmlV2(payload, libs) {
         selection.addRange(nextRange);
         saveCurrentPage();
         balanceCoverSubtitle();
+        if (coverMode === 'none') balanceCoverTitle();
         return;
       }
       const boldNodes = coverBoldNodesInRange(subtitle, range);
@@ -6571,6 +6643,7 @@ function studioHtmlV2(payload, libs) {
         selection.removeAllRanges();
         saveCurrentPage();
         balanceCoverSubtitle();
+        if (coverMode === 'none') balanceCoverTitle();
         return;
       }
       const span = document.createElement('span');
@@ -6588,6 +6661,7 @@ function studioHtmlV2(payload, libs) {
       selection.addRange(styledRange);
       saveCurrentPage();
       balanceCoverSubtitle();
+      if (coverMode === 'none') balanceCoverTitle();
     }
     function toggleCoverTitleBold(selection, range, title) {
       if (range.collapsed) {
@@ -7870,6 +7944,8 @@ function studioHtmlV2(payload, libs) {
         currentPaperPattern,
         currentCardStyle,
         coverMode,
+        noCoverSubtitleBottom: lockedNoCoverSubtitleBottom,
+        noCoverBodyTop: lockedNoCoverBodyTop,
         controls: {
           coverTitle: coverTitleRange.value,
           bodyFont: bodyFontRange.value,
@@ -7979,6 +8055,7 @@ function studioHtmlV2(payload, libs) {
         selectedFrame = null;
         selectedFlowBlock = null;
         coverMode = ['full', 'half', 'none'].includes(config.coverMode) ? config.coverMode : 'half';
+        resetLockedNoCoverLayout();
         coverTitleRange.value = String(initialLayout.coverTitleSize);
         bodyFontRange.value = String(initialLayout.bodyFontSize);
         bodyLineRange.value = String(initialLayout.bodyLineHeight * 100);
@@ -8130,6 +8207,12 @@ function studioHtmlV2(payload, libs) {
         coverMode = ['full', 'half', 'none'].includes(state.coverMode)
           ? state.coverMode
           : (state.coverImageEnabled === false ? 'none' : 'half');
+        if (Number.isFinite(Number(state.noCoverSubtitleBottom)) &&
+            Number.isFinite(Number(state.noCoverBodyTop))) {
+          setLockedNoCoverLayout(state.noCoverSubtitleBottom, state.noCoverBodyTop);
+        } else {
+          resetLockedNoCoverLayout();
+        }
         syncPaperPatternUi();
         applyLayout(false);
         if (state.flowHtml) {
@@ -8656,6 +8739,7 @@ function main() {
       layout: {
         coverSplitY: payload.coverSplitY,
         noCoverSplitY: payload.noCoverSplitY,
+        noCoverBodyGap: Math.round(opts.height * 40 / DEFAULT_HEIGHT),
         bodyPadX: payload.bodyPadX,
         bodyPadTop: payload.bodyPadTop,
         bodyPadBottom: payload.bodyPadBottom,
