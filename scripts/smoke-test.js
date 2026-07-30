@@ -1775,6 +1775,46 @@ async function main() {
     wholeStyledBlockType: 'quote',
   }, 'whole-block browser selections must resolve from the text-bearing block instead of their parent-boundary endpoints');
 
+  const wholeLineInlineBoundaryProbe = await page.evaluate(() => {
+    const frame = document.querySelector('#stageScale .xhs-body-frame, #stageScale .xhs-cover-tail-frame');
+    if (!frame) throw new Error('missing body frame for whole-line inline-format probe');
+    const first = document.createElement('p');
+    first.className = 'xhs-p xhs-block xhs-page-start';
+    first.innerHTML = '<strong>Whole selected first line</strong>';
+    const second = document.createElement('p');
+    second.className = 'xhs-p xhs-block';
+    second.textContent = 'Next line starts here';
+    frame.append(first, second);
+    const range = document.createRange();
+    range.setStart(first.querySelector('strong').firstChild, 0);
+    range.setEnd(second.firstChild, 0);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    applyGreenUnderline();
+    const result = {
+      firstUnderlineText: first.querySelector('.xhs-green-underline')?.textContent || '',
+      secondUnderlineCount: second.querySelectorAll('.xhs-green-underline').length,
+      nestedParagraphCount: frame.querySelectorAll('p p').length,
+      emptyInlineCount: first.querySelectorAll('span:empty, strong:empty, b:empty, em:empty, i:empty').length,
+      firstStillDirectChild: first.parentElement === frame,
+      secondStillDirectChild: second.parentElement === frame,
+    };
+    selection.removeAllRanges();
+    first.remove();
+    second.remove();
+    saveCurrentPage({ skipNormalize: true });
+    return result;
+  });
+  assert.deepStrictEqual(wholeLineInlineBoundaryProbe, {
+    firstUnderlineText: 'Whole selected first line',
+    secondUnderlineCount: 0,
+    nestedParagraphCount: 0,
+    emptyInlineCount: 0,
+    firstStillDirectChild: true,
+    secondStillDirectChild: true,
+  }, 'whole-line underline must ignore an offset-0 boundary in the next paragraph and never create nested/empty paragraphs');
+
   const codeSelectionGuard = await page.evaluate(() => {
     const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
     let frame = null;

@@ -6729,9 +6729,21 @@ function studioHtmlV2(payload, libs) {
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement;
       const listBody = commonEl?.closest?.('.xhs-list-line')?.querySelector('.xhs-list-body');
-      const host = startHost && (!endHost || startHost === endHost)
+      const boundaryHosts = Array.from(new Set([startHost, endHost].filter(Boolean)));
+      const textBearingBoundaryHosts = boundaryHosts.filter((host) =>
+        rangeHasSelectedTextInBlock(range, host)
+      );
+      // Native whole-line selection commonly ends at offset 0 of the next
+      // paragraph. That boundary does not mean the next paragraph was
+      // selected. Clamp the range to the only host that contains real
+      // selected text, otherwise inline formatting can create nested/empty
+      // paragraphs at page starts and between adjacent blocks.
+      const singleTextHost = textBearingBoundaryHosts.length === 1
+        ? textBearingBoundaryHosts[0]
+        : null;
+      const host = singleTextHost || (startHost && (!endHost || startHost === endHost)
         ? startHost
-        : (endHost && !startHost ? endHost : (listBody || null));
+        : (endHost && !startHost ? endHost : (listBody || null)));
       if (!host) return range;
       const restricted = range.cloneRange();
       if (!host.contains(range.startContainer)) restricted.setStart(host, 0);
@@ -6798,6 +6810,13 @@ function studioHtmlV2(payload, libs) {
     }
     function fragmentHasInlineContent(fragment) {
       return Boolean((fragment.textContent || '').length || fragment.querySelector?.('br, img, code'));
+    }
+    function removeEmptyInlineWrappers(root) {
+      if (!root?.querySelectorAll) return;
+      Array.from(root.querySelectorAll('span, strong, b, em, i')).reverse().forEach((node) => {
+        if ((node.textContent || '').length || node.querySelector('br, img, code')) return;
+        node.remove();
+      });
     }
     function markedAncestorContainingRange(range, className) {
       const start = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
@@ -6904,6 +6923,8 @@ function studioHtmlV2(payload, libs) {
       }
       const offsets = inlineRangeTextOffsets(item.range);
       const span = toggleInlineMarkInRange(item.range, className);
+      const inlineHost = offsets?.host || inlineFormattingHost(span || item.range.commonAncestorContainer);
+      removeEmptyInlineWrappers(inlineHost);
       item.selection.removeAllRanges();
       if (span) {
         const styledRange = document.createRange();
@@ -6927,7 +6948,7 @@ function studioHtmlV2(payload, libs) {
       if (!scopeFrame) return false;
       const blocks = Array.from(scopeFrame.querySelectorAll(BLOCK_SELS)).filter((block) => {
         if (block.classList.contains('xhs-list-line')) return false;
-        return range.intersectsNode(block);
+        return rangeHasSelectedTextInBlock(range, block);
       });
       if (blocks.length < 2) return false;
       blocks.forEach((block) => {
@@ -6941,6 +6962,7 @@ function studioHtmlV2(payload, libs) {
         }
         if (br.collapsed) return;
         toggleInlineMarkInRange(br, className);
+        removeEmptyInlineWrappers(block);
       });
       window.getSelection()?.removeAllRanges();
       normalizeListLinesInFrame(scopeFrame);
