@@ -50,7 +50,7 @@ async function main() {
     "",
     "> 引用块适合放金句：这仍然应该是引用，不是卡片。",
     "",
-    "**金句：这是明确的卡片。**",
+    "**金句：这是明确的卡片，而且长度满足自动卡片规则。**",
     "",
     "**注意：这是注意卡片需要保留的正文，开头标签不应该重复显示。**",
     "",
@@ -61,6 +61,10 @@ async function main() {
     "**总结：这是总结卡片需要保留的正文，开头标签不应该重复显示。**",
     "",
     "**避坑：这是避坑卡片需要保留的正文，开头标签不应该重复显示。**",
+    "",
+    "**这是一段没有标签但长度符合要求的完整加粗正文，应该自动成为卡片。**",
+    "",
+    "注意：这条提醒刚好超过十字。",
     "",
     "**时间价值**",
     "",
@@ -374,6 +378,8 @@ async function main() {
   assert.match(html, /--xhs-font: "Noto Serif SC", "Source Han Serif SC"/);
   assert.match(html, /<strong>结论<\/strong><p><strong>总结：这是总结卡片/, "总结 label should trigger a card with the inferred 结论 corner");
   assert.match(html, /<strong>注意<\/strong><p><strong>避坑：这是避坑卡片/, "避坑 label should trigger a card with the inferred 注意 corner");
+  assert.match(html, /<strong>划重点<\/strong><p><strong>这是一段没有标签但长度符合要求的完整加粗正文/, "18–75 character full-bold paragraphs should become cards");
+  assert.match(html, /<strong>注意<\/strong><p>注意：这条提醒刚好超过十字。/, "10–75 character paragraphs with an exact card label should become cards without requiring bold");
   assert.match(html, /<p><strong>时间价值<\/strong><\/p>/, "short full-bold paragraphs must stay plain bold paragraphs");
   assert.match(html, /<p><strong>提示词：<\/strong><\/p>/, "提示词 is not an exact card label and must stay plain bold text");
   assert.match(html, /<p><strong>这是超长加粗段落/, "full-bold paragraphs over 75 chars must stay plain bold paragraphs, not cards");
@@ -2212,6 +2218,9 @@ async function main() {
 
     assert.ok(content.quotes.some((text) => text.includes("仍然应该是引用")));
     assert.ok(content.callouts.some((text) => text.includes("这是明确的卡片")));
+    assert.ok(content.callouts.some((text) => text.includes("没有标签但长度符合要求")));
+    assert.ok(content.callouts.some((text) => text.includes("这条提醒刚好超过十字")));
+    assert.ok(!content.callouts.some((text) => text.trim() === "提示词："), "提示词 must stay a plain paragraph after runtime normalization");
     assert.ok(!content.callouts.some((text) => /^\s*(?:金句|注意|结论|划重点)\s*[：:]/.test(text)));
     assert.ok(["金句", "注意", "结论", "划重点"].every((label) => content.labels.includes(label)));
     assert.ok(content.lists.some((text) => text.includes("Alt + 拖动")));
@@ -3084,11 +3093,12 @@ async function main() {
     }
     assert.ok(calloutPageIndex >= 0, "expected a page with the target callout after reflow");
     await activateStudioPage(page, calloutPageIndex);
-    const calloutCountBeforeToggle = await page.locator("#stageScale .xhs-callout").count();
     await page.locator("#stageScale .xhs-callout-body").filter({ hasText: "这是明确的卡片" }).first().click();
     await page.click("#keypointBtn");
-    const calloutCountAfterToggle = await page.locator("#stageScale .xhs-callout").count();
-    assert.strictEqual(calloutCountAfterToggle, calloutCountBeforeToggle - 1);
+    assert.strictEqual(
+      await page.locator("#stageScale .xhs-callout-body").filter({ hasText: "这是明确的卡片" }).count(),
+      0,
+    );
 
     const restoredParagraph = page.locator("#stageScale .xhs-p").filter({ hasText: "这是明确的卡片" });
     assert.strictEqual(await restoredParagraph.count(), 1);

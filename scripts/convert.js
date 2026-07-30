@@ -581,10 +581,13 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (!text) return;
     const strongStart = text.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)([\s\S]*)$/);
     const strongContent = plainMarkdownText(strongStart?.[1] || "");
-    const explicitCardStart = CARD_LABEL_PREFIX.test(strongContent);
+    const fullStrongParagraph = Boolean(strongStart && !strongStart[2].trim());
+    const labelCandidate = strongStart ? strongContent : plainMarkdownText(text);
+    const explicitCardStart = CARD_LABEL_PREFIX.test(labelCandidate);
     const plainLength = plainMarkdownText(text).length;
-    const cardLength = plainLength >= 18 && plainLength <= 75;
-    if (explicitCardStart && cardLength) {
+    const fullStrongCard = fullStrongParagraph && plainLength >= 18 && plainLength <= 75;
+    const labeledCard = explicitCardStart && plainLength >= 10 && plainLength <= 75;
+    if (fullStrongCard || labeledCard) {
       const label = inferCardLabel(text);
       blocks.push(`<section data-xhs-block-type="callout" style="border-left:4px solid #57b560;background:#f4faf3;"><strong>${escapeHtml(label)}</strong><p>${inlineMarkdownToHtml(text, markdownFile)}</p></section>`);
       return;
@@ -669,8 +672,13 @@ function renderNativeXhsSourceHtml(markdownFile, markdown, title, options = {}) 
     if (splitMarkdownTableRow(line).length >= 2) return "table";
     const strongStart = line.match(/^(?:\*\*|__)([\s\S]+?)(?:\*\*|__)([\s\S]*)$/);
     const strongContent = plainMarkdownText(strongStart?.[1] || "");
+    const fullStrongParagraph = Boolean(strongStart && !strongStart[2].trim());
+    const labelCandidate = strongStart ? strongContent : plainMarkdownText(line);
     const plainLength = plainMarkdownText(line).length;
-    if (CARD_LABEL_PREFIX.test(strongContent) && plainLength >= 18 && plainLength <= 75) return "callout";
+    if (
+      (fullStrongParagraph && plainLength >= 18 && plainLength <= 75) ||
+      (CARD_LABEL_PREFIX.test(labelCandidate) && plainLength >= 10 && plainLength <= 75)
+    ) return "callout";
     return "prose";
   }
   function shouldInsertMarkdownFlowBlank(upcoming) {
@@ -1954,7 +1962,23 @@ function studioHtmlV2(payload, libs) {
       const text = cleanText(el.textContent);
       const first = cleanText(el.firstElementChild?.textContent || '');
       const style = el.getAttribute('style') || '';
-      return /${CARD_LABEL_WORDS}/.test(first || text) || /border-left\\s*:\\s*4px[^;]*#57b560/i.test(style);
+      const candidate = first || text;
+      const firstElement = el.firstElementChild;
+      const fullStrongParagraph = Boolean(
+        firstElement &&
+        /^(?:STRONG|B)$/.test(firstElement.tagName) &&
+        cleanText(firstElement.textContent) === text &&
+        Array.from(el.childNodes).every((node) => (
+          node === firstElement ||
+          (node.nodeType === Node.TEXT_NODE && !cleanText(node.textContent))
+        ))
+      );
+      const hasStructuredLabel = /^(${CARD_LABEL_TOKEN})$/.test(first);
+      const hasPrefixedLabel = /^${CARD_LABEL_TOKEN}(?:\\s*[:：]\\s*|\\s*[—–-]\\s*|\\s+)/.test(candidate);
+      const fullStrongCard = fullStrongParagraph && text.length >= 18 && text.length <= 75;
+      const labeledCard = text.length >= 10 && text.length <= 75 && (hasStructuredLabel || hasPrefixedLabel);
+      return fullStrongCard || labeledCard ||
+        /border-left\\s*:\\s*4px[^;]*#57b560/i.test(style);
     }
     function calloutFromElement(el) {
       const children = Array.from(el.children);
