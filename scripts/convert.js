@@ -977,11 +977,11 @@ function studioHtmlV2(payload, libs) {
       --xhs-card-bg: #ffffff;
       --xhs-accent: #4d7fd2;
       --xhs-accent-strong: #2e5fb2;
-      --xhs-accent-soft: rgba(77, 127, 210, .16);
-      --xhs-accent-pale: #f5faff;
-      --xhs-underline: #b8cbee;
+      --xhs-accent-soft: rgba(77, 127, 210, .20);
+      --xhs-accent-pale: #f0f7ff;
+      --xhs-underline: #aec4ec;
       --xhs-cover-bg: #ffffff;
-      --xhs-cover-border: #b8cbee;
+      --xhs-cover-border: #aec4ec;
       --xhs-cover-placeholder: #8f948d;
     }
     html, body { margin: 0; min-height: 100%; background: var(--xhs-shell-bg); color: #111; }
@@ -1126,8 +1126,9 @@ function studioHtmlV2(payload, libs) {
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
     .xhs-green-underline { font-weight: inherit; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-split-head { margin-bottom: 0 !important; }
-    .xhs-p.xhs-split-tail, .xhs-rich.xhs-split-tail { margin-top: 0 !important; }
+    .xhs-p.xhs-split-tail, .xhs-rich.xhs-split-tail, .xhs-callout.xhs-split-tail, .xhs-quote.xhs-split-tail, .xhs-code-block.xhs-split-tail, .xhs-list-line.xhs-split-tail { margin-top: 0 !important; }
     .xhs-callout.xhs-split-tail { padding-top: 0.72em; }
+    .xhs-list-line.xhs-split-tail .xhs-list-marker, .xhs-list-line[data-xhs-list-continuation="1"] .xhs-list-marker { visibility: hidden; }
     .xhs-rich img { max-width: 100%; height: auto; }
     .selected-image-frame { outline: 5px solid rgba(37, 99, 235, .92); outline-offset: 5px; }
     .measure { position: fixed; left: -20000px; top: 0; width: var(--body-content-width); visibility: hidden; pointer-events: none; background: #fff; font-family: var(--xhs-font); }
@@ -1439,7 +1440,7 @@ function studioHtmlV2(payload, libs) {
     };
     const ACCENT_THEMES = {
       green: { accent: '#5fa66a', strong: '#2f7d3b', soft: 'rgba(95,166,106,.18)', pale: '#f4faf3', underline: '#b8ddb4' },
-      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.16)', pale: '#f5faff', underline: '#b8cbee' },
+      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.20)', pale: '#f0f7ff', underline: '#aec4ec' },
       pink: { accent: '#d7789b', strong: '#b94f76', soft: 'rgba(215,120,155,.16)', pale: '#fff5f8', underline: '#efbfd0' },
       teal: { accent: '#47a69e', strong: '#227a73', soft: 'rgba(71,166,158,.16)', pale: '#f1fbf9', underline: '#abdcd6' },
       orange: { accent: '#d99542', strong: '#b66b18', soft: 'rgba(217,149,66,.16)', pale: '#fff8ec', underline: '#edcea3' },
@@ -2624,9 +2625,9 @@ function studioHtmlV2(payload, libs) {
         }
         return;
       }
-      if (target.classList.contains('xhs-callout')) {
-        const targetBody = target.querySelector('.xhs-callout-body');
-        const sourceBody = source.querySelector('.xhs-callout-body');
+      if (continuationFieldForBlock(target)) {
+        const targetBody = continuationFieldForBlock(target);
+        const sourceBody = continuationFieldForBlock(source);
         if (targetBody && sourceBody) {
           Array.from(sourceBody.childNodes).forEach((node) => targetBody.appendChild(node.cloneNode(true)));
         }
@@ -2639,7 +2640,7 @@ function studioHtmlV2(payload, libs) {
         next?.dataset?.flowId &&
         base.dataset.flowId === next.dataset.flowId &&
         base.tagName === next.tagName &&
-        (isPlainSplittable(base) || base.classList.contains('xhs-callout') || base.classList.contains('xhs-table-block'));
+        (isPlainSplittable(base) || continuationFieldForBlock(base) || base.classList.contains('xhs-table-block'));
     }
     function mergeSplitBlocks(blocks) {
       const merged = [];
@@ -2989,6 +2990,12 @@ function studioHtmlV2(payload, libs) {
     function isSplittableTextBlock(block) {
       return isPlainSplittable(block) && !isAtomicFlowBlock(block);
     }
+    function isContinuousStructuralBlock(block) {
+      return Boolean(continuationFieldForBlock(block));
+    }
+    function isFlowTextSplittable(block) {
+      return isSplittableTextBlock(block) || isContinuousStructuralBlock(block);
+    }
     function sanitizeMergedFlowBlocks(blocks) {
       return blocks.filter((node) => {
         if (node.classList?.contains('xhs-manual-blank') || node.dataset?.xhsManualBlank === '1' || node.dataset?.xhsPageBreak === '1') return true;
@@ -3045,6 +3052,57 @@ function studioHtmlV2(payload, libs) {
       const tail = markSplitPart(cloneTextRangeElement(block, best, total), id, 'tail');
       return cleanText(head.textContent) && cleanText(tail.textContent) ? { head, tail } : null;
     }
+    function splitContinuousStructuralBlock(block, available) {
+      const field = continuationFieldForBlock(block);
+      const total = textLengthDeep(field);
+      const oneLine = config.bodyFontSize * config.bodyLineHeight;
+      if (!field || total < 4 || available < Math.max(24, oneLine * 0.45)) return null;
+      const id = flowIdFor(block);
+      function makePart(start, end, kind) {
+        const part = block.cloneNode(true);
+        const partField = continuationFieldForBlock(part);
+        const content = cloneTextRangeElement(field, start, end);
+        if (!partField || !content) return null;
+        partField.replaceChildren(...Array.from(content.childNodes));
+        if (kind === 'tail' && part.classList.contains('xhs-callout')) {
+          part.querySelector('.xhs-callout-label')?.remove();
+        }
+        if (kind === 'tail' && part.classList.contains('xhs-list-line')) {
+          part.dataset.xhsListContinuation = '1';
+        }
+        return markSplitPart(part, id, kind);
+      }
+      let lo = 1;
+      let hi = total - 1;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const head = makePart(0, mid, 'head');
+        if (!head || !cleanText(continuationFieldForBlock(head)?.textContent || '')) {
+          lo = mid + 1;
+          continue;
+        }
+        if (measureBlock(head, true) <= available) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (best < 1 || best >= total - 1) return null;
+      const preferred = preferredTextSplitIndex(field.textContent || '', best, total);
+      if (preferred !== best) {
+        const preferredHead = makePart(0, preferred, 'head');
+        const preferredHeight = preferredHead ? measureBlock(preferredHead, true) : Infinity;
+        if (available - preferredHeight <= oneLine * 0.25) best = preferred;
+      }
+      const head = makePart(0, best, 'head');
+      const tail = makePart(best, total, 'tail');
+      return cleanText(continuationFieldForBlock(head)?.textContent || '') &&
+        cleanText(continuationFieldForBlock(tail)?.textContent || '')
+        ? { head, tail }
+        : null;
+    }
     function splitTableBlock(block, available) {
       const rows = Array.from(block.querySelectorAll('tbody > tr'));
       if (rows.length < 2 || available < 120) return null;
@@ -3076,11 +3134,12 @@ function studioHtmlV2(payload, libs) {
       };
     }
     function splitTextBlockToFit(block, available) {
-      if (!isSplittableTextBlock(block)) return null;
-      return splitPlainTextBlock(block, available);
+      if (isSplittableTextBlock(block)) return splitPlainTextBlock(block, available);
+      if (isContinuousStructuralBlock(block)) return splitContinuousStructuralBlock(block, available);
+      return null;
     }
     function isSplittableBlock(block) {
-      if (isSplittableTextBlock(block)) return true;
+      if (isFlowTextSplittable(block)) return true;
       if (block.classList.contains('xhs-table-block')) {
         return block.querySelectorAll('tbody > tr').length >= 2;
       }
@@ -3088,6 +3147,7 @@ function studioHtmlV2(payload, libs) {
     }
     function splitBlockToFit(block, available) {
       if (isSplittableTextBlock(block)) return splitPlainTextBlock(block, available);
+      if (isContinuousStructuralBlock(block)) return splitContinuousStructuralBlock(block, available);
       if (block.classList.contains('xhs-table-block')) return splitTableBlock(block, available);
       return null;
     }
@@ -3135,7 +3195,7 @@ function studioHtmlV2(payload, libs) {
             ? Math.max(8, Math.round(config.bodyFontSize * config.bodyLineHeight * 0.22))
             : 0;
           if (current.length && fitHeight + atomicFitGuard > remaining) {
-            if (isSplittableTextBlock(block)) {
+            if (isFlowTextSplittable(block)) {
               const split = splitBlockToFit(block, remaining);
               if (split) {
                 current.push(split.head);
@@ -3209,7 +3269,7 @@ function studioHtmlV2(payload, libs) {
             pending = null;
             continue;
           }
-          if (effectiveFitHeight > remaining && isSplittableTextBlock(block)) {
+          if (effectiveFitHeight > remaining && isFlowTextSplittable(block)) {
             const split = splitBlockToFit(block, remaining);
             if (split) {
               tailNodes.push(split.head);
@@ -3222,7 +3282,7 @@ function studioHtmlV2(payload, libs) {
             }
           }
           if (effectiveFitHeight <= remaining ||
-            (!tailNodes.length && isSplittableTextBlock(block) && effectiveFitHeight <= tailLimit + 40)) {
+            (!tailNodes.length && isFlowTextSplittable(block) && effectiveFitHeight <= tailLimit + 40)) {
             tailNodes.push(block);
             used += effectiveHeight;
             pending = null;
@@ -4112,9 +4172,32 @@ function studioHtmlV2(payload, libs) {
       if (!block?.classList) return null;
       if (block.classList.contains('xhs-list-line')) return block.querySelector('.xhs-list-body');
       if (block.classList.contains('xhs-callout')) return block.querySelector('.xhs-callout-body');
-      if (block.classList.contains('xhs-code-block')) return block.querySelector('.xhs-code-content');
+      if (block.classList.contains('xhs-code-block')) return block.querySelector('.xhs-code-content code, .xhs-code-content');
       if (block.classList.contains('xhs-quote')) return block;
       return null;
+    }
+    function continuationBlockKind(block) {
+      if (!block?.classList) return '';
+      if (block.classList.contains('xhs-list-line')) {
+        return 'list:' + (block.dataset.listType === 'ordered' ? 'ordered' : 'unordered');
+      }
+      if (block.classList.contains('xhs-callout')) return 'callout';
+      if (block.classList.contains('xhs-code-block')) return 'code';
+      if (block.classList.contains('xhs-quote')) return 'quote';
+      return '';
+    }
+    function mergeMatchingContinuationBlocks(current, previous) {
+      const kind = continuationBlockKind(current);
+      if (!kind || kind !== continuationBlockKind(previous)) return null;
+      const currentField = continuationFieldForBlock(current);
+      const previousField = continuationFieldForBlock(previous);
+      if (!currentField || !previousField) return null;
+      if (!cleanText(previousField.textContent)) previousField.innerHTML = '';
+      Array.from(currentField.childNodes).forEach((node) => previousField.appendChild(node));
+      previous.dataset.xhsContinuousBlock = '1';
+      current.remove();
+      if (previous.classList.contains('xhs-list-line')) renumberContiguousListLines(previous);
+      return previous;
     }
     function mergeParagraphIntoContinuationField(paragraph, previousBlock) {
       const field = continuationFieldForBlock(previousBlock);
@@ -4522,6 +4605,8 @@ function studioHtmlV2(payload, libs) {
       let changed = false;
       if (wasSplitTail && current) {
         changed = removePreviousCodePoint(current, marker);
+      } else if (mergeMatchingContinuationBlocks(current, previous)) {
+        changed = true;
       } else if (previous?.classList?.contains('xhs-manual-blank')) {
         previous.remove();
         changed = true;
@@ -8073,13 +8158,13 @@ function studioHtmlV2(payload, libs) {
       return {
         cardBg: styles.getPropertyValue('--xhs-card-bg').trim() || '#ffffff',
         coverBg: styles.getPropertyValue('--xhs-cover-bg').trim() || styles.getPropertyValue('--xhs-card-bg').trim() || '#ffffff',
-        coverBorder: styles.getPropertyValue('--xhs-cover-border').trim() || styles.getPropertyValue('--xhs-underline').trim() || '#b8cbee',
+        coverBorder: styles.getPropertyValue('--xhs-cover-border').trim() || styles.getPropertyValue('--xhs-underline').trim() || '#aec4ec',
         coverPlaceholder: styles.getPropertyValue('--xhs-cover-placeholder').trim() || '#8f948d',
         accent: styles.getPropertyValue('--xhs-accent').trim() || '#4d7fd2',
         accentStrong: styles.getPropertyValue('--xhs-accent-strong').trim() || '#2e5fb2',
-        accentSoft: styles.getPropertyValue('--xhs-accent-soft').trim() || 'rgba(77,127,210,.16)',
-        accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f5faff',
-        underline: styles.getPropertyValue('--xhs-underline').trim() || '#b8cbee',
+        accentSoft: styles.getPropertyValue('--xhs-accent-soft').trim() || 'rgba(77,127,210,.20)',
+        accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f0f7ff',
+        underline: styles.getPropertyValue('--xhs-underline').trim() || '#aec4ec',
       };
     }
     function prepareCardForExport(card) {

@@ -1016,6 +1016,127 @@ async function main() {
     assert.strictEqual(crossPageBackspaceResult.notice, '', 'valid cross-page deletion should not trigger an integrity rollback');
     await continuousBackspacePage.close();
 
+    // Regression: page boundaries are not document boundaries. Backspace at
+    // the first character of a matching structural block joins both blocks,
+    // keeps one editable field, and lets that merged field paginate by line.
+    const structuralJoinPage = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+    await structuralJoinPage.addInitScript(() => localStorage.clear());
+    await structuralJoinPage.goto(`file://${path.join(continuousOutputDir, "xhs-studio.html")}`);
+    await structuralJoinPage.waitForTimeout(350);
+    const structuralJoinSetup = await structuralJoinPage.evaluate(() => {
+      const cover = { ...(pages.find((page) => page.type === 'cover') || { type: 'cover', html: initialCoverHtml() }), tailHtml: '' };
+      const first = document.createElement('section');
+      first.className = 'xhs-quote xhs-block';
+      first.textContent = '上一页引用';
+      const second = document.createElement('section');
+      second.className = 'xhs-quote xhs-block';
+      second.textContent = '下一页引用';
+      pages = [
+        cover,
+        { type: 'body', html: first.outerHTML },
+        { type: 'body', html: second.outerHTML },
+      ];
+      continuousFlowHtml = first.outerHTML + second.outerHTML;
+      pageIndex = 2;
+      renderAll();
+      const current = document.querySelector('#stageScale .xhs-quote');
+      const node = current?.firstChild;
+      if (!node) return { ready: false };
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      current.closest('[contenteditable="true"]')?.focus();
+      return { ready: true, pageIndex };
+    });
+    assert.strictEqual(structuralJoinSetup.ready, true, 'cross-page structural join fixture should place the caret in the next-page quote');
+    await structuralJoinPage.keyboard.press('Backspace');
+    await structuralJoinPage.waitForTimeout(500);
+    const structuralJoinState = await structuralJoinPage.evaluate(() => {
+      const holder = mergedContinuousFlowHolder();
+      const merged = holder.querySelector('.xhs-quote');
+      const mergedText = continuationFieldForBlock(merged)?.textContent || '';
+      const longText = '连续块按正文分行重新分页。'.repeat(260);
+      if (merged) continuationFieldForBlock(merged).textContent = longText;
+      const splitPages = merged ? paginateBlocks([merged]) : [];
+      const fragments = [];
+      splitPages.forEach((savedPage) => {
+        const frame = document.createElement('div');
+        frame.innerHTML = savedPage.html || '';
+        Array.from(frame.children).forEach((node) => fragments.push(node));
+      });
+      const restored = mergeSplitBlocks(fragments);
+      const restoredField = continuationFieldForBlock(restored[0]);
+      return {
+        mergedCount: holder.querySelectorAll('.xhs-quote').length,
+        mergedText,
+        continuous: merged?.dataset?.xhsContinuousBlock || '',
+        splitPageCount: splitPages.length,
+        splitHeadCount: splitPages.filter((savedPage) => savedPage.html.includes('data-split="head"')).length,
+        splitTailCount: splitPages.filter((savedPage) => savedPage.html.includes('data-split="tail"')).length,
+        restoredCount: restored.length,
+        restoredText: restoredField?.textContent || '',
+        longText,
+        notice: document.querySelector('#runtimeNotice')?.textContent || '',
+      };
+    });
+    assert.strictEqual(structuralJoinState.mergedCount, 1, 'matching quotes across pages should become one document block');
+    assert.ok(structuralJoinState.mergedText.startsWith('上一页引用下一页引用'), 'Backspace should delete only the block boundary');
+    assert.strictEqual(structuralJoinState.continuous, '1', 'a joined structural block should opt into continuous line pagination');
+    assert.ok(structuralJoinState.splitPageCount > 1, 'a joined structural block should split across 3:4 pages by line');
+    assert.ok(structuralJoinState.splitHeadCount >= 1);
+    assert.ok(structuralJoinState.splitTailCount >= 1);
+    assert.strictEqual(structuralJoinState.restoredCount, 1, 'split page slices should reconstruct one document block');
+    assert.strictEqual(structuralJoinState.restoredText, structuralJoinState.longText, 'structural pagination must preserve all joined text');
+    assert.strictEqual(structuralJoinState.notice, '', 'valid structural joining should not trigger an integrity rollback');
+
+    const structuralKindProbe = await structuralJoinPage.evaluate(() => {
+      const marker = () => {
+        const span = document.createElement('span');
+        span.dataset.xhsCaretMarker = 'probe';
+        span.textContent = String.fromCharCode(8203);
+        return span;
+      };
+      const probePair = (previous, current) => {
+        const host = document.createElement('div');
+        host.append(previous, current);
+        continuationFieldForBlock(current).prepend(marker());
+        const merged = mergeMatchingContinuationBlocks(current, previous);
+        return {
+          count: host.children.length,
+          text: continuationFieldForBlock(merged)?.textContent?.replace(String.fromCharCode(8203), '') || '',
+          markerCount: host.querySelectorAll('[data-xhs-caret-marker="probe"]').length,
+          continuous: merged?.dataset?.xhsContinuousBlock || '',
+        };
+      };
+      const card = (label, text) => {
+        const block = document.createElement('section');
+        block.className = 'xhs-callout xhs-card-frame xhs-block';
+        block.innerHTML = '<div class="xhs-callout-label">' + label + '</div><div class="xhs-callout-body">' + text + '</div>';
+        return block;
+      };
+      const list = (text, type = 'unordered') => buildListLines([{ html: text, plain: text }], type)[0];
+      const quote = (text) => makeElement('section', 'xhs-quote xhs-block', text);
+      return {
+        card: probePair(card('保留标签', '卡片前'), card('忽略标签', '卡片后')),
+        code: probePair(makeNewCodeBlock('代码前'), makeNewCodeBlock('代码后')),
+        list: probePair(list('序列前'), list('序列后')),
+        quote: probePair(quote('引用前'), quote('引用后')),
+      };
+    });
+    for (const [kind, state] of Object.entries(structuralKindProbe)) {
+      assert.strictEqual(state.count, 1, `${kind} boundary Backspace should leave one block`);
+      assert.strictEqual(state.markerCount, 1, `${kind} join should keep the caret marker`);
+      assert.strictEqual(state.continuous, '1', `${kind} join should enable line pagination`);
+    }
+    assert.strictEqual(structuralKindProbe.card.text, '卡片前卡片后');
+    assert.strictEqual(structuralKindProbe.code.text, '代码前代码后');
+    assert.strictEqual(structuralKindProbe.list.text, '序列前序列后');
+    assert.strictEqual(structuralKindProbe.quote.text, '引用前引用后');
+    await structuralJoinPage.close();
+
     // Regression: Enter at the start of an atomic quote inserts one real blank.
     // When that blank pushes the quote to the next page, the quote remains once
     // and the caret stays in the blank on the previous page.
@@ -1751,7 +1872,7 @@ async function main() {
     });
     assert.deepStrictEqual(flowingListProbe, [2, 2], 'a sequence should flow across pages between complete list items');
 
-    const atomicCalloutProbe = await page.evaluate(() => {
+    const flowingCalloutProbe = await page.evaluate(() => {
       const callout = document.createElement('section');
       callout.className = 'xhs-callout xhs-block';
       callout.innerHTML = '<div class="xhs-callout-label">划重点</div><div class="xhs-callout-body">' +
@@ -1770,10 +1891,10 @@ async function main() {
         };
       });
     });
-    assert.deepStrictEqual(atomicCalloutProbe, [
-      { callouts: 0, splitCallouts: 0 },
-      { callouts: 1, splitCallouts: 0 },
-    ], 'a card must never be split to fill the previous page remainder');
+    assert.deepStrictEqual(flowingCalloutProbe, [
+      { callouts: 1, splitCallouts: 1 },
+      { callouts: 1, splitCallouts: 1 },
+    ], 'a card should use the previous-page remainder and continue by line on the next page');
 
     const atomicShortTableProbe = await page.evaluate(() => {
       const table = document.createElement('section');
