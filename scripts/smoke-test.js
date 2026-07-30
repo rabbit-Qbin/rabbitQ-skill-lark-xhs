@@ -1746,11 +1746,34 @@ async function main() {
     range.setStart(first.firstChild, 0);
     range.setEnd(second.firstChild, 0);
     const resolved = proseBlockForRange(range);
+    const firstIndex = Array.from(frame.childNodes).indexOf(first);
+    const wholeParagraphRange = document.createRange();
+    wholeParagraphRange.setStart(frame, firstIndex);
+    wholeParagraphRange.setEnd(frame, firstIndex + 1);
+    const wholeParagraphResolved = proseBlockForRange(wholeParagraphRange);
+    const quote = document.createElement('section');
+    quote.className = 'xhs-quote xhs-block';
+    quote.textContent = '已有引用样式';
+    second.before(quote);
+    const quoteIndex = Array.from(frame.childNodes).indexOf(quote);
+    const wholeQuoteRange = document.createRange();
+    wholeQuoteRange.setStart(frame, quoteIndex);
+    wholeQuoteRange.setEnd(frame, quoteIndex + 1);
+    const wholeQuoteInfo = singleSelectedFlowInfoFromRange(wholeQuoteRange);
     first.remove();
+    quote.remove();
     second.remove();
-    return resolved === first;
+    return {
+      nextParagraphBoundary: resolved === first,
+      wholeParagraphBoundary: wholeParagraphResolved === first,
+      wholeStyledBlockType: wholeQuoteInfo?.type || '',
+    };
   });
-  assert.strictEqual(singleParagraphBoundaryProbe, true, 'a selection ending at the next paragraph offset 0 must still resolve to the first paragraph');
+  assert.deepStrictEqual(singleParagraphBoundaryProbe, {
+    nextParagraphBoundary: true,
+    wholeParagraphBoundary: true,
+    wholeStyledBlockType: 'quote',
+  }, 'whole-block browser selections must resolve from the text-bearing block instead of their parent-boundary endpoints');
 
   const codeSelectionGuard = await page.evaluate(() => {
     const tabs = Array.from(document.querySelectorAll('#pageTabs button'));
@@ -3986,6 +4009,7 @@ async function main() {
       return {
         display: getComputedStyle(node).display,
         height: node.offsetHeight,
+        markerHeight: parseFloat(marker.height),
         markerTop: parseFloat(marker.top),
         markerTransform: marker.transform,
       };
@@ -4003,10 +4027,15 @@ async function main() {
       const marker = getComputedStyle(node, "::before");
       return {
         height: node.offsetHeight,
+        markerHeight: parseFloat(marker.height),
         markerTop: parseFloat(marker.top),
       };
     });
     assert.ok(twoLineGeometry.height > oneLineGeometry.height);
+    assert.ok(
+      Math.abs(twoLineGeometry.markerHeight / oneLineGeometry.markerHeight - 1.5) <= 0.03,
+      `two-line subtitle marker should be 50% longer: ${JSON.stringify({ oneLineGeometry, twoLineGeometry })}`,
+    );
     assert.ok(
       Math.abs(twoLineGeometry.markerTop - twoLineGeometry.height / 2) <= 1,
       `two-line subtitle marker is not centered: ${JSON.stringify(twoLineGeometry)}`,

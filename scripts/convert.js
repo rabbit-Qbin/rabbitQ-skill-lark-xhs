@@ -1030,6 +1030,7 @@ function studioHtmlV2(payload, libs) {
     .cover-subtitle * { font-size: inherit !important; line-height: inherit !important; letter-spacing: inherit; }
     .cover-subtitle strong, .cover-subtitle b, .cover-subtitle .xhs-cover-bold { font-weight: 900 !important; }
     .cover-subtitle::before { content: ""; position: absolute; left: 0; top: 50%; width: ${Math.max(5, Math.round(width * 0.006))}px; height: 1.08em; transform: translateY(-50%); background: var(--xhs-accent); border-radius: 999px; pointer-events: none; }
+    .cover-subtitle.xhs-two-lines::before { height: 1.62em; }
     .cover-subtitle:empty::after { content: attr(data-placeholder); color: #8f948d; letter-spacing: 0; pointer-events: none; }
     .xhs-page-break { height: 0; margin: 0; padding: 0; border: 0; overflow: hidden; visibility: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-body-frame > .xhs-page-break + .xhs-page-break { display: none; }
@@ -5294,6 +5295,7 @@ function studioHtmlV2(payload, libs) {
       const usedLines = coverSubtitleUsedLines(subtitle);
       subtitle.style.fontSize = base + 'px';
       lockCoverSubtitleBox(subtitle, base);
+      subtitle.classList.toggle('xhs-two-lines', usedLines === 2);
       subtitle.style.minHeight = (lineSlot * usedLines) + 'px';
       subtitle.style.flex = '0 0 auto';
     }
@@ -6396,6 +6398,43 @@ function studioHtmlV2(payload, libs) {
       if (!parent || !stageScale.contains(parent)) return null;
       return { selection, range };
     }
+    function rangeFlowFrame(range) {
+      if (!range) return null;
+      const elementAt = (node) => node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      const startFrame = elementAt(range.startContainer)?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      const endFrame = elementAt(range.endContainer)?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      if (startFrame && startFrame === endFrame) return startFrame;
+      const commonFrame = elementAt(range.commonAncestorContainer)?.closest?.('.xhs-body-frame, .xhs-cover-tail-frame');
+      return commonFrame && stageScale.contains(commonFrame) ? commonFrame : null;
+    }
+    function rangeHasSelectedTextInBlock(range, block) {
+      if (!range || !block) return false;
+      try {
+        if (!range.intersectsNode(block)) return false;
+        const full = document.createRange();
+        full.selectNodeContents(block);
+        const overlap = range.cloneRange();
+        if (overlap.compareBoundaryPoints(Range.START_TO_START, full) < 0) {
+          overlap.setStart(full.startContainer, full.startOffset);
+        }
+        if (overlap.compareBoundaryPoints(Range.END_TO_END, full) > 0) {
+          overlap.setEnd(full.endContainer, full.endOffset);
+        }
+        return !overlap.collapsed && Boolean(cleanText(overlap.toString()));
+      } catch (_) {
+        return false;
+      }
+    }
+    function textBearingFlowBlocksForRange(range) {
+      const frame = rangeFlowFrame(range);
+      if (!frame) return [];
+      return Array.from(frame.children).filter((block) => rangeHasSelectedTextInBlock(range, block));
+    }
+    function singleSelectedFlowInfoFromRange(range) {
+      const blocks = textBearingFlowBlocksForRange(range);
+      if (blocks.length !== 1) return null;
+      return activeFlowBlockAt(blocks[0]);
+    }
     function proseBlockForRange(range) {
       if (!range) return null;
       const closestProse = (node) => {
@@ -6440,7 +6479,11 @@ function studioHtmlV2(payload, libs) {
           startBlock = endBlock;
         }
       }
-      if (!startBlock || startBlock !== endBlock || !stageScale.contains(startBlock)) return null;
+      if (!startBlock || startBlock !== endBlock || !stageScale.contains(startBlock)) {
+        const selectedProse = textBearingFlowBlocksForRange(range)
+          .filter((block) => block.matches?.('.xhs-p, .xhs-rich'));
+        return selectedProse.length === 1 ? selectedProse[0] : null;
+      }
       return startBlock;
     }
     function proseContentRange(range, sourceBlock) {
@@ -7149,7 +7192,7 @@ function studioHtmlV2(payload, libs) {
           const startInfo = activeFlowBlockAt(range.startContainer);
           const endInfo = activeFlowBlockAt(range.endContainer);
           if (!startInfo || !endInfo || startInfo.el !== endInfo.el) {
-            rangeInfo = selectedListFlowInfoFromRange(range);
+            rangeInfo = singleSelectedFlowInfoFromRange(range) || selectedListFlowInfoFromRange(range);
             if (!rangeInfo) return false;
           }
         }
