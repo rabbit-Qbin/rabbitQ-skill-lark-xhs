@@ -980,7 +980,7 @@ function studioHtmlV2(payload, libs) {
       --xhs-accent-strong: #2e5fb2;
       --xhs-accent-soft: rgba(77, 127, 210, .20);
       --xhs-accent-pale: #f0f7ff;
-      --xhs-underline: #d7e6fb;
+      --xhs-underline: #aec4ec;
       --xhs-cover-bg: #ffffff;
       --xhs-cover-border: #aec4ec;
       --xhs-cover-placeholder: #8f948d;
@@ -1450,7 +1450,7 @@ function studioHtmlV2(payload, libs) {
     };
     const ACCENT_THEMES = {
       green: { accent: '#5fa66a', strong: '#2f7d3b', soft: 'rgba(95,166,106,.18)', pale: '#f4faf3', underline: '#b8ddb4' },
-      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.20)', pale: '#f0f7ff', underline: '#d7e6fb' },
+      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.20)', pale: '#f0f7ff', underline: '#aec4ec' },
       pink: { accent: '#d7789b', strong: '#b94f76', soft: 'rgba(215,120,155,.16)', pale: '#fff5f8', underline: '#efbfd0' },
       teal: { accent: '#47a69e', strong: '#227a73', soft: 'rgba(71,166,158,.16)', pale: '#f1fbf9', underline: '#abdcd6' },
       orange: { accent: '#d99542', strong: '#b66b18', soft: 'rgba(217,149,66,.16)', pale: '#fff8ec', underline: '#edcea3' },
