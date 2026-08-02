@@ -981,6 +981,7 @@ function studioHtmlV2(payload, libs) {
       --xhs-accent-soft: rgba(77, 127, 210, .20);
       --xhs-accent-pale: #f0f7ff;
       --xhs-underline: #aec4ec;
+      --xhs-underline-line: rgba(174, 196, 236, .80);
       --xhs-cover-bg: #ffffff;
       --xhs-cover-border: #aec4ec;
       --xhs-cover-placeholder: #8f948d;
@@ -1064,14 +1065,14 @@ function studioHtmlV2(payload, libs) {
     .xhs-block-drag-handle-dot { width: 2.5px; height: 2.5px; border-radius: 50%; background: currentColor; pointer-events: none; }
     .xhs-p span, .xhs-callout span, .xhs-quote span, .xhs-rich span, .xhs-list-line span, .xhs-table span { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; font-weight: inherit !important; letter-spacing: 0 !important; }
     .xhs-card code { font-family: inherit !important; font-size: inherit !important; font-weight: inherit; font-style: inherit; line-height: inherit !important; letter-spacing: inherit !important; color: inherit; background: none; }
-    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline); display: grid; grid-template-columns: ${headingNumberSlotWidth}px minmax(0, 1fr); column-gap: ${headingNumberTitleGap}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+    .xhs-heading { margin: 0 0 ${Math.round(width * 0.03) + 2}px; padding: 0 0 ${Math.round(width * 0.014)}px; border-bottom: 1px solid var(--xhs-underline-line, var(--xhs-underline)); display: grid; grid-template-columns: ${headingNumberSlotWidth}px minmax(0, 1fr); column-gap: ${headingNumberTitleGap}px; align-items: center; font-family: var(--xhs-font); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-heading[contenteditable="false"] { outline: none; }
     .xhs-heading-number { width: 100%; min-width: 100%; display: flex; align-items: center; justify-content: center; color: var(--xhs-underline); font-size: ${headingNumberSize}px; line-height: 1; font-weight: 950; font-style: italic; white-space: nowrap; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
     .xhs-heading-space { display: none; }
     .xhs-heading-title { min-width: 0; margin-left: 0; color: #111; font-size: ${headingTitleSize}px; line-height: 1.16; font-weight: 900; word-break: normal; overflow-wrap: break-word; white-space: pre-wrap; }
     .xhs-heading[data-level="2"] { display: block; min-height: var(--body-line-px) !important; margin: 0 0 ${HEADING_LEVEL2_MARGIN_PX}px; padding: 0; border-bottom: 0; }
     .xhs-body-frame > .xhs-page-start.xhs-heading[data-level="2"] { margin-top: ${HEADING_LEVEL2_PAGE_START_MARGIN_PX}px; }
-    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline-flex; align-items: center; box-sizing: border-box; min-height: var(--body-line-px); flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: var(--body-font); line-height: var(--body-line-px); font-weight: var(--body-bold-weight); background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-heading[data-level="2"] .xhs-heading-title { display: inline-flex; align-items: center; box-sizing: border-box; min-height: var(--body-line-px); flex: none; margin-left: 0; color: var(--xhs-accent-strong); font-size: var(--body-font); line-height: var(--body-line-px); font-weight: var(--body-bold-weight); background: none; padding: 0 1px; border-bottom: 2px solid var(--xhs-underline-line, var(--xhs-underline)); border-radius: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-callout { margin: 0 0 var(--body-paragraph-gap); padding: 0.72em 0.84em 0.74em; background: var(--xhs-accent-pale); border-left: ${calloutBorder}px solid var(--xhs-accent); border-radius: 0 10px 10px 0; font-family: var(--xhs-font); font-size: var(--body-font); line-height: var(--body-line); overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
     .xhs-callout-label { margin: 0 0 0.42em; color: var(--xhs-accent-strong); font-size: ${calloutLabelSize}px; line-height: 1.2; font-weight: var(--body-bold-weight); }
     .xhs-callout-body { max-width: var(--body-text-width); color: #111; font-size: ${supportBodySize}px; line-height: var(--body-line); font-weight: var(--body-regular-weight); text-align: left; text-align-last: left; text-justify: auto; word-break: normal; overflow-wrap: break-word; letter-spacing: 0; overflow: hidden; }
@@ -1126,7 +1127,7 @@ function studioHtmlV2(payload, libs) {
     .xhs-p strong, .xhs-p b, .xhs-rich strong, .xhs-rich b, .xhs-list-body strong, .xhs-list-body b, .xhs-callout-body strong, .xhs-callout-body b, .xhs-quote strong, .xhs-quote b { font-weight: var(--body-bold-weight) !important; }
     .xhs-card .xhs-text-regular, .xhs-card .xhs-text-regular * { font-weight: var(--body-unbold-weight) !important; }
     .xhs-green-text { color: var(--xhs-accent-strong); font-weight: inherit; }
-    .xhs-green-underline { font-weight: inherit; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .xhs-green-underline { font-weight: inherit; background: linear-gradient(to top, var(--xhs-accent-soft) 0 46%, transparent 46% 100%); padding:0 2px; border-bottom:1px solid var(--xhs-underline-line, var(--xhs-underline)); border-radius:2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .xhs-split-head { margin-bottom: 0 !important; }
     .xhs-p.xhs-split-tail, .xhs-rich.xhs-split-tail, .xhs-callout.xhs-split-tail, .xhs-quote.xhs-split-tail, .xhs-code-block.xhs-split-tail, .xhs-list-line.xhs-split-tail { margin-top: 0 !important; }
     .xhs-callout.xhs-split-tail { padding-top: 0.72em; }
@@ -1450,7 +1451,7 @@ function studioHtmlV2(payload, libs) {
     };
     const ACCENT_THEMES = {
       green: { accent: '#5fa66a', strong: '#2f7d3b', soft: 'rgba(95,166,106,.18)', pale: '#f4faf3', underline: '#b8ddb4' },
-      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.20)', pale: '#f0f7ff', underline: '#aec4ec' },
+      blue: { accent: '#4d7fd2', strong: '#2e5fb2', soft: 'rgba(77,127,210,.20)', pale: '#f0f7ff', underline: '#aec4ec', underlineLine: 'rgba(174,196,236,.80)' },
       pink: { accent: '#d7789b', strong: '#b94f76', soft: 'rgba(215,120,155,.16)', pale: '#fff5f8', underline: '#efbfd0' },
       teal: { accent: '#47a69e', strong: '#227a73', soft: 'rgba(71,166,158,.16)', pale: '#f1fbf9', underline: '#abdcd6' },
       orange: { accent: '#d99542', strong: '#b66b18', soft: 'rgba(217,149,66,.16)', pale: '#fff8ec', underline: '#edcea3' },
@@ -5381,7 +5382,7 @@ function studioHtmlV2(payload, libs) {
       // html2canvas renders that gradient as a full solid fill, so we strip the
       // node's visual styles and repaint the identical band + baseline manually.
       const bandFill = theme.accentSoft || theme.soft || 'rgba(95,166,106,.18)';
-      const lineFill = theme.underline || 'rgba(95,166,106,.5)';
+      const lineFill = theme.underlineLine || theme.underline || 'rgba(95,166,106,.5)';
       normalizeUnderlineDecorations(card);
       const cardRect = card.getBoundingClientRect();
       const underlineRects = [];
@@ -6440,6 +6441,7 @@ function studioHtmlV2(payload, libs) {
       root.setProperty('--xhs-accent-soft', theme.soft);
       root.setProperty('--xhs-accent-pale', theme.pale);
       root.setProperty('--xhs-underline', theme.underline);
+      root.setProperty('--xhs-underline-line', theme.underlineLine || theme.underline);
       accentThemeButtons.forEach((button) => button.classList.toggle('active', button.dataset.accentTheme === key));
       if (currentCoverTheme === 'accent') applyCoverTheme(currentCoverTheme, false);
       if (currentCoverTheme === 'background') applyCoverTheme(currentCoverTheme, false);
@@ -8322,6 +8324,7 @@ function studioHtmlV2(payload, libs) {
         accentSoft: styles.getPropertyValue('--xhs-accent-soft').trim() || 'rgba(77,127,210,.20)',
         accentPale: styles.getPropertyValue('--xhs-accent-pale').trim() || '#f0f7ff',
         underline: styles.getPropertyValue('--xhs-underline').trim() || '#aec4ec',
+        underlineLine: styles.getPropertyValue('--xhs-underline-line').trim() || styles.getPropertyValue('--xhs-underline').trim() || '#aec4ec',
       };
     }
     function prepareCardForExport(card) {
@@ -8339,6 +8342,7 @@ function studioHtmlV2(payload, libs) {
         '--xhs-accent-soft': theme.accentSoft,
         '--xhs-accent-pale': theme.accentPale,
         '--xhs-underline': theme.underline,
+        '--xhs-underline-line': theme.underlineLine,
       }).forEach(([key, value]) => card.style.setProperty(key, value));
       card.style.backgroundColor = theme.cardBg;
       card.style.boxShadow = 'none';
